@@ -72,7 +72,11 @@ checksums; assembly verifies both before producing the combined SHA256SUMS.
 
 ## Draft workflow
 
-1. Update Cargo version and release notes together; keep Cargo.lock committed.
+1. Update Cargo version, the default preview version in `install.sh`, and release
+   notes together; keep Cargo.lock committed. The installer downloads an explicit
+   version so GitHub prereleases work without a latest-stable API dependency.
+   Its default version is checked by the Python test suite. After the first public
+   release, remove the README notice that binary installation is not yet available.
 2. Run `./scripts/check.sh` and build/test both native musl artifacts. CI performs
    these checks on Ubuntu 24.04 x86_64 and ARM64, with exact pinned Rust.
 3. Commit the release changes, create an annotated `v0.1.0` tag for the first
@@ -119,3 +123,20 @@ Local musl targets and musl-gcc were absent at the last packaging attempt. Nativ
 artifact builds, hosted CI, and the first draft must pass before declaring
 release distribution complete. A public source push does not publish a binary
 release.
+
+## One-command installer
+
+The public entrypoint is `install.sh` on `main`, served by raw.githubusercontent.com.
+It supports POSIX sh on Linux x86_64 and ARM64, downloads the selected release's
+binary and license notices, and verifies each against that release's SHA256SUMS.
+It checks the binary version before replacing an existing installation via a
+same-directory rename. No Rust, GitHub CLI, root access, or shell-profile edits
+are needed. `TRACR_VERSION` selects a published `vMAJOR.MINOR.PATCH` tag;
+`TRACR_INSTALL_DIR` overrides the default `~/.local/bin`. Notices use
+`${XDG_DATA_HOME:-$HOME/.local/share}/tracr`.
+
+Tests execute the installer through sh stdin with isolated homes and stubbed curl,
+cover both architecture aliases, unsupported systems, custom directories,
+unavailable releases, checksum failures, version mismatches and cleanup. Before
+publishing a release, also run the installer against the actual published assets
+in a temporary home; stubbed-download tests do not establish release availability.

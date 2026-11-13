@@ -5,34 +5,65 @@ searching metadata globally, and resuming work in the same terminal. Browsing an
 resume pass automated checks and isolated real-Codex acceptance with Codex 0.167.2.
 Session relocation is not yet supported.
 
-## Install the preview
+## Install
 
-Release tooling targets Linux x86_64 and ARM64 using static musl binaries. The
-first release is being prepared; assets are usable once a release is published at
-[GitHub Releases](https://github.com/BasedCodeDev/tracr/releases).
-
-Download `tracr-linux-x86_64` or `tracr-linux-aarch64`, plus `SHA256SUMS`,
-`LICENSE`, and `THIRD_PARTY_NOTICES.txt` from the same release. For x86_64:
+On Linux x86_64 or ARM64:
 
 ```sh
-# In the download directory; select exactly the checksum for this binary.
-grep '  tracr-linux-x86_64$' SHA256SUMS > selected-checksum.txt
-test "$(wc -l < selected-checksum.txt)" -eq 1
-sha256sum -c selected-checksum.txt
-mkdir -p ~/.local/bin
-install -m 755 tracr-linux-x86_64 ~/.local/bin/tracr
-~/.local/bin/tracr --version
+curl -fsSL https://raw.githubusercontent.com/BasedCodeDev/tracr/main/install.sh | sh
 ```
 
-For ARM64 replace `x86_64` with `aarch64`. Ensure `~/.local/bin` is on PATH.
-Install Codex separately, then run `tracr`, `tracr .`, or `tracr ~/Work/project`.
-Upgrade by repeating the checksum and install steps with a newer release; remove
-`~/.local/bin/tracr` to uninstall. Neither operation deletes Codex sessions.
-macOS and Windows are planned. See [release instructions](docs/releasing.md) for
-build prerequisites, draft releases, and current publication status.
+**The first binary release is still being prepared.** This command will work once
+`v0.1.0` is published on [GitHub Releases](https://github.com/BasedCodeDev/tracr/releases).
+Until then, [install from source](#install-from-source).
 
-Source installation is also supported with the pinned Rust toolchain:
-`cargo install --path . --locked` (installs to Cargo's bin directory).
+The installer downloads the preview binary, verifies SHA-256 checksums, and
+installs to `~/.local/bin`. No Rust or `sudo` is needed. Install Codex separately,
+then start in your project:
+
+```sh
+tracr .
+```
+
+If `tracr` is not found, add `~/.local/bin` to your PATH:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Add that line to your shell configuration to keep it across terminals. Run the
+install command again to update to the preview selected by the current installer.
+macOS and Windows support are planned.
+
+<details>
+<summary>Custom installation, specific versions, and removal</summary>
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BasedCodeDev/tracr/main/install.sh | \
+  TRACR_INSTALL_DIR="$HOME/bin" TRACR_VERSION=v0.1.0 sh
+```
+
+Installation directories must be absolute. License notices are saved in
+`${XDG_DATA_HOME:-$HOME/.local/share}/tracr`. The installer leaves an existing
+binary untouched if downloading, verification, or the version check fails.
+It does not modify your shell configuration.
+
+To uninstall the default installation, remove `~/.local/bin/tracr`. You may also
+remove its license-notice directory above. Your Codex sessions are preserved.
+Manual binaries and checksums are available from GitHub Releases.
+
+</details>
+
+### Install from source
+
+With Rust and Cargo installed:
+
+```sh
+cargo install --git https://github.com/BasedCodeDev/tracr.git --locked
+```
+
+This installs to `~/.cargo/bin`; ensure that directory is on PATH. Developers can
+also use `cargo install --path . --locked` from a checkout.
 
 ## Build and run
 
