@@ -165,7 +165,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         .collect();
     frame.render_widget(
         Paragraph::new(format!(
-            "Tab panes · Enter resume · / search · a archives · r refresh · ? help · q quit\n{}",
+            "←/→ panes · Enter toggle/resume · / search · a archives · r refresh · ? help · q quit\n{}",
             if view.preparing {
                 "Preparing resume… Esc cancels".into()
             } else {
@@ -186,7 +186,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             height: area.height.saturating_sub(2),
         };
         frame.render_widget(Clear, popup);
-        frame.render_widget(Paragraph::new("Arrows / j,k: navigate\nTab / Shift-Tab: switch panes\nLeft / Right: collapse / expand folder\nEnter: toggle folder or resume selected active session\n/: edit global search; Enter: finish editing\na: toggle archived sessions\nr: refresh\nEsc: close help, leave search editing, or clear search\nq / Ctrl-C: quit (q inserts text during search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Clearing search restores the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
+        frame.render_widget(Paragraph::new("Up / Down or j,k: navigate\nLeft / Right or Tab / Shift-Tab: switch panes\nEnter: toggle folder or resume selected active session\n/: edit global search; arrows still navigate\nEnter: toggle folders; elsewhere finish editing\na: toggle archived sessions\nr: refresh\nEsc: close help, leave search editing, or clear search\nq / Ctrl-C: quit (q inserts text during search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Clearing search restores the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
     }
 }
 fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, view: &View) {
@@ -405,7 +405,17 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
-    if view.editing {
+    // Search text remains editable while navigation keys operate the focused pane.
+    let navigation = matches!(
+        key.code,
+        KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Tab
+            | KeyCode::BackTab
+    ) || (key.code == KeyCode::Enter && view.focus == 0);
+    if view.editing && !navigation {
         match key.code {
             KeyCode::Esc | KeyCode::Enter => view.editing = false,
             KeyCode::Backspace => {
@@ -430,8 +440,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         KeyCode::Char('r') => return Action::Refresh,
         KeyCode::Char('a') => browser.include_archived = !browser.include_archived,
-        KeyCode::Tab => view.focus = (view.focus + 1) % 3,
-        KeyCode::BackTab => view.focus = (view.focus + 2) % 3,
+        KeyCode::Tab | KeyCode::Right => view.focus = (view.focus + 1) % 3,
+        KeyCode::BackTab | KeyCode::Left => view.focus = (view.focus + 2) % 3,
         KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
             let delta = if matches!(key.code, KeyCode::Up | KeyCode::Char('k')) {
                 -1
@@ -456,10 +466,9 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 _ => view.details_scroll = view.details_scroll.saturating_add_signed(delta as i16),
             }
         }
-        KeyCode::Left | KeyCode::Right | KeyCode::Enter if view.focus == 0 => {
+        KeyCode::Enter if view.focus == 0 => {
             if let FolderFilter::Path(path) = &browser.folder {
-                let expand = key.code == KeyCode::Right
-                    || (key.code == KeyCode::Enter && !browser.expanded.contains(path));
+                let expand = !browser.expanded.contains(path);
                 if expand {
                     browser.expanded.insert(path.clone());
                 } else {

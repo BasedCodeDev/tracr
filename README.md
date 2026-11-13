@@ -170,9 +170,11 @@ so relative fixture and configuration arguments also resolve there.
 The folder, session, and details panes show partial results while loading.
 Terminals narrower than 100 columns show the focused pane full-width.
 
-- Arrows or `j/k`: navigate; Tab / Shift-Tab: switch panes.
-- Left / Right: collapse or expand a folder; Enter: toggle a folder or resume a session.
-- `/`: edit global search; Enter or Escape: finish editing; Escape again: clear.
+- Up / Down or `j/k`: navigate; Left / Right or Tab / Shift-Tab: switch panes.
+- Enter: expand or collapse the selected folder, or resume a session.
+- `/`: edit global search; arrow keys still navigate and switch panes. Enter in
+  the folder pane toggles expansion; elsewhere Enter finishes editing without
+  resuming. Escape finishes editing; Escape again clears the query.
 - `a`: include archived sessions; `r`: refresh; `?`: help.
 - `q` or Ctrl-C: quit. While editing search, `q` is text.
 

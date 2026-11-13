@@ -247,3 +247,13 @@ session filtering. Tests assert parent totals of two active/three with archives
 while showing one active/two archived-inclusive direct sessions, and a parent
 with three descendant sessions but no direct sessions. Component-based counting
 excludes similarly prefixed sibling paths.
+
+## Navigation while filtering (unreleased)
+
+Arrow keys and Tab/Shift-Tab now operate while search text is being edited.
+Up/Down navigate the focused pane; Left/Right switch panes with the same wrapping
+as Tab/Shift-Tab. Enter in the folder pane toggles expansion even during search
+editing. Enter elsewhere ends editing without resuming; a subsequent Enter can
+resume as before. Printable shortcut characters remain search text while editing.
+Regression checks cover folder navigation, expansion, pane switching, details
+scrolling, session selection, query preservation, and safe Enter behavior.

@@ -491,3 +491,64 @@ async fn initial_folder_shows_direct_sessions_and_survives_empty_refresh() {
             .any(|row| row.filter == browser.folder && row.count == 0)
     );
 }
+
+#[tokio::test]
+async fn arrows_navigate_panes_and_folders_while_search_remains_editable() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use tracr::tui::{Action, View, handle_key};
+    let mut browser = loaded().await;
+    let mut view = View::default();
+    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+    for editing in [false, true] {
+        view.editing = editing;
+        view.focus = 0;
+        browser.folder = FolderFilter::All;
+        browser.query = "codex".into();
+        handle_key(&mut browser, &mut view, key(KeyCode::Down));
+        assert_eq!(browser.folder, FolderFilter::Unlinked);
+        handle_key(&mut browser, &mut view, key(KeyCode::Up));
+        assert_eq!(browser.folder, FolderFilter::All);
+        let path = PathBuf::from("/work/project");
+        browser.open_folder(path.clone());
+        browser.expanded.remove(&path);
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter));
+        assert!(browser.expanded.contains(&path));
+        assert_eq!(view.editing, editing);
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter));
+        assert!(!browser.expanded.contains(&path));
+        for expected in [1, 2, 0] {
+            handle_key(&mut browser, &mut view, key(KeyCode::Right));
+            assert_eq!(view.focus, expected);
+            assert!(!browser.expanded.contains(&path));
+        }
+        handle_key(&mut browser, &mut view, key(KeyCode::Left));
+        assert_eq!(view.focus, 2);
+        handle_key(&mut browser, &mut view, key(KeyCode::Down));
+        assert_eq!(view.details_scroll, 1);
+        handle_key(&mut browser, &mut view, key(KeyCode::Tab));
+        assert_eq!(view.focus, 0);
+        handle_key(&mut browser, &mut view, key(KeyCode::BackTab));
+        assert_eq!(view.focus, 2);
+        assert_eq!(browser.query, "codex");
+    }
+    view.focus = 1;
+    browser.folder = FolderFilter::All;
+    browser.query.clear();
+    browser.reconcile(0);
+    let selected = browser.selected.clone();
+    handle_key(&mut browser, &mut view, key(KeyCode::Down));
+    assert_ne!(browser.selected, selected);
+    for character in ['j', 'k', 'q', 'a', 'r'] {
+        assert_eq!(
+            handle_key(&mut browser, &mut view, key(KeyCode::Char(character))),
+            Action::Continue
+        );
+    }
+    assert_eq!(browser.query, "jkqar");
+    assert_eq!(
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+        Action::Continue
+    );
+    assert!(!view.editing);
+    assert_eq!(browser.query, "jkqar");
+}
