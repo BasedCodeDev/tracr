@@ -183,7 +183,7 @@ class SimulatedFlowTests(unittest.TestCase):
             executable = Path(temp)/'codex'
             executable.write_bytes(b'fake executable fingerprint')
             cwd = str(home/'old')
-            browser = f'Loaded ID: abc Folder: {cwd} Resume: Enter this folder only'
+            browser = f'Loaded ID: abc Folder: {cwd} Resume: Enter > ▸ old (1)'
             class FakeTerminal:
                 def __init__(self, *args):
                     self.output = bytearray(browser.encode())

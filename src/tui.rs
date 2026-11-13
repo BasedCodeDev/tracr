@@ -218,14 +218,11 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
         1 => {
             let sessions = browser.visible();
             let scope = if !browser.query.is_empty() {
-                "Global search".to_owned()
-            } else if let FolderFilter::Path(path) = &browser.folder {
-                format!(
-                    "{} (this folder only)",
-                    safe_text(&path.display().to_string())
-                )
+                Some("Global search".to_owned())
+            } else if matches!(browser.folder, FolderFilter::Path(_)) {
+                None
             } else {
-                "Sessions · activity in Unix seconds".to_owned()
+                Some("Sessions · activity in Unix seconds".to_owned())
             };
             if sessions.is_empty() {
                 let message = if browser.loading() {
@@ -236,22 +233,26 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                     "No matching sessions. Press a to include archives, / to search globally, or Tab to choose another folder."
                 };
                 frame.render_widget(
-                    Paragraph::new(format!("{scope}\n\n{message}"))
-                        .wrap(Wrap { trim: false })
-                        .block(block("Sessions", view.focus == 1)),
+                    Paragraph::new(match &scope {
+                        Some(scope) => format!("{scope}\n\n{message}"),
+                        None => message.to_owned(),
+                    })
+                    .wrap(Wrap { trim: false })
+                    .block(block("Sessions", view.focus == 1)),
                     area,
                 );
                 return;
             }
-            let panes = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Min(1)])
-                .split(area);
-            frame.render_widget(
-                Paragraph::new(scope.clone()).wrap(Wrap { trim: false }),
-                panes[0],
-            );
-            let area = panes[1];
+            let area = if let Some(scope) = scope {
+                let panes = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(3), Constraint::Min(1)])
+                    .split(area);
+                frame.render_widget(Paragraph::new(scope).wrap(Wrap { trim: false }), panes[0]);
+                panes[1]
+            } else {
+                area
+            };
             let items: Vec<_> = sessions
                 .iter()
                 .map(|s| {
