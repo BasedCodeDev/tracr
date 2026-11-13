@@ -7,3 +7,5 @@ pub mod browser;
 pub mod tui;
 
 pub mod resume;
+
+pub mod state;

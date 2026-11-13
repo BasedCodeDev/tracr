@@ -498,12 +498,12 @@ async fn arrows_navigate_panes_and_folders_outside_search() {
         let editing = false;
         view.editing = editing;
         view.focus = 0;
-        browser.folder = FolderFilter::All;
+        browser.folder = FolderFilter::Unlinked;
         browser.query = "codex".into();
         handle_key(&mut browser, &mut view, key(KeyCode::Down));
-        assert_eq!(browser.folder, FolderFilter::Unlinked);
+        assert_eq!(browser.folder, FolderFilter::Unknown);
         handle_key(&mut browser, &mut view, key(KeyCode::Up));
-        assert_eq!(browser.folder, FolderFilter::All);
+        assert_eq!(browser.folder, FolderFilter::Unlinked);
         let path = PathBuf::from("/work/project");
         browser.open_folder(path.clone());
         browser.expanded.remove(&path);
@@ -704,4 +704,73 @@ async fn modal_search_handles_missing_unknown_and_archived_folders() {
                 .unwrap_or(FolderFilter::Unknown)
         );
     }
+}
+
+#[test]
+fn empty_folder_creation_picker_and_validation() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use tracr::tui::{Action, View, handle_key};
+    let temp = tempfile::tempdir().unwrap();
+    let spec = |name: &str| SourceSpec::Codex {
+        binary: "codex".into(),
+        source: SourceConfig {
+            id: source_id(&ProviderId("codex".into()), &temp.path().join(name)),
+            home: temp.path().join(name),
+        },
+    };
+    let mut browser = Browser::new(vec![spec("one")]);
+    browser.open_folder(temp.path().to_owned());
+    assert!(
+        browser
+            .folder_rows()
+            .iter()
+            .all(|r| r.filter != FolderFilter::All)
+    );
+    let mut view = View {
+        focus: 1,
+        ..View::default()
+    };
+    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+    assert_eq!(
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+        Action::CreateNew(0)
+    );
+    let command = browser.specs[0].prepare_new(temp.path()).unwrap();
+    assert_eq!(command.cwd, temp.path());
+    assert_eq!(
+        command.args,
+        vec![
+            std::ffi::OsString::from("--cd"),
+            temp.path().as_os_str().to_owned()
+        ]
+    );
+    assert_eq!(command.env[0].1, temp.path().join("one").as_os_str());
+    assert!(
+        browser.specs[0]
+            .prepare_new(&temp.path().join("missing"))
+            .is_err()
+    );
+    assert!(browser.specs[0].prepare_new(Path::new("relative")).is_err());
+    let file = temp.path().join("file");
+    std::fs::write(&file, "").unwrap();
+    assert!(browser.specs[0].prepare_new(&file).is_err());
+    browser.specs.push(spec("two"));
+    assert_eq!(
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+        Action::Continue
+    );
+    assert_eq!(view.source_picker, Some(0));
+    handle_key(&mut browser, &mut view, key(KeyCode::Down));
+    assert_eq!(
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+        Action::CreateNew(1)
+    );
+    handle_key(&mut browser, &mut view, key(KeyCode::Enter));
+    handle_key(&mut browser, &mut view, key(KeyCode::Esc));
+    assert_eq!(view.source_picker, None);
+    browser.begin_refresh();
+    assert_eq!(
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+        Action::ResumeSelected
+    );
 }

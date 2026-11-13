@@ -184,7 +184,7 @@ def run_case(binary, codex, home, mode):
         result['phases'].append(dict(phase=name, status='passed', **details))
     try:
         fixture = probe.prepare_fixture(codex, home, mode)
-        env = fixture['env']
+        env = {**fixture['env'], 'XDG_STATE_HOME': str(home/'tracr-state')}
         # Use only system tools; never inherit caller credentials or config.
         env['PATH'] = '/usr/bin:/bin'
         tid, cwd = fixture['baseline']['id'], str(home/'old')
@@ -261,6 +261,52 @@ def run_case(binary, codex, home, mode):
             result['phases'].append(dict(phase='cleanup', status='failed', reason=str(error)))
     return result
 
+def run_new_case(binary, codex, home):
+    home.mkdir()
+    env = probe.environment(home)
+    env['PATH'] = '/usr/bin:/bin'
+    project = home/'project'
+    project.mkdir()
+    # Trust only this disposable empty project; no caller configuration is read.
+    with (home/'codex/config.toml').open('a') as config:
+        config.write('\n[projects.' + json.dumps(str(project)) + ']\ntrust_level = "trusted"\n')
+    terminal = None
+    result = {'mode': 'new-session', 'status': 'failed', 'phases': []}
+    try:
+        terminal = Terminal([binary, '--codex-home', str(home/'codex'), '--codex-bin', codex, str(project)], env)
+        terminal.expect('Create new session')
+        mark = len(terminal.output)
+        terminal.send(b'\r')
+        terminal.wait(lambda: b'\x1b[?1049l' in terminal.output[mark:])
+        handoff = terminal.output.index(b'\x1b[?1049l', mark) + len(b'\x1b[?1049l')
+        def started():
+            raw = terminal.output[handoff:].decode(errors='replace')
+            blocker = startup_blocker(raw)
+            if blocker: raise Blocked(blocker)
+            return 'OpenAI Codex' in screen_since(terminal, handoff) and os.tcgetpgrp(terminal.master) != terminal.child.pid
+        terminal.wait(started, timeout=30)
+        mark = len(terminal.output)
+        submit_status(terminal)
+        terminal.wait(lambda: re.search(r'Directory:\s*' + re.escape(str(project)), screen_since(terminal, mark)) is not None)
+        result['phases'].append({'phase': 'new-session-directory', 'status': 'passed'})
+        return_to_browser(terminal)
+        terminal.expect('Folders')
+        terminal.finish()
+        result['status'] = 'passed'
+    except (AssertionError, RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
+        result['status'] = failure(error)
+        result['phases'].append({'phase': 'new-session', 'status': result['status'], 'reason': str(error)})
+    finally:
+        try:
+            if terminal:
+                terminal.close()
+                (home/'terminal.bin').write_bytes(terminal.output)
+            result['phases'].append({'phase': 'daemon-cleanup', 'status': 'passed', **stop_daemons(codex, env, home)})
+        except (AssertionError, OSError, ValueError, subprocess.SubprocessError) as error:
+            result['status'] = 'failed'
+            result['phases'].append({'phase': 'cleanup', 'status': 'failed', 'reason': str(error)})
+    return result
+
 def main():
     binary, codex = map(lambda p: str(Path(p).resolve()), sys.argv[1:])
     evidence = Path(tempfile.mkdtemp(prefix='tracr-real-check-'))
@@ -268,6 +314,8 @@ def main():
     for mode in ['legacy', 'paginated']:
         results.append(run_case(binary, codex, evidence/mode, mode))
         (evidence/'results.json').write_text(json.dumps(results, indent=2)+'\n')
+    results.append(run_new_case(binary, codex, evidence/'new-session'))
+    (evidence/'results.json').write_text(json.dumps(results, indent=2)+'\n')
     print(json.dumps(results, indent=2))
     print('Real Codex evidence:', evidence)
     return exit_code(results)

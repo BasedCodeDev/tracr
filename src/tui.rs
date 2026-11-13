@@ -27,6 +27,7 @@ pub struct View {
     pub details_scroll: u16,
     pub message: Option<String>,
     pub preparing: bool,
+    pub source_picker: Option<usize>,
 }
 fn restore() {
     let _ = terminal::disable_raw_mode();
@@ -166,7 +167,31 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             height: area.height.saturating_sub(2),
         };
         frame.render_widget(Clear, popup);
-        frame.render_widget(Paragraph::new("Up / Down or j,k: navigate\nLeft / Right or Tab / Shift-Tab: switch panes\nEnter: toggle folder or resume selected active session\n/: search modal; type to filter, Up/Down select\nEnter in search: open folder and select session (not resume)\na: toggle archived sessions\nr: refresh\nEsc: previous pane (close help or cancel preparation)\nCtrl-U in search: clear query\nq / Ctrl-C: quit (q inserts text in search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Esc closes search without changing the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
+        frame.render_widget(Paragraph::new("Up / Down or j,k: navigate\nLeft / Right or Tab / Shift-Tab: switch panes\nEnter: toggle folder, resume session, or create in an empty folder\n/: search modal; type to filter, Up/Down select\nEnter in search: open folder and select session (not resume)\na: toggle archived sessions\nr: refresh\nEsc: previous pane (close help or cancel preparation)\nCtrl-U in search: clear query\nq / Ctrl-C: quit (q inserts text in search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Esc closes search without changing the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
+    }
+    if let Some(selected) = view.source_picker {
+        let popup = Rect::new(
+            area.x + 1,
+            area.y + 1,
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2).min(12),
+        );
+        frame.render_widget(Clear, popup);
+        let items: Vec<_> = creation_sources(browser)
+            .iter()
+            .map(|&i| ListItem::new(safe_text(&browser.specs[i].label())))
+            .collect();
+        frame.render_stateful_widget(
+            List::new(items)
+                .block(block(
+                    "Codex home — ↑/↓ select · Enter creates · Esc cancels",
+                    true,
+                ))
+                .highlight_symbol("> ")
+                .highlight_style(Style::default().fg(Color::Cyan)),
+            popup,
+            &mut ListState::default().with_selected(Some(selected)),
+        );
     }
     if view.editing {
         draw_search(frame, browser, view);
@@ -294,6 +319,14 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                     "No matching sessions found; inventory is incomplete. Check source errors below."
                 } else {
                     "No matching sessions. Press a to include archives, / to search globally, or Tab to choose another folder."
+                };
+                let message = if can_create(browser) {
+                    format!(
+                        "No sessions currently shown. Press a to include archives.\n\n{}Create new session — Enter",
+                        if view.focus == 1 { "> " } else { "" }
+                    )
+                } else {
+                    message.to_owned()
                 };
                 frame.render_widget(
                     Paragraph::new(match &scope {
@@ -430,6 +463,24 @@ pub enum Action {
     Refresh,
     ResumeSelected,
     CancelResume,
+    CreateNew(usize),
+}
+
+fn creation_sources(browser: &Browser) -> Vec<usize> {
+    browser
+        .specs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, spec)| {
+            matches!(spec, crate::browser::SourceSpec::Codex { .. }).then_some(i)
+        })
+        .collect()
+}
+fn can_create(browser: &Browser) -> bool {
+    !browser.loading()
+        && matches!(browser.folder, FolderFilter::Path(_))
+        && browser.visible().is_empty()
+        && !creation_sources(browser).is_empty()
 }
 
 fn resume_hint(browser: &Browser, session: &crate::domain::SessionSummary) -> String {
@@ -464,6 +515,23 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             KeyCode::Char('q') => Action::Quit,
             _ => Action::Continue,
         };
+    }
+    if let Some(selected) = view.source_picker.as_mut() {
+        let sources = creation_sources(browser);
+        match key.code {
+            KeyCode::Esc => view.source_picker = None,
+            KeyCode::Up => *selected = selected.saturating_sub(1),
+            KeyCode::Down => *selected = (*selected + 1).min(sources.len().saturating_sub(1)),
+            KeyCode::Enter => {
+                let source = sources.get(*selected).copied();
+                view.source_picker = None;
+                if let Some(source) = source {
+                    return Action::CreateNew(source);
+                }
+            }
+            _ => {}
+        }
+        return Action::Continue;
     }
     if view.help {
         if matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
@@ -572,6 +640,13 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 }
             }
         }
+        KeyCode::Enter if view.focus == 1 && can_create(browser) => {
+            let sources = creation_sources(browser);
+            if sources.len() == 1 {
+                return Action::CreateNew(sources[0]);
+            }
+            view.source_picker = Some(0);
+        }
         KeyCode::Enter => return Action::ResumeSelected,
         _ => {}
     }
@@ -592,6 +667,16 @@ impl Drop for PendingResume {
     }
 }
 
+fn save_folder(browser: &mut Browser, folder: Option<&std::path::Path>, view: &mut View) {
+    if let (Some(file), Some(folder)) = (&browser.state_path, folder) {
+        if let Err(error) = crate::state::save(file, folder) {
+            let warning = format!("Could not save browser state: {error}");
+            view.message = Some(warning.clone());
+            browser.state_warning = Some(warning);
+        }
+    }
+}
+
 pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("interactive browsing requires a terminal; use 'tracr list'".into());
@@ -608,10 +693,17 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     discovery.refresh(&mut browser);
     let mut view = View {
         focus: usize::from(browser.initial_folder.is_some()),
+        message: browser.state_warning.take(),
         ..View::default()
     };
     let signals = ShutdownSignals::new()?;
     let mut pending: Option<PendingResume> = None;
+    let mut last_folder = browser.initial_folder.clone();
+    let mut created: Option<(
+        crate::domain::SourceId,
+        std::path::PathBuf,
+        std::collections::BTreeSet<crate::domain::SessionKey>,
+    )> = None;
     let outcome: Result<(), Box<dyn std::error::Error>> = async {
         loop {
             if signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
@@ -623,6 +715,20 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 match discovery.rx.try_recv() {
                     Ok(update) => browser.apply(update),
                     Err(_) => break,
+                }
+            }
+            if let FolderFilter::Path(path) = &browser.folder {
+                last_folder = Some(path.clone());
+            }
+            if !browser.loading() {
+                if let Some((source, path, before)) = created.take() {
+                    if let Some(session) = browser.visible().into_iter().find(|s| {
+                        s.key.source_id == source
+                            && s.cwd.as_ref() == Some(&path)
+                            && !before.contains(&s.key)
+                    }) {
+                        browser.selected = Some(session.key);
+                    }
                 }
             }
             discovery.check_folders(&browser);
@@ -652,6 +758,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             discovery.close(&mut browser).await;
                             // Discard pending metadata events before starting a fresh generation.
                             while discovery.rx.try_recv().is_ok() {}
+                            save_folder(&mut browser, last_folder.as_deref(), &mut view);
                             guard.suspend()?;
                             let result = crate::resume::run(&command, &signals.terminate).await;
                             signals
@@ -661,7 +768,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             terminal.clear()?;
                             terminal.autoresize()?;
                             view.message = match result {
-                                Ok(status) if status.success() => None,
+                                Ok(status) if status.success() => view.message.take(),
                                 Ok(status) => Some(format!(
                                     "Codex exited with {status}. You can retry or refresh."
                                 )),
@@ -695,6 +802,50 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             view.message = Some("Resume cancelled.".into());
                             // Cancellation may interrupt an RPC frame. Reconnect rather than reuse it.
                             discovery.refresh(&mut browser);
+                        }
+                        Action::CreateNew(index) => {
+                            if !can_create(&browser) {
+                                continue;
+                            }
+                            let FolderFilter::Path(path) = browser.folder.clone() else {
+                                continue;
+                            };
+                            let spec = &browser.specs[index];
+                            let command = match spec.prepare_new(&path) {
+                                Ok(command) => command,
+                                Err(error) => {
+                                    view.message = Some(error);
+                                    continue;
+                                }
+                            };
+                            let crate::browser::SourceSpec::Codex { source, .. } = spec else {
+                                continue;
+                            };
+                            created = Some((
+                                source.id.clone(),
+                                path,
+                                browser.all().into_iter().map(|s| s.key).collect(),
+                            ));
+                            discovery.close(&mut browser).await;
+                            while discovery.rx.try_recv().is_ok() {}
+                            save_folder(&mut browser, last_folder.as_deref(), &mut view);
+                            guard.suspend()?;
+                            let result = crate::resume::run(&command, &signals.terminate).await;
+                            signals
+                                .interrupt
+                                .store(false, std::sync::atomic::Ordering::Relaxed);
+                            guard.activate()?;
+                            terminal.clear()?;
+                            terminal.autoresize()?;
+                            view.message = match result {
+                                Ok(status) if status.success() => view.message.take(),
+                                Ok(status) => Some(format!("Codex exited with {status}.")),
+                                Err(error) => Some(format!("Could not start Codex: {error}")),
+                            };
+                            discovery.refresh(&mut browser);
+                            while event::poll(Duration::ZERO)? {
+                                let _ = event::read()?;
+                            }
                         }
                         Action::ResumeSelected => {
                             if let Some(session) = browser
@@ -739,6 +890,11 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     .await;
     drop(pending);
     discovery.close(&mut browser).await;
+    save_folder(&mut browser, last_folder.as_deref(), &mut view);
+    guard.suspend()?;
+    if let Some(warning) = browser.state_warning.as_ref() {
+        eprintln!("tracr: {}", safe_text(warning));
+    }
     outcome
 }
 

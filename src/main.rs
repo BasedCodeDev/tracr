@@ -111,11 +111,27 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     };
     let mut browser = Browser::new(specs);
     browser.include_archived = include_archived;
-    if let Command::Browse {
-        path: Some(path), ..
-    } = &command
-    {
-        browser.open_folder(config::absolute_path(path, &env.cwd)?);
+    if let Command::Browse { path, fixture, .. } = &command {
+        let state_path = config.state_dir.join("browser-state.json");
+        let remembered = if fixture.is_none() && path.is_none() {
+            match tracr::state::load(&state_path) {
+                Ok(folder) => folder,
+                Err(error) => {
+                    browser.state_warning = Some(error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let folder = match path {
+            Some(path) => config::absolute_path(path, &env.cwd)?,
+            None => remembered.unwrap_or_else(|| env.cwd.clone()),
+        };
+        browser.open_folder(folder);
+        if fixture.is_none() {
+            browser.state_path = Some(state_path);
+        }
     }
     match command {
         Command::Browse { .. } => {

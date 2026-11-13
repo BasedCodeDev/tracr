@@ -121,12 +121,23 @@ mod tests {
 
 /// A prepared launch. Paths and arguments are passed directly, never through a shell.
 #[derive(Clone, Debug)]
-pub struct ResumeCommand {
+pub struct LaunchCommand {
     pub executable: PathBuf,
     pub args: Vec<std::ffi::OsString>,
     pub cwd: PathBuf,
     pub env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResumeCommand {
+    pub launch: LaunchCommand,
     pub session: SessionSummary,
+}
+impl std::ops::Deref for ResumeCommand {
+    type Target = LaunchCommand;
+    fn deref(&self) -> &Self::Target {
+        &self.launch
+    }
 }
 
 pub fn resume_blocker(session: &SessionSummary) -> Option<&'static str> {

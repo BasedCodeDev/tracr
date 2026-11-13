@@ -10,20 +10,20 @@ Use **Ratatui and Crossterm** with three areas:
 
 | Area | Contents |
 |---|---|
-| Folder sidebar | All sessions, Unlinked folders, and an expandable directory tree with session counts |
-| Session list | Title, working folder, last activity, provider, and archive status |
+| Folder sidebar | Unlinked/Unknown folders and an expandable directory tree with descendant session counts |
+| Session list | Title, last activity, provider, and archive status |
 | Details pane | Full title, session ID, working directory, timestamps, source, and available Git metadata |
 
 Default to non-archived sessions ordered by recent activity. Include interactive and non-interactive sessions, identifying their source when available. Provide an archive visibility toggle.
 
-Selecting a folder includes sessions in its subdirectories. Keep full paths distinct, even when folders share a name.
+Selecting a folder shows only sessions recorded directly there; tree counts include subdirectories. Keep full paths distinct, even when folders share a name.
 
 Keyboard controls:
 
 - Arrows or `j/k`: navigate.
 - Tab: switch panes.
 - `/`: global search.
-- Enter: resume.
+- Enter: expand/collapse folders, resume a selected session, or create one in an empty folder.
 - `r`: refresh.
 - `l`: relink or change folder.
 - `?`: help.
@@ -275,3 +275,14 @@ The initial scope excludes full-text search, project-file moves, cloud synchroni
 
 The Linux preview does not complete the relocation goal. Keep relocation
 compatibility, relinking implementation, and full-release criteria open.
+
+## Folder-first startup and creation increment
+
+- [x] Remove the All sessions folder row; keep global search and global CLI listing.
+- [x] Explicit paths override remembered state; first launch defaults to caller cwd.
+- [x] Atomically remember the last concrete folder in the XDG state directory; fixtures and listing do not alter it.
+- [x] Offer interactive Codex creation for empty folder views, with a source-home picker when needed.
+- [x] Validate the destination, reuse terminal handoff, refresh and select newly discovered work on return.
+- [x] Add isolated state, navigation, command preparation, and PTY creation coverage.
+
+Creation currently supports Codex. Provider-owned preparation returns a shared process-launch description, leaving room for other agents without introducing a plugin system. Publishing a new release remains separate.

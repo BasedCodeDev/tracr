@@ -291,3 +291,23 @@ navigation without resume. The standard checks passed in
 targeted test. Real-Codex acceptance passed for legacy and paginated histories in
 `/tmp/tracr-real-check-zamvt8lu`. Terminal return checks now recognize the footer
 instead of relying on the removed search/header row.
+
+## Folder-first browsing and creation (unreleased)
+
+Removed the All sessions row. Explicit paths select that folder; plain browsing
+restores the last concrete folder, falling back to caller cwd on first launch.
+State is saved atomically under the resolved XDG state directory. Missing folders
+remain selectable; invalid state is nonfatal. Fixtures and CLI listing do not
+read or write the preference.
+
+Empty folder views offer interactive Codex creation, with a home picker when
+multiple sources are configured. The provider prepares a shell-free launch with
+fresh directory validation; creation shares resume's foreground process handling.
+On return, discovery refreshes and selects new work from that home and folder.
+No prompt is submitted automatically, so exiting immediately may leave no session.
+
+`./scripts/check.sh --offline` passed all stages, including the new `create_check`
+PTY test (`/tmp/tracr-check-usinkszu`). Real Codex 0.167.2 acceptance passed legacy
+resume, paginated resume, and empty-folder creation with directory confirmation,
+terminal return, and daemon cleanup (`/tmp/tracr-real-check-sn6l7b3u`). All live
+checks used disposable homes and submitted no model prompts.

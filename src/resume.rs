@@ -1,5 +1,5 @@
 //! Linux foreground-process handoff. Only the newly spawned process group is supervised.
-use crate::domain::ResumeCommand;
+use crate::domain::LaunchCommand;
 use std::{
     fs::{File, OpenOptions},
     io,
@@ -113,7 +113,7 @@ impl Drop for OwnedChild {
 
 /// Called only after tracr has suspended raw mode and its alternate screen.
 /// Polling std::process::Child avoids relying on asynchronous SIGCHLD delivery.
-pub async fn run(command: &ResumeCommand, terminate: &AtomicBool) -> io::Result<ExitStatus> {
+pub async fn run(command: &LaunchCommand, terminate: &AtomicBool) -> io::Result<ExitStatus> {
     let foreground = Foreground::capture()?;
     if terminate.load(Ordering::Relaxed) {
         return Err(io::Error::new(

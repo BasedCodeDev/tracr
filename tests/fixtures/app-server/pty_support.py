@@ -8,9 +8,11 @@ import struct
 import subprocess
 import termios
 import time
+import tempfile
 
 class Terminal:
     def __init__(self, command, env=None):
+        self.state = tempfile.TemporaryDirectory(prefix='tracr-pty-state-')
         self.master, self.slave = pty.openpty()
         self.resize(80, 240)
         self.original = termios.tcgetattr(self.slave)
@@ -18,7 +20,7 @@ class Terminal:
             os.setsid()
             fcntl.ioctl(self.slave, termios.TIOCSCTTY, 0)
         self.child = subprocess.Popen(command, stdin=self.slave, stdout=self.slave, stderr=self.slave,
-                                      preexec_fn=setup, env={**(env or os.environ), 'TERM':'xterm-256color'})
+                                      preexec_fn=setup, env={**(env if env is not None else os.environ), 'XDG_STATE_HOME': (env or {}).get('XDG_STATE_HOME', self.state.name), 'TERM':'xterm-256color'})
         self.output = bytearray()
     def resize(self, rows, cols):
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
@@ -99,3 +101,4 @@ class Terminal:
         self.child.wait()
         os.close(self.master)
         os.close(self.slave)
+        self.state.cleanup()

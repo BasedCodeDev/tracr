@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 home = Path(os.environ['CODEX_HOME'])
 settings = json.loads((home / 'fake.json').read_text())
-if len(sys.argv) > 1 and sys.argv[1] == 'resume':
+if len(sys.argv) > 1 and sys.argv[1] in ('resume', '--cd'):
     import signal
     import termios
     import tty
@@ -22,6 +22,8 @@ if len(sys.argv) > 1 and sys.argv[1] == 'resume':
         if key == b'\x03':
             os.kill(os.getpid(), signal.SIGINT)
         if key == b'x':
+            if sys.argv[1] == '--cd':
+                (home / 'created.json').write_text(json.dumps({'cwd': os.getcwd()}))
             sys.exit(settings.get('resume_exit', 0))
 with (home / 'requests.jsonl').open('a', buffering=1) as log:
     for line in sys.stdin:
@@ -48,6 +50,8 @@ with (home / 'requests.jsonl').open('a', buffering=1) as log:
             item = dict(id=suffix, name='Task '+suffix, preview='', cwd=str(home / 'listed'),
                         createdAt=100, updatedAt=200, source='exec', gitInfo={'branch':'main'})
             result = {'data':[item], 'nextCursor':None if archived or cursor else 'page-2'}
+            if (home / 'created.json').exists() and not archived and not cursor:
+                result['data'].insert(0, dict(item, id='created', name='New session', cwd=json.loads((home / 'created.json').read_text())['cwd'], updatedAt=300))
             if settings.get('guardians'):
                 guardian = dict(item, id='guardian-'+suffix, name='Internal review', source={'subAgent':{'other':'guardian'}})
                 if not archived and not cursor:

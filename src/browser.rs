@@ -24,6 +24,14 @@ pub enum SourceSpec {
     Fixture(PathBuf),
 }
 impl SourceSpec {
+    pub fn prepare_new(&self, cwd: &std::path::Path) -> Result<LaunchCommand, String> {
+        match self {
+            Self::Codex { binary, source } => {
+                crate::providers::codex::prepare_new(binary, source, cwd).map_err(|e| e.to_string())
+            }
+            Self::Fixture(_) => Err("Fixture data is browse-only.".into()),
+        }
+    }
     pub fn label(&self) -> String {
         match self {
             Self::Codex { source, .. } => source.home.display().to_string(),
@@ -151,6 +159,8 @@ pub struct SourceDiagnostic {
 }
 
 pub struct Browser {
+    pub state_path: Option<PathBuf>,
+    pub state_warning: Option<String>,
     pub generation: u64,
     pub sources: Vec<SourceState>,
     pub specs: Vec<SourceSpec>,
@@ -166,6 +176,8 @@ pub struct Browser {
 impl Browser {
     pub fn new(specs: Vec<SourceSpec>) -> Self {
         Self {
+            state_path: None,
+            state_warning: None,
             generation: 0,
             sources: (0..specs.len()).map(|_| SourceState::default()).collect(),
             specs,
@@ -317,12 +329,6 @@ impl Browser {
                 .count()
         };
         let mut rows = vec![
-            FolderRow {
-                filter: FolderFilter::All,
-                label: "All sessions".into(),
-                depth: 0,
-                count: sessions.len(),
-            },
             FolderRow {
                 filter: FolderFilter::Unlinked,
                 label: "Unlinked folders".into(),

@@ -154,8 +154,18 @@ A terminal is required on stdin and stdout; use `tracr list` in pipelines.
 
 Use `tracr .`, `tracr ~/Work/Seb.SysAdmin`, or `tracr browse PATH` to select a
 folder immediately, showing only sessions recorded directly there. The session
-pane starts focused: choose a session and press Enter to resume. No path still opens All sessions. You can
+pane starts focused: choose a session and press Enter to resume. Without a path, tracr restores the last visited folder; the first launch starts in your current directory. You can
 navigate to other folders or search globally; selecting a result opens its folder.
+
+When a folder has no sessions shown, the Sessions pane offers **Create new session — Enter**.
+This opens Codex interactively in that folder and returns to tracr when you exit.
+With multiple configured Codex homes, choose where to store the new session first.
+The folder must already exist. Hidden archives can be shown with `a`; fixture data
+and the Unlinked/Unknown aggregate views cannot create sessions.
+
+The last concrete folder is saved in `$XDG_STATE_HOME/tracr/browser-state.json`
+(default `~/.local/state/tracr/browser-state.json`). Explicit paths override this
+preference. Fixture browsing and `tracr list` never read or update it.
 
 Relative paths use the caller's current directory. Missing directories can still
 be browsed; existing files are rejected. Paths are matched lexically, without

@@ -36,7 +36,7 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout'):
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
         child = subprocess.Popen([binary, '--codex-home', directory, '--codex-bin', str(executable), str(home / 'listed')],
                                  stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup,
-                                 env={**os.environ, 'TERM': 'xterm-256color'})
+                                 env={**os.environ, 'XDG_STATE_HOME': str(home/'state'), 'TERM': 'xterm-256color'})
         output = bytearray()
         screen = Terminal.__new__(Terminal)
         screen.output = output

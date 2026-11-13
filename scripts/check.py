@@ -46,7 +46,7 @@ built = stage('build', cargo + ['build', *locked, '--target-dir', str(root / 'ta
 stage('clippy', cargo + ['clippy', '--all-targets', *locked, '--', '-D', 'warnings'])
 stage('rust-tests', cargo + ['test', *locked])
 stage('python-tests', ['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-v'])
-for helper in ['terminal_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check']:
+for helper in ['terminal_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check', 'create_check']:
     command = ['python3', f'tests/fixtures/app-server/{helper}.py', str(root / 'target/debug/tracr')]
     if helper == 'terminal_check':
         command.append(str(root / 'tests/fixtures/sessions/catalog.json'))

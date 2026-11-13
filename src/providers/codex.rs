@@ -342,19 +342,21 @@ impl SessionProvider for CodexProvider {
             }
         }
         Ok(ResumeCommand {
-            executable: self.binary.clone(),
-            args: vec![
-                "resume".into(),
-                "--cd".into(),
-                cwd.clone().into_os_string(),
-                "--".into(),
-                fresh.key.native_id.clone().into(),
-            ],
-            cwd,
-            env: vec![(
-                "CODEX_HOME".into(),
-                self.source.home.clone().into_os_string(),
-            )],
+            launch: LaunchCommand {
+                executable: self.binary.clone(),
+                args: vec![
+                    "resume".into(),
+                    "--cd".into(),
+                    cwd.clone().into_os_string(),
+                    "--".into(),
+                    fresh.key.native_id.clone().into(),
+                ],
+                cwd,
+                env: vec![(
+                    "CODEX_HOME".into(),
+                    self.source.home.clone().into_os_string(),
+                )],
+            },
             session: fresh,
         })
     }
@@ -429,4 +431,24 @@ impl SessionProvider for CodexProvider {
         }
         self.summary(response["thread"].clone(), false).map(Some)
     }
+}
+
+/// Prepare an interactive session without creating or modifying stored records.
+pub fn prepare_new(
+    binary: &std::path::Path,
+    source: &crate::config::SourceConfig,
+    cwd: &std::path::Path,
+) -> Result<LaunchCommand, ProviderError> {
+    if !cwd.is_absolute() || classify_folder(Some(cwd)) != FolderStatus::Available {
+        return Err(ProviderError::Unavailable(format!(
+            "Cannot create a session: folder is missing, inaccessible, or not a directory: {}",
+            cwd.display()
+        )));
+    }
+    Ok(LaunchCommand {
+        executable: binary.to_owned(),
+        args: vec!["--cd".into(), cwd.as_os_str().to_owned()],
+        cwd: cwd.to_owned(),
+        env: vec![("CODEX_HOME".into(), source.home.as_os_str().to_owned())],
+    })
 }
