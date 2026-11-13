@@ -186,12 +186,14 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         layout[1],
     );
     if view.help {
-        let popup = Rect {
-            x: area.x + 1,
-            y: area.y + 1,
-            width: area.width.saturating_sub(2),
-            height: area.height.saturating_sub(2),
-        };
+        let width = area.width.saturating_sub(2).min(76);
+        let height = area.height.saturating_sub(2).min(24);
+        let popup = Rect::new(
+            area.x + (area.width - width) / 2,
+            area.y + (area.height - height) / 2,
+            width,
+            height,
+        );
         frame.render_widget(Clear, popup);
         frame.render_widget(Paragraph::new("Up / Down or j,k: navigate\nLeft / Right or Tab / Shift-Tab: switch panes\nEnter: toggle folder, resume session, or create in an empty folder\n/: search modal; type to filter, Up/Down select\nEnter in search: open folder and select session (not resume)\na: toggle archived sessions\nr: refresh\nEsc: previous pane (close help or cancel preparation)\nCtrl-U in search: clear query\nq / Ctrl-C: quit (q inserts text in search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Esc closes search without changing the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
     }
