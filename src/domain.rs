@@ -149,3 +149,60 @@ pub fn resume_blocker(session: &SessionSummary) -> Option<&'static str> {
         None
     }
 }
+
+/// Ephemeral provider runtime state, deliberately separate from session history.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RuntimeStatus {
+    #[default]
+    Unknown,
+    Idle,
+    Running,
+    Waiting {
+        approval: bool,
+        input: bool,
+    },
+    Error,
+}
+impl RuntimeStatus {
+    pub fn from_codex(status: Option<&serde_json::Value>) -> Self {
+        use serde_json::Value;
+        match status.and_then(|s| s.get("type")).and_then(Value::as_str) {
+            Some("idle" | "notLoaded") => Self::Idle,
+            Some("systemError") => Self::Error,
+            Some("active") => {
+                let Some(flags) = status
+                    .and_then(|s| s.get("activeFlags"))
+                    .and_then(Value::as_array)
+                else {
+                    return Self::Unknown;
+                };
+                let approval = flags
+                    .iter()
+                    .any(|f| f.as_str() == Some("waitingOnApproval"));
+                let input = flags
+                    .iter()
+                    .any(|f| f.as_str() == Some("waitingOnUserInput"));
+                if approval || input {
+                    Self::Waiting { approval, input }
+                } else if flags.is_empty() {
+                    Self::Running
+                } else {
+                    Self::Unknown
+                }
+            }
+            _ => Self::Unknown,
+        }
+    }
+    pub fn label(self) -> Option<&'static str> {
+        match self {
+            Self::Running => Some("Running"),
+            Self::Waiting {
+                approval: true,
+                input: true,
+            } => Some("Waiting for approval/input"),
+            Self::Waiting { approval: true, .. } => Some("Waiting for approval"),
+            Self::Waiting { input: true, .. } => Some("Waiting for input"),
+            _ => None,
+        }
+    }
+}

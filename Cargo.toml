@@ -20,6 +20,9 @@ ratatui = "=0.29.0"
 crossterm = "=0.28.1"
 signal-hook = "=0.3.18"
 libc = "=0.2.191"
+futures-util = { version = "=0.3.31", features = ["sink"] }
+tokio-tungstenite = { version = "=0.26.2", default-features = false, features = ["handshake"] }
+unicode-width = "=0.2.0"
 
 [dev-dependencies]
 tempfile = "=3.19.1"

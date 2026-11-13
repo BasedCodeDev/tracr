@@ -201,6 +201,18 @@ title, native ID, path, provider, or Git branch. It ignores the selected folder
 inside the modal. Choosing a result returns to exact-folder browsing; sessions
 without a recorded folder are selected under Unknown folders.
 
+Live activity appears to the right of session titles: **Running** is green;
+**Waiting for approval/input** is orange. Folder colors include activity in
+subfolders, with orange taking priority when work is waiting. Selection markers
+and focus borders remain visible independently of those colors.
+
+Status is polled every two seconds from each configured Codex home's existing
+daemon, without resuming sessions or answering approvals. Idle sessions are not
+highlighted. If monitoring fails, activity highlights are cleared and the footer
+reports that live status is unavailable; retries occur after five seconds.
+Independently hosted sessions and older Codex versions without the daemon
+interface may have unknown status. Metadata browsing and `tracr list` still work.
+
 Missing directories appear under Unlinked folders. Permission errors remain
 inaccessible rather than unlinked. Folder matching uses exact paths; select a child
 folder to see its sessions. Folder-tree counts include sessions in that folder and

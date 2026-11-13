@@ -1,4 +1,5 @@
 pub mod codex;
+pub mod codex_live;
 pub mod fixture;
 
 use crate::domain::{ProviderCapabilities, ResumeCommand, SessionKey, SessionSummary};

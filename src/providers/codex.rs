@@ -32,7 +32,7 @@ const SOURCE_KINDS: &[&str] = &[
 ];
 // The API groups Guardian with unrelated "other" subagents. Filter the exact
 // metadata marker instead of excluding that entire category or matching titles.
-fn is_guardian(thread: &Value) -> bool {
+pub(super) fn is_guardian(thread: &Value) -> bool {
     ["/source/subAgent/other", "/source/subagent/other"]
         .iter()
         .any(|pointer| thread.pointer(pointer).and_then(Value::as_str) == Some("guardian"))

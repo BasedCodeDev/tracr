@@ -88,6 +88,12 @@ impl Provider {
 }
 
 pub enum Update {
+    Live {
+        generation: u64,
+        source: usize,
+        statuses: BTreeMap<SessionKey, RuntimeStatus>,
+        error: Option<String>,
+    },
     Ready {
         generation: u64,
         source: usize,
@@ -118,7 +124,8 @@ pub enum Update {
 impl Update {
     fn generation(&self) -> u64 {
         match self {
-            Self::Ready { generation, .. }
+            Self::Live { generation, .. }
+            | Self::Ready { generation, .. }
             | Self::Page { generation, .. }
             | Self::Finished { generation, .. }
             | Self::Folder { generation, .. }
@@ -129,6 +136,8 @@ impl Update {
 
 #[derive(Default)]
 pub struct SourceState {
+    pub live: BTreeMap<SessionKey, RuntimeStatus>,
+    pub live_error: Option<String>,
     committed: BTreeMap<SessionKey, SessionSummary>,
     staging: BTreeMap<SessionKey, SessionSummary>,
     pub loading: bool,
@@ -206,6 +215,8 @@ impl Browser {
         for source in &mut self.sources {
             // Preserve partial first-load observations through a cancelled refresh.
             source.committed.append(&mut source.staging);
+            source.live.clear();
+            source.live_error = None;
             source.loading = true;
             source.error = None;
             source.warnings.clear();
@@ -251,6 +262,38 @@ impl Browser {
                 warnings: s.warnings.clone(),
             })
             .collect()
+    }
+    pub fn runtime_status(&self, key: &SessionKey) -> RuntimeStatus {
+        self.sources
+            .iter()
+            .find_map(|s| s.live.get(key))
+            .copied()
+            .unwrap_or_default()
+    }
+    pub fn folder_activity(&self, filter: &FolderFilter) -> RuntimeStatus {
+        let mut status = RuntimeStatus::Unknown;
+        for session in self
+            .all()
+            .into_iter()
+            .filter(|s| self.include_archived || !s.archived)
+        {
+            let matches = match filter {
+                FolderFilter::Path(path) => session
+                    .cwd
+                    .as_ref()
+                    .is_some_and(|cwd| cwd.starts_with(path)),
+                _ => self.matches_folder(&session, filter),
+            };
+            if !matches {
+                continue;
+            }
+            match self.runtime_status(&session.key) {
+                waiting @ RuntimeStatus::Waiting { .. } => return waiting,
+                RuntimeStatus::Running => status = RuntimeStatus::Running,
+                _ => {}
+            }
+        }
+        status
     }
     pub fn all(&self) -> Vec<SessionSummary> {
         let mut records = BTreeMap::new();
@@ -420,6 +463,15 @@ impl Browser {
             .position(|s| Some(&s.key) == self.selected.as_ref())
             .unwrap_or(0);
         match update {
+            Update::Live {
+                source,
+                statuses,
+                error,
+                ..
+            } => {
+                self.sources[source].live = statuses;
+                self.sources[source].live_error = error;
+            }
             Update::Ready {
                 source, provider, ..
             } => self.sources[source].provider = Some(provider),
@@ -469,6 +521,7 @@ pub struct Discovery {
     checked: HashSet<PathBuf>,
     requested: HashSet<SessionKey>,
     folder_limit: Arc<Semaphore>,
+    live_enabled: bool,
 }
 impl Default for Discovery {
     fn default() -> Self {
@@ -485,7 +538,11 @@ impl Discovery {
             checked: HashSet::new(),
             requested: HashSet::new(),
             folder_limit: Arc::new(Semaphore::new(8)),
+            live_enabled: false,
         }
+    }
+    pub fn enable_live(&mut self) {
+        self.live_enabled = true;
     }
     pub fn refresh(&mut self, browser: &mut Browser) {
         for task in self.tasks.drain(..) {
@@ -496,6 +553,60 @@ impl Discovery {
         browser.begin_refresh();
         let limit = Arc::new(Semaphore::new(4));
         for (source, spec) in browser.specs.clone().into_iter().enumerate() {
+            if self.live_enabled {
+                if let SourceSpec::Codex {
+                    binary,
+                    source: config,
+                } = spec.clone()
+                {
+                    let tx = self.tx.clone();
+                    let generation = browser.generation;
+                    self.tasks.push(tokio::spawn(async move {
+                        loop {
+                            let error = match crate::providers::codex_live::LiveClient::connect(
+                                &binary,
+                                config.clone(),
+                            )
+                            .await
+                            {
+                                Ok(mut client) => loop {
+                                    match client.snapshot().await {
+                                        Ok(statuses) => {
+                                            if tx
+                                                .send(Update::Live {
+                                                    generation,
+                                                    source,
+                                                    statuses,
+                                                    error: None,
+                                                })
+                                                .is_err()
+                                            {
+                                                return;
+                                            }
+                                            tokio::time::sleep(std::time::Duration::from_secs(2))
+                                                .await;
+                                        }
+                                        Err(error) => break error,
+                                    }
+                                },
+                                Err(error) => error,
+                            };
+                            if tx
+                                .send(Update::Live {
+                                    generation,
+                                    source,
+                                    statuses: BTreeMap::new(),
+                                    error: Some(error),
+                                })
+                                .is_err()
+                            {
+                                return;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
+                    }));
+                }
+            }
             let tx = self.tx.clone();
             let generation = browser.generation;
             let limit = limit.clone();

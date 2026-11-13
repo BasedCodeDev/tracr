@@ -46,13 +46,14 @@ built = stage('build', cargo + ['build', *locked, '--target-dir', str(root / 'ta
 stage('clippy', cargo + ['clippy', '--all-targets', *locked, '--', '-D', 'warnings'])
 stage('rust-tests', cargo + ['test', *locked])
 stage('python-tests', ['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-v'])
-for helper in ['terminal_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check', 'create_check', 'menu_check']:
+for helper in ['terminal_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check', 'create_check', 'menu_check', 'status_check']:
     command = ['python3', f'tests/fixtures/app-server/{helper}.py', str(root / 'target/debug/tracr')]
     if helper == 'terminal_check':
         command.append(str(root / 'tests/fixtures/sessions/catalog.json'))
     stage(helper, command, built)
 if args.codex:
     stage('real-codex', ['python3', 'tests/fixtures/app-server/real_check.py', str(root / 'target/debug/tracr'), args.codex], built)
+    stage('real-status', ['python3', 'tests/fixtures/app-server/real_status_check.py', str(root / 'target/debug/tracr'), args.codex], built)
 (logs / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
 print(f'Logs and results: {logs}')
 raise SystemExit(int(any(r['status'] != 'passed' for r in results)))

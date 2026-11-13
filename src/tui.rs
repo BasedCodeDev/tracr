@@ -155,7 +155,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     } else {
         draw_pane(frame, layout[0], view.focus, browser, view);
     }
-    let issues: Vec<_> = browser
+    let mut issues: Vec<_> = browser
         .diagnostics()
         .into_iter()
         .filter(|s| !s.complete)
@@ -175,6 +175,14 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             )
         })
         .collect();
+    for (source, spec) in browser.sources.iter().zip(&browser.specs) {
+        if source.live_error.is_some() {
+            issues.push(format!(
+                "{}: live status unavailable",
+                safe_text(&spec.label())
+            ));
+        }
+    }
     frame.render_widget(
         Paragraph::new(format!(
             "←/→ panes · Enter toggle/resume · / search · a archives · r refresh · ? help · q quit\n{}",
@@ -212,7 +220,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                     true,
                 ))
                 .highlight_symbol("> ")
-                .highlight_style(Style::default().fg(Color::Cyan)),
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
             popup,
             &mut ListState::default().with_selected(Some(selected)),
         );
@@ -474,6 +482,66 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     );
 }
 
+fn activity_color(status: crate::domain::RuntimeStatus) -> Option<Color> {
+    match status {
+        crate::domain::RuntimeStatus::Running => Some(Color::Green),
+        crate::domain::RuntimeStatus::Waiting { .. } => Some(Color::Rgb(255, 165, 0)),
+        _ => None,
+    }
+}
+fn session_title(
+    session: &crate::domain::SessionSummary,
+    status: crate::domain::RuntimeStatus,
+    width: u16,
+) -> Line<'static> {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    let title = format!(
+        "{}{}",
+        if session.archived { "[archived] " } else { "" },
+        safe_text(&session.title)
+    );
+    let Some(label) = status.label() else {
+        return Line::styled(title, Style::default().add_modifier(Modifier::BOLD));
+    };
+    let label = if usize::from(width) < label.width() + 12 {
+        match status {
+            crate::domain::RuntimeStatus::Running => "Running",
+            _ => "Waiting",
+        }
+    } else {
+        label
+    };
+    let available = usize::from(width).saturating_sub(label.width() + 1);
+    let mut clipped = String::new();
+    let mut used = 0;
+    if title.width() > available {
+        for c in title.chars() {
+            let size = c.width().unwrap_or(0);
+            if used + size > available.saturating_sub(1) {
+                break;
+            }
+            clipped.push(c);
+            used += size;
+        }
+        if available > 0 {
+            clipped.push('…');
+        }
+    } else {
+        clipped = title;
+    }
+    let padding = usize::from(width).saturating_sub(clipped.width() + label.width());
+    Line::from(vec![
+        Span::styled(clipped, Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" ".repeat(padding)),
+        Span::styled(
+            label,
+            Style::default()
+                .fg(activity_color(status).expect("active label"))
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])
+}
+
 fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     let area = frame.area();
     let width = area.width.saturating_sub(2).min(100);
@@ -526,13 +594,10 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         .iter()
         .map(|s| {
             ListItem::new(vec![
-                Line::styled(
-                    format!(
-                        "{}{}",
-                        if s.archived { "[archived] " } else { "" },
-                        safe_text(&s.title)
-                    ),
-                    Style::default().add_modifier(Modifier::BOLD),
+                session_title(
+                    s,
+                    browser.runtime_status(&s.key),
+                    sections[1].width.saturating_sub(4),
                 ),
                 Line::from(safe_text(
                     &s.cwd
@@ -547,7 +612,7 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     frame.render_stateful_widget(
         List::new(items)
             .block(block("Results — ↑/↓ select · Enter opens folder", false))
-            .highlight_style(Style::default().fg(Color::Cyan))
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
             .highlight_symbol("> "),
         sections[1],
         &mut ListState::default().with_selected(Some(index)),
@@ -567,6 +632,10 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                         safe_text(&row.label),
                         row.count
                     ))
+                    .style(
+                        activity_color(browser.folder_activity(&row.filter))
+                            .map_or(Style::default(), |color| Style::default().fg(color)),
+                    )
                 })
                 .collect();
             let mut state = ListState::default()
@@ -574,7 +643,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             frame.render_stateful_widget(
                 List::new(items)
                     .block(block("Folders", view.focus == 0))
-                    .highlight_style(Style::default().fg(Color::Cyan))
+                    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                     .highlight_symbol("> "),
                 area,
                 &mut state,
@@ -615,13 +684,10 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 .iter()
                 .map(|s| {
                     ListItem::new(vec![
-                        Line::styled(
-                            format!(
-                                "{}{}",
-                                if s.archived { "[archived] " } else { "" },
-                                safe_text(&s.title),
-                            ),
-                            Style::default().add_modifier(Modifier::BOLD),
+                        session_title(
+                            s,
+                            browser.runtime_status(&s.key),
+                            area.width.saturating_sub(4),
                         ),
                         Line::styled(
                             format!(
@@ -643,7 +709,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             frame.render_stateful_widget(
                 List::new(items)
                     .block(block("Sessions", view.focus == 1))
-                    .highlight_style(Style::default().fg(Color::Cyan))
+                    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                     .highlight_symbol("> "),
                 area,
                 &mut state,
@@ -1001,6 +1067,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     }));
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut discovery = Discovery::new();
+    discovery.enable_live();
     discovery.refresh(&mut browser);
     let mut view = View {
         focus: usize::from(browser.initial_folder.is_some()),

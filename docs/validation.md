@@ -325,3 +325,36 @@ accepting a newly opened dialog or resuming the underlying selected session.
 The full offline check suite passed (`/tmp/tracr-check-2dka2cdh`), including
 new Rust coverage for menu selection/cancellation, command routing and small
 layouts, and a PTY check for disabled actions, resize, search, resume and quit.
+
+## Live session activity (unreleased)
+
+The browser passively polls each configured home's existing daemon every two
+seconds using a WebSocket connection over `codex app-server proxy`. It paginates
+`thread/loaded/list` and uses metadata-only `thread/read` calls. It never starts
+or stops the daemon, resumes a thread, submits a prompt, or answers approval
+requests. A five-second connection deadline and twenty-second snapshot deadline
+bound stalled requests; failures clear that source's highlights and retry after
+five seconds. CLI listing does not start monitors.
+
+Running sessions show green text; approval/input waits show orange text. Folder
+colors include descendants and honor archive visibility, with waiting taking
+priority. Source-scoped runtime snapshots are separate from persisted metadata,
+and old discovery generations cannot overwrite current state. Unknown, idle,
+and error states do not receive activity colors. Independently hosted sessions
+outside the daemon remain outside this monitor's coverage.
+
+The full offline suite passed (`/tmp/tracr-check-t1txd4h5`), including WebSocket
+pagination, state mapping, Guardian exclusion, repeated cursor rejection, stale
+generations, folder aggregation and rendering, polling, disconnect/reconnect,
+and search display. An additional targeted test verified that identical native
+session IDs in different homes retain independent status after one disconnects.
+The existing failure-path PTY helper now preserves screen history when checking
+incremental redraws.
+
+Real Codex 0.167.2 acceptance passed Running → Waiting for input → Idle with a
+separate owning client and local scripted HTTP model, without credentials or
+paid inference (`/tmp/tracr-real-status-f2gtbu9b`). The owner could still read the
+thread after tracr exited, and its daemon remained alive. Existing real legacy
+resume, paginated resume, and creation acceptance also passed
+(`/tmp/tracr-real-check-o_alawt_`). `check.sh --codex PATH` now includes this
+isolated live-status check alongside the existing real-Codex acceptance.
