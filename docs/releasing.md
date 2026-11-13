@@ -142,3 +142,14 @@ cover both architecture aliases, unsupported systems, custom directories,
 unavailable releases, checksum failures, version mismatches and cleanup. Before
 publishing a release, also run the installer against the actual published assets
 in a temporary home; stubbed-download tests do not establish release availability.
+
+## v0.2.0 publication
+
+The v0.2.0 preview includes folder-first startup, remembered folders, interactive
+session creation, modal search, exact-folder session lists, and clearer focus
+borders. Both native Linux build/test jobs and the draft installation checks
+passed in [the release workflow](https://github.com/BasedCodeDev/tracr/actions/runs/43438437027).
+The downloaded x86_64 release binary passed isolated real-Codex 0.167.2 checks
+for legacy resume, paginated resume, and new-session creation, including terminal
+return and daemon cleanup. See [release evidence](release-0.2.0-evidence.json).
+ARM64 real-Codex acceptance remains unverified. The v0.1.0 release is unchanged.

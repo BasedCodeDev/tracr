@@ -1,0 +1,127 @@
+{
+  "version": "0.2.0",
+  "target": "x86_64-unknown-linux-musl",
+  "binary_sha256": "de69c3ea8eaefdcdf3448cca6e9c94b6e9e78616846b644412e7b074532c10e0",
+  "source_commit": "17e05de241aec441899f5c1ca10355d7e99c259a",
+  "build_run": "https://github.com/BasedCodeDev/tracr/actions/runs/43438437027",
+  "native_checks": {
+    "x86_64": "passed",
+    "aarch64": "passed"
+  },
+  "download_verification": "passed",
+  "live_cases": [
+    {
+      "mode": "legacy",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "fixture",
+          "status": "passed"
+        },
+        {
+          "phase": "inventory",
+          "status": "passed"
+        },
+        {
+          "phase": "browser-ready",
+          "status": "passed"
+        },
+        {
+          "phase": "startup",
+          "status": "passed",
+          "foreground_group": 956924
+        },
+        {
+          "phase": "session-and-directory",
+          "status": "passed"
+        },
+        {
+          "phase": "return-to-browser",
+          "status": "passed"
+        },
+        {
+          "phase": "daemon-cleanup",
+          "status": "passed",
+          "observed_pids": [
+            957062,
+            957163
+          ],
+          "updater_terminated": 957163,
+          "shutdown_seconds": 0.001926700999320019
+        }
+      ],
+      "version": "codex-cli 0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b",
+      "session_id": "01a1d538-b861-7321-abb4-9a9c43c5f020",
+      "expected_directory": "/tmp/tracr-real-check-fq1vw184/legacy/old"
+    },
+    {
+      "mode": "paginated",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "fixture",
+          "status": "passed"
+        },
+        {
+          "phase": "inventory",
+          "status": "passed"
+        },
+        {
+          "phase": "browser-ready",
+          "status": "passed"
+        },
+        {
+          "phase": "startup",
+          "status": "passed",
+          "foreground_group": 958030
+        },
+        {
+          "phase": "session-and-directory",
+          "status": "passed"
+        },
+        {
+          "phase": "return-to-browser",
+          "status": "passed"
+        },
+        {
+          "phase": "daemon-cleanup",
+          "status": "passed",
+          "observed_pids": [
+            958167,
+            958268
+          ],
+          "updater_terminated": 958268,
+          "shutdown_seconds": 0.0018549119995441288
+        }
+      ],
+      "version": "codex-cli 0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b",
+      "session_id": "01a1d538-c00a-7b52-8f72-87d02e0b5d5d",
+      "expected_directory": "/tmp/tracr-real-check-fq1vw184/paginated/old"
+    },
+    {
+      "mode": "new-session",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "new-session-directory",
+          "status": "passed"
+        },
+        {
+          "phase": "daemon-cleanup",
+          "status": "passed",
+          "observed_pids": [
+            958849,
+            958950
+          ],
+          "updater_terminated": 958950,
+          "shutdown_seconds": 0.0019229419995099306
+        }
+      ]
+    }
+  ],
+  "arm64_real_codex": "not tested",
+  "anonymous_public_install": "passed",
+  "repeat_install": "passed"
+}
