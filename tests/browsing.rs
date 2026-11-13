@@ -552,3 +552,32 @@ async fn arrows_navigate_panes_and_folders_while_search_remains_editable() {
     assert!(!view.editing);
     assert_eq!(browser.query, "jkqar");
 }
+
+#[tokio::test]
+async fn guardian_metadata_is_hidden_without_dropping_other_sessions_or_pages() {
+    let (temp, binary, source) = fake(serde_json::json!({"guardians":true}));
+    let provider = CodexProvider::connect(&binary, source).await.unwrap();
+    let result = tracr::app::collect(&provider).await;
+    assert!(result.complete);
+    assert_eq!(result.sessions.len(), 4);
+    assert_eq!(result.sessions.iter().filter(|s| s.archived).count(), 2);
+    assert!(result.sessions.iter().any(|s| s.title == "Guardian review"));
+    assert!(
+        result
+            .sessions
+            .iter()
+            .any(|s| s.key.native_id == "other-second")
+    );
+    assert!(
+        result
+            .sessions
+            .iter()
+            .all(|s| !s.key.native_id.starts_with("guardian-")
+                && !s.key.native_id.starts_with("legacy-"))
+    );
+    std::fs::write(temp.path().join("fake.json"), r#"{"guardian_read":true}"#).unwrap();
+    let session = &result.sessions[0];
+    assert!(provider.read(&session.key).await.unwrap().is_none());
+    assert!(provider.prepare_resume(session).await.is_err());
+    provider.close().await;
+}

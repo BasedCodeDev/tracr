@@ -30,6 +30,14 @@ const SOURCE_KINDS: &[&str] = &[
     "subAgentOther",
     "unknown",
 ];
+// The API groups Guardian with unrelated "other" subagents. Filter the exact
+// metadata marker instead of excluding that entire category or matching titles.
+fn is_guardian(thread: &Value) -> bool {
+    ["/source/subAgent/other", "/source/subagent/other"]
+        .iter()
+        .any(|pointer| thread.pointer(pointer).and_then(Value::as_str) == Some("guardian"))
+}
+
 const DEADLINE: Duration = Duration::from_secs(20);
 
 struct Rpc {
@@ -376,6 +384,9 @@ impl SessionProvider for CodexProvider {
         let mut sessions = Vec::new();
         let mut warnings = Vec::new();
         for value in data {
+            if is_guardian(value) {
+                continue;
+            }
             match self.summary(value.clone(), position.archived) {
                 Ok(summary) => sessions.push(summary),
                 Err(error) => warnings.push(error.to_string()),
@@ -413,6 +424,9 @@ impl SessionProvider for CodexProvider {
                 json!({"threadId":key.native_id,"includeTurns":false}),
             )
             .await?;
+        if is_guardian(&response["thread"]) {
+            return Ok(None);
+        }
         self.summary(response["thread"].clone(), false).map(Some)
     }
 }

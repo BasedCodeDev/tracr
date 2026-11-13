@@ -48,6 +48,14 @@ with (home / 'requests.jsonl').open('a', buffering=1) as log:
             item = dict(id=suffix, name='Task '+suffix, preview='', cwd=str(home / 'listed'),
                         createdAt=100, updatedAt=200, source='exec', gitInfo={'branch':'main'})
             result = {'data':[item], 'nextCursor':None if archived or cursor else 'page-2'}
+            if settings.get('guardians'):
+                guardian = dict(item, id='guardian-'+suffix, name='Internal review', source={'subAgent':{'other':'guardian'}})
+                if not archived and not cursor:
+                    result['data'] = [guardian]  # A hidden-only page must not end pagination.
+                else:
+                    result['data'].extend([guardian, dict(guardian, id='legacy-'+suffix, source={'subagent':{'other':'guardian'}})])
+                    result['data'].append(dict(item, id='other-'+suffix, source={'subAgent':{'other':'worker'}}))
+                    item['name'] = 'Guardian review'  # Ordinary sessions with this name must remain visible.
             if settings.get('malformed'):
                 result['data'].append({'id':'invalid'})
             print(json.dumps({'method':'thread/status/changed','params':{}}), flush=True)
@@ -57,6 +65,8 @@ with (home / 'requests.jsonl').open('a', buffering=1) as log:
                 while not (home / 'release').exists():
                     time.sleep(.02)
             result = {'thread':dict(id=request['params']['threadId'], name='Task', cwd=settings.get('read_cwd', str(home/'resume')), canAcceptDirectInput=settings.get('direct', True), createdAt=100, updatedAt=200, source='exec')}
+            if settings.get('guardian_read'):
+                result['thread']['source'] = {'subAgent':{'other':'guardian'}}
         else:
             raise AssertionError('Forbidden RPC method: '+method)
         print(json.dumps({'id':request['id'], 'result':result}), flush=True)

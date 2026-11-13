@@ -196,6 +196,9 @@ regrouping the session. Timestamps currently display as Unix seconds.
 
 Live discovery explicitly includes non-interactive and subagent source kinds
 exposed by the tested Codex protocol, and pages active/archived inventories.
+Internal Guardian approval-review sessions are excluded by their source metadata
+from discovery, search, and folder counts. Ordinary sessions with the same title
+and other subagents remain visible.
 Backend-hidden attached threads are not separately traversed. Requests time out
 after 20 seconds; quitting shuts down only app servers owned by tracr.
 Press Enter in the session or details pane to resume an active Codex session in

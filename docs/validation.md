@@ -257,3 +257,18 @@ editing. Enter elsewhere ends editing without resuming; a subsequent Enter can
 resume as before. Printable shortcut characters remain search text while editing.
 Regression checks cover folder navigation, expansion, pane switching, details
 scrolling, session selection, query preservation, and safe Enter behavior.
+
+## Guardian review exclusion (unreleased)
+
+Codex 0.167.2's generated `ThreadListParams` schema has source-kind allowlists,
+but no Guardian-specific source filter. Guardian shares `subAgentOther` with
+unrelated sessions. The adapter therefore excludes the exact structured
+`source.subAgent.other = guardian` marker (and legacy `subagent` spelling) before
+adding records to discovery. It also returns no record when a fresh read identifies
+Guardian, preventing a stale selection from preparing resume. Titles are not used.
+
+Regression coverage includes a Guardian-only first page followed by ordinary
+sessions, active/archive partitions, both source spellings, unrelated subagents,
+ordinary sessions named Guardian review, and fresh-read/resume rejection. A
+metadata-only run against the real Codex home completed with 20 visible sessions
+and zero remaining Guardian source markers. No histories were deleted or resumed.
