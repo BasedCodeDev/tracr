@@ -3,12 +3,12 @@
 set -eu
 
 main() {
-    version=${TRACR_VERSION:-v0.1.0}
+    version=${TRACR_VERSION:-v0.2.0}
     install_dir=${TRACR_INSTALL_DIR:-${HOME:?HOME must be set}/.local/bin}
     data_dir=${XDG_DATA_HOME:-${HOME:?HOME must be set}/.local/share}/tracr
     case "$install_dir" in /*) ;; *) fail 'TRACR_INSTALL_DIR must be an absolute path' ;; esac
     case "$data_dir" in /*) ;; *) fail 'XDG_DATA_HOME must be an absolute path' ;; esac
-    printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail 'TRACR_VERSION must look like v0.1.0'
+    printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail 'TRACR_VERSION must look like v0.2.0'
     [ "$#" -eq 0 ] || fail 'Use TRACR_VERSION and TRACR_INSTALL_DIR to configure installation; no arguments are accepted'
     [ "$(uname -s)" = Linux ] || fail 'tracr currently supports Linux only; macOS and Windows are planned'
     case "$(uname -m)" in

@@ -13,7 +13,7 @@ On Linux x86_64 or ARM64:
 curl -fsSL https://raw.githubusercontent.com/BasedCodeDev/tracr/main/install.sh | sh
 ```
 
-The current preview is [v0.1.0](https://github.com/BasedCodeDev/tracr/releases/tag/v0.1.0).
+The current preview is [v0.2.0](https://github.com/BasedCodeDev/tracr/releases/tag/v0.2.0).
 You can also [install from source](#install-from-source).
 
 The installer downloads the preview binary, verifies SHA-256 checksums, and
@@ -39,7 +39,7 @@ macOS and Windows support are planned.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BasedCodeDev/tracr/main/install.sh | \
-  TRACR_INSTALL_DIR="$HOME/bin" TRACR_VERSION=v0.1.0 sh
+  TRACR_INSTALL_DIR="$HOME/bin" TRACR_VERSION=v0.2.0 sh
 ```
 
 Installation directories must be absolute. License notices are saved in

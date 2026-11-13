@@ -22,8 +22,8 @@ class InstallerTests(unittest.TestCase):
             destination = bin_dir/'tracr'
             destination.write_text('existing installation')
             downloads = root/'downloads'; downloads.mkdir()
-            binary = b'#!/bin/sh\nprintf "tracr 0.1.0\\n"\n'
-            if scenario == 'wrong-version': binary = binary.replace(b'0.1.0', b'9.0.0')
+            binary = b'#!/bin/sh\nprintf "tracr 0.2.0\\n"\n'
+            if scenario == 'wrong-version': binary = binary.replace(b'0.2.0', b'9.0.0')
             assets = {'tracr-linux-x86_64':binary, 'tracr-linux-aarch64':binary,
                       'LICENSE':b'MIT notice', 'THIRD_PARTY_NOTICES.txt':b'Dependency notices'}
             for name, data in assets.items(): (downloads/name).write_bytes(data)
@@ -39,7 +39,7 @@ class InstallerTests(unittest.TestCase):
 import os,sys,pathlib,shutil
 args=sys.argv[1:]
 url=next(a for a in args if a.startswith('https://'))
-assert url.startswith('https://github.com/BasedCodeDev/tracr/releases/download/v0.1.0/')
+assert url.startswith('https://github.com/BasedCodeDev/tracr/releases/download/v0.2.0/')
 assert '--proto' in args and '--proto-redir' in args
 with open(os.environ['TEST_LOG'],'a') as f: f.write(url+'\\n')
 if os.environ['TEST_SCENARIO']=='unavailable': sys.exit(22)
