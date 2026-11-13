@@ -58,7 +58,7 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout'):
                 os.write(master, b'/second\r')
                 wait(lambda: 'ID: second' in screen.text())
                 os.write(master, b'\tjjj')
-                wait(lambda: 'Provider: codex' in screen.line(2, 157))
+                wait(lambda: 'Provider: codex' in screen.line(1, 157))
                 session_id = 'second'
             os.write(master, b'\r')
             wait(lambda: (home / 'launch.json').exists())
@@ -73,13 +73,13 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout'):
                 os.write(master, b'\x03' if action == 'ctrl-c' else b'x')
                 wait(lambda: os.tcgetpgrp(master) == child.pid)
                 # Wait for refreshed browser before quitting.
-                wait(lambda: output.count(b'\x1b[1;1HSearch') >= 2)
+                wait(lambda: output.count(b'toggle/resume') >= 2)
                 if action == 'normal':
-                    wait(lambda: 'Search: second' in screen.text() and 'Task second' in screen.text())
-                    assert 'Global search' in screen.text()
-                    wait(lambda: 'Provider: codex' in screen.line(2, 157))
+                    wait(lambda: '> Task second' in screen.text())
+                    assert 'Search sessions' not in screen.text()
+                    wait(lambda: 'Provider: codex' in screen.line(1, 157))
                     os.write(master, b'j')
-                    wait(lambda: 'Source home:' in screen.line(2, 157))
+                    wait(lambda: 'Source home:' in screen.line(1, 157))
                 os.write(master, b'q')
             wait(lambda: child.poll() is not None)
             assert child.returncode == 0, bytes(output)

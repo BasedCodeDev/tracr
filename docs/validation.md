@@ -272,3 +272,22 @@ sessions, active/archive partitions, both source spellings, unrelated subagents,
 ordinary sessions named Guardian review, and fresh-read/resume rejection. A
 metadata-only run against the real Codex home completed with 20 visible sessions
 and zero remaining Guardian source markers. No histories were deleted or resumed.
+
+## Modal session search (unreleased)
+
+The permanent search row has been removed. `/` opens a modal with an input field
+and globally matched session titles/paths below it. Up/Down moves the modal's
+selection; Enter opens the selected session's exact folder, expands its ancestors,
+focuses the sessions pane, and highlights the selected session without launching
+Codex. Sessions without an absolute working directory use Unknown folders.
+Escape cancels without changing the underlying folder, session, pane, or scroll.
+Empty input lists sessions under the existing archive setting; Ctrl-U clears the
+input. Search text and selected result are separate from browser navigation state.
+
+Tests cover cancellation, Unicode matching, empty results, result navigation,
+missing/unknown folders, archived sessions, narrow layouts, and search-to-folder
+navigation without resume. The standard checks passed in
+`/tmp/tracr-check-2mtjo7ta`; additional missing/unknown/archive cases passed as a
+targeted test. Real-Codex acceptance passed for legacy and paginated histories in
+`/tmp/tracr-real-check-zamvt8lu`. Terminal return checks now recognize the footer
+instead of relying on the removed search/header row.

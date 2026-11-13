@@ -147,20 +147,14 @@ async fn layouts_render_normal_narrow_and_tiny_and_search_keys_are_text() {
         ),
         tracr::tui::Action::Continue
     );
-    assert_eq!(browser.query, "q");
+    assert_eq!(view.search_query, "q");
+    assert!(browser.query.is_empty());
     tracr::tui::handle_key(
         &mut browser,
         &mut view,
         KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
     );
-    assert!(view.editing);
-    assert_eq!(view.focus, 2);
-    assert_eq!(browser.query, "q");
-    tracr::tui::handle_key(
-        &mut browser,
-        &mut view,
-        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
-    );
+    assert!(!view.editing);
     assert!(browser.query.is_empty());
     assert!(tracr::browser::safe_text("\x1b[31m").starts_with("\\u{1b}"));
 }
@@ -494,13 +488,14 @@ async fn initial_folder_shows_direct_sessions_and_survives_empty_refresh() {
 }
 
 #[tokio::test]
-async fn arrows_navigate_panes_and_folders_while_search_remains_editable() {
+async fn arrows_navigate_panes_and_folders_outside_search() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use tracr::tui::{Action, View, handle_key};
+    use tracr::tui::{View, handle_key};
     let mut browser = loaded().await;
     let mut view = View::default();
     let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
-    for editing in [false, true] {
+    {
+        let editing = false;
         view.editing = editing;
         view.focus = 0;
         browser.folder = FolderFilter::All;
@@ -532,26 +527,6 @@ async fn arrows_navigate_panes_and_folders_while_search_remains_editable() {
         assert_eq!(view.focus, 2);
         assert_eq!(browser.query, "codex");
     }
-    view.focus = 1;
-    browser.folder = FolderFilter::All;
-    browser.query.clear();
-    browser.reconcile(0);
-    let selected = browser.selected.clone();
-    handle_key(&mut browser, &mut view, key(KeyCode::Down));
-    assert_ne!(browser.selected, selected);
-    for character in ['j', 'k', 'q', 'a', 'r'] {
-        assert_eq!(
-            handle_key(&mut browser, &mut view, key(KeyCode::Char(character))),
-            Action::Continue
-        );
-    }
-    assert_eq!(browser.query, "jkqar");
-    assert_eq!(
-        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
-        Action::Continue
-    );
-    assert!(!view.editing);
-    assert_eq!(browser.query, "jkqar");
 }
 
 #[tokio::test]
@@ -589,7 +564,8 @@ fn escape_matches_left_navigation_but_still_closes_help_and_cancels_resume() {
     use tracr::tui::{Action, View, handle_key};
     let mut browser = Browser::new(vec![]);
     browser.query = "keep filter".into();
-    for editing in [false, true] {
+    {
+        let editing = false;
         for focus in 0..3 {
             for code in [KeyCode::Esc, KeyCode::Left] {
                 let mut view = View {
@@ -629,4 +605,103 @@ fn escape_matches_left_navigation_but_still_closes_help_and_cancels_resume() {
         Action::CancelResume
     );
     assert_eq!(view.focus, 1);
+}
+
+#[tokio::test]
+async fn search_modal_selects_a_session_then_navigates_without_resuming() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use tracr::tui::{Action, View, handle_key};
+    let mut browser = loaded().await;
+    let mut view = View {
+        focus: 2,
+        details_scroll: 3,
+        ..View::default()
+    };
+    browser.open_folder("/unrelated".into());
+    let original_folder = browser.folder.clone();
+    let original_selection = browser.selected.clone();
+    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+    handle_key(&mut browser, &mut view, key(KeyCode::Char('/')));
+    for c in "café".chars() {
+        handle_key(&mut browser, &mut view, key(KeyCode::Char(c)));
+    }
+    let results = browser.search_results(&view.search_query);
+    assert_eq!(results.len(), 1);
+    let target = results[0].clone();
+    assert_eq!(browser.folder, original_folder);
+    handle_key(&mut browser, &mut view, key(KeyCode::Esc));
+    assert_eq!(browser.folder, original_folder);
+    assert_eq!(browser.selected, original_selection);
+    assert_eq!(view.focus, 2);
+    assert_eq!(view.details_scroll, 3);
+    handle_key(&mut browser, &mut view, key(KeyCode::Char('/')));
+    assert!(view.search_query.is_empty());
+    handle_key(&mut browser, &mut view, key(KeyCode::Down));
+    assert_eq!(
+        view.search_selected.as_ref(),
+        Some(&browser.search_results("")[1].key)
+    );
+    handle_key(&mut browser, &mut view, key(KeyCode::Up));
+    assert_eq!(
+        view.search_selected.as_ref(),
+        Some(&browser.search_results("")[0].key)
+    );
+    for c in "café".chars() {
+        handle_key(&mut browser, &mut view, key(KeyCode::Char(c)));
+    }
+    assert_eq!(
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+        Action::Continue
+    );
+    assert!(!view.editing);
+    assert_eq!(browser.folder, FolderFilter::Path(target.cwd.unwrap()));
+    assert_eq!(browser.selected, Some(target.key));
+    assert_eq!(view.focus, 1);
+    assert_eq!(view.details_scroll, 0);
+    handle_key(&mut browser, &mut view, key(KeyCode::Char('/')));
+    for c in "no-such-session-jkqar".chars() {
+        handle_key(&mut browser, &mut view, key(KeyCode::Char(c)));
+    }
+    assert!(browser.search_results(&view.search_query).is_empty());
+    handle_key(&mut browser, &mut view, key(KeyCode::Enter));
+    assert!(view.editing);
+    assert_eq!(view.search_query, "no-such-session-jkqar");
+    // Render the modal at wide and narrow widths, including an empty result list.
+    for (width, height) in [(140, 40), (60, 20), (12, 4)] {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| tracr::tui::draw(frame, &browser, &view))
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn modal_search_handles_missing_unknown_and_archived_folders() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use tracr::tui::{Action, View, handle_key};
+    let mut browser = loaded().await;
+    let mut view = View::default();
+    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+    assert!(browser.search_results("Archived task").is_empty());
+    browser.include_archived = true;
+    for query in ["Missing folder", "No folder recorded", "Archived task"] {
+        handle_key(&mut browser, &mut view, key(KeyCode::Char('/')));
+        view.search_query = query.into();
+        let target = browser.search_results(query)[0].clone();
+        assert_eq!(
+            handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+            Action::Continue
+        );
+        assert_eq!(browser.selected, Some(target.key));
+        assert_eq!(view.focus, 1);
+        assert!(!view.editing);
+        assert_eq!(
+            browser.folder,
+            target
+                .cwd
+                .map(FolderFilter::Path)
+                .unwrap_or(FolderFilter::Unknown)
+        );
+    }
 }

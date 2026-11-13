@@ -250,12 +250,13 @@ impl Browser {
         records.into_values().collect()
     }
     pub fn visible(&self) -> Vec<SessionSummary> {
-        let terms: Vec<String> = self
-            .query
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .collect();
-        let searching = !terms.is_empty();
+        self.matching_sessions(&self.query, !self.query.trim().is_empty())
+    }
+    pub fn search_results(&self, query: &str) -> Vec<SessionSummary> {
+        self.matching_sessions(query, true)
+    }
+    fn matching_sessions(&self, query: &str, searching: bool) -> Vec<SessionSummary> {
+        let terms: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         let mut sessions: Vec<_> = self
             .all()
             .into_iter()

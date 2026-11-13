@@ -21,6 +21,8 @@ use std::{
 pub struct View {
     pub focus: usize,
     pub editing: bool,
+    pub search_query: String,
+    pub search_selected: Option<crate::domain::SessionKey>,
     pub help: bool,
     pub details_scroll: u16,
     pub message: Option<String>,
@@ -104,20 +106,8 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     }
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(3),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(3)])
         .split(area);
-    frame.render_widget(
-        Paragraph::new(format!(
-            "Search{}: {}",
-            if view.editing { " (editing)" } else { "" },
-            safe_text(&browser.query)
-        )),
-        layout[0],
-    );
     if area.width >= 100 {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
@@ -126,12 +116,12 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 Constraint::Percentage(40),
                 Constraint::Percentage(35),
             ])
-            .split(layout[1]);
+            .split(layout[0]);
         for (index, pane) in panes.iter().enumerate() {
             draw_pane(frame, *pane, index, browser, view);
         }
     } else {
-        draw_pane(frame, layout[1], view.focus, browser, view);
+        draw_pane(frame, layout[0], view.focus, browser, view);
     }
     let issues: Vec<_> = browser
         .diagnostics()
@@ -166,7 +156,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             }
         ))
         .wrap(Wrap { trim: false }),
-        layout[2],
+        layout[1],
     );
     if view.help {
         let popup = Rect {
@@ -176,9 +166,92 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             height: area.height.saturating_sub(2),
         };
         frame.render_widget(Clear, popup);
-        frame.render_widget(Paragraph::new("Up / Down or j,k: navigate\nLeft / Right or Tab / Shift-Tab: switch panes\nEnter: toggle folder or resume selected active session\n/: edit global search; arrows still navigate\nEnter: toggle folders; elsewhere finish editing\na: toggle archived sessions\nr: refresh\nEsc: previous pane (close help or cancel preparation)\nCtrl-U: clear search\nq / Ctrl-C: quit (q inserts text during search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Clearing search restores the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
+        frame.render_widget(Paragraph::new("Up / Down or j,k: navigate\nLeft / Right or Tab / Shift-Tab: switch panes\nEnter: toggle folder or resume selected active session\n/: search modal; type to filter, Up/Down select\nEnter in search: open folder and select session (not resume)\na: toggle archived sessions\nr: refresh\nEsc: previous pane (close help or cancel preparation)\nCtrl-U in search: clear query\nq / Ctrl-C: quit (q inserts text in search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Esc closes search without changing the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
+    }
+    if view.editing {
+        draw_search(frame, browser, view);
     }
 }
+fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
+    let area = frame.area();
+    let width = area.width.saturating_sub(2).min(100);
+    let height = area.height.saturating_sub(2).min(30);
+    let popup = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(Clear, popup);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .split(popup);
+    let query = safe_text(&view.search_query);
+    let query_width = Line::from(query.clone()).width();
+    let input_width = sections[0].width.saturating_sub(2) as usize;
+    let offset = query_width.saturating_sub(input_width.saturating_sub(1));
+    frame.render_widget(
+        Paragraph::new(query)
+            .scroll((0, offset.min(u16::MAX as usize) as u16))
+            .block(block("Search sessions — Esc cancels", true)),
+        sections[0],
+    );
+    if input_width > 0 && sections[0].height >= 3 {
+        frame.set_cursor_position((
+            sections[0].x + 1 + query_width.saturating_sub(offset) as u16,
+            sections[0].y + 1,
+        ));
+    }
+    let results = browser.search_results(&view.search_query);
+    if results.is_empty() {
+        frame.render_widget(
+            Paragraph::new(if browser.loading() {
+                "Searching…"
+            } else {
+                "No matching sessions"
+            })
+            .block(block("Results", false)),
+            sections[1],
+        );
+        return;
+    }
+    let index = results
+        .iter()
+        .position(|s| Some(&s.key) == view.search_selected.as_ref())
+        .unwrap_or(0);
+    let items: Vec<_> = results
+        .iter()
+        .map(|s| {
+            ListItem::new(vec![
+                Line::styled(
+                    format!(
+                        "{}{}",
+                        if s.archived { "[archived] " } else { "" },
+                        safe_text(&s.title)
+                    ),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Line::from(safe_text(
+                    &s.cwd
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "Unknown folder".into()),
+                )),
+                Line::default(),
+            ])
+        })
+        .collect();
+    frame.render_stateful_widget(
+        List::new(items)
+            .block(block("Results — ↑/↓ select · Enter opens folder", false))
+            .highlight_style(Style::default().fg(Color::Cyan))
+            .highlight_symbol("> "),
+        sections[1],
+        &mut ListState::default().with_selected(Some(index)),
+    );
+}
+
 fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, view: &View) {
     match pane {
         0 => {
@@ -398,40 +471,66 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
-        browser.query.clear();
-        browser.reconcile(0);
-        return Action::Continue;
-    }
-    // Search text remains editable while navigation keys operate the focused pane.
-    let navigation = matches!(
-        key.code,
-        KeyCode::Up
-            | KeyCode::Down
-            | KeyCode::Left
-            | KeyCode::Esc
-            | KeyCode::Right
-            | KeyCode::Tab
-            | KeyCode::BackTab
-    ) || (key.code == KeyCode::Enter && view.focus == 0);
-    if view.editing && !navigation {
+    if view.editing {
+        let results = browser.search_results(&view.search_query);
+        let index = results
+            .iter()
+            .position(|s| Some(&s.key) == view.search_selected.as_ref())
+            .unwrap_or(0);
         match key.code {
-            KeyCode::Enter => view.editing = false,
-            KeyCode::Backspace => {
-                browser.query.pop();
+            KeyCode::Esc => view.editing = false,
+            KeyCode::Up | KeyCode::Down => {
+                let next = if key.code == KeyCode::Up {
+                    index.saturating_sub(1)
+                } else {
+                    (index + 1).min(results.len().saturating_sub(1))
+                };
+                view.search_selected = results.get(next).map(|s| s.key.clone());
             }
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                browser.query.push(c)
+            KeyCode::Enter => {
+                if let Some(session) = results.get(index) {
+                    browser.query.clear();
+                    if let Some(path) = session.cwd.as_ref().filter(|path| path.is_absolute()) {
+                        browser.open_folder(path.clone());
+                    } else {
+                        browser.folder = FolderFilter::Unknown;
+                    }
+                    browser.selected = Some(session.key.clone());
+                    browser.reconcile(0);
+                    view.focus = 1;
+                    view.details_scroll = 0;
+                    view.message = None;
+                    view.editing = false;
+                }
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                view.search_query.clear();
+                view.search_selected = None;
+            }
+            KeyCode::Backspace => {
+                view.search_query.pop();
+                view.search_selected = None;
+            }
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                view.search_query.push(c);
+                view.search_selected = None;
             }
             _ => {}
         }
-        browser.reconcile(0);
         return Action::Continue;
     }
     match key.code {
         KeyCode::Char('q') => return Action::Quit,
         KeyCode::Char('?') => view.help = true,
-        KeyCode::Char('/') => view.editing = true,
+        KeyCode::Char('/') => {
+            view.editing = true;
+            view.search_query.clear();
+            view.search_selected = None;
+        }
         KeyCode::Char('r') => return Action::Refresh,
         KeyCode::Char('a') => browser.include_archived = !browser.include_archived,
         KeyCode::Tab | KeyCode::Right => view.focus = (view.focus + 1) % 3,

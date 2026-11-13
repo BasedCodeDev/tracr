@@ -155,7 +155,7 @@ A terminal is required on stdin and stdout; use `tracr list` in pipelines.
 Use `tracr .`, `tracr ~/Work/Seb.SysAdmin`, or `tracr browse PATH` to select a
 folder immediately, showing only sessions recorded directly there. The session
 pane starts focused: choose a session and press Enter to resume. No path still opens All sessions. You can
-navigate to other folders or search globally; clearing search restores the folder.
+navigate to other folders or search globally; selecting a result opens its folder.
 
 Relative paths use the caller's current directory. Missing directories can still
 be browsed; existing files are rejected. Paths are matched lexically, without
@@ -172,17 +172,20 @@ Terminals narrower than 100 columns show the focused pane full-width.
 
 - Up / Down or `j/k`: navigate; Left / Right or Tab / Shift-Tab: switch panes.
 - Enter: expand or collapse the selected folder, or resume a session.
-- `/`: edit global search; arrow keys still navigate and switch panes. Enter in
-  the folder pane toggles expansion; elsewhere Enter finishes editing without
-  resuming. Escape moves to the previous pane, like Left Arrow, including while
-  editing. Ctrl-U clears the query. Escape still closes help or cancels resume
-  preparation when those are active.
+- `/`: open the search modal. Type to filter results; each result shows its title
+  and path. Up/Down selects a result; Enter opens its folder and highlights the
+  session without resuming it. Escape cancels without changing your location.
+  Ctrl-U clears the modal input. Empty input lists all sessions allowed by the
+  archive toggle.
+- Escape outside the modal moves to the previous pane, closes help, or cancels
+  pending resume preparation.
 - `a`: include archived sessions; `r`: refresh; `?`: help.
 - `q` or Ctrl-C: quit. While editing search, `q` is text.
 
 Search requires every whitespace-separated term to match some metadata field:
 title, native ID, path, provider, or Git branch. It ignores the selected folder
-while a query is active. Clearing the query restores folder filtering.
+inside the modal. Choosing a result returns to exact-folder browsing; sessions
+without a recorded folder are selected under Unknown folders.
 
 Missing directories appear under Unlinked folders. Permission errors remain
 inaccessible rather than unlinked. Folder matching uses exact paths; select a child
