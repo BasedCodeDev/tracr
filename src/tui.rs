@@ -105,25 +105,14 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(1),
             Constraint::Min(1),
             Constraint::Length(3),
         ])
         .split(area);
     frame.render_widget(
         Paragraph::new(format!(
-            "tracr · {}  {}  {}\nSearch{}: {}",
-            browser.mode_label(),
-            if browser.loading() {
-                "Loading…"
-            } else {
-                "Loaded"
-            },
-            if browser.include_archived {
-                "including archived"
-            } else {
-                "active sessions"
-            },
+            "Search{}: {}",
             if view.editing { " (editing)" } else { "" },
             safe_text(&browser.query)
         )),

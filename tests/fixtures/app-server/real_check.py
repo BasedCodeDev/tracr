@@ -49,8 +49,8 @@ def history_visible(text, expected_messages):
 
 
 def ready(text, tid, cwd):
-    return (tid in text and cwd in text and 'Loaded' in text
-            and 'Fetching metadata' not in text and 'Loading' not in text
+    return (tid in text and cwd in text and 'Search' in text
+            and 'Fetching metadata' not in text and 'Loading' not in text and 'refreshing' not in text
             and 'Resume: Enter' in text)
 
 def verify_inventory(inventory, tid, cwd):
@@ -99,7 +99,7 @@ def return_to_browser(terminal):
     # Ctrl-C can clear residual composer input before it arms Codex's exit
     # confirmation. Require a fresh, recognized redraw between interrupts.
     start = len(terminal.output)
-    returned = lambda: b'\x1b[1;1Htracr' in terminal.output[start:]
+    returned = lambda: b'\x1b[1;1HSearch' in terminal.output[start:]
     cleared = False
     for _ in range(2):
         mark = len(terminal.output)
@@ -213,7 +213,7 @@ def run_case(binary, codex, home, mode):
             blocker = startup_blocker(raw)
             if blocker:
                 raise Blocked(blocker)
-            assert b'\x1b[1;1Htracr' not in terminal.output[handoff:], 'Codex exited before acceptance'
+            assert b'\x1b[1;1HSearch' not in terminal.output[handoff:], 'Codex exited before acceptance'
             return history_visible(text, fixture['expected_messages']) and os.tcgetpgrp(terminal.master) != terminal.child.pid
         terminal.wait(started, timeout=30)
         passed(phase, foreground_group=os.tcgetpgrp(terminal.master))
@@ -237,7 +237,7 @@ def run_case(binary, codex, home, mode):
         def refreshed():
             nonlocal observed_loading
             text = terminal.text()
-            observed_loading |= len(terminal.output) > before_refresh and 'Loading' in text
+            observed_loading |= len(terminal.output) > before_refresh and 'refreshing' in text
             return observed_loading and ready(text, tid, cwd)
         terminal.wait(refreshed)
         terminal.finish()

@@ -43,7 +43,7 @@ for scenario in ['changed', 'cancel', 'missing', 'direct', 'launch']:
                 terminal.wait(lambda: (home/'launch.json').exists())
                 assert json.loads((home/'launch.json').read_text())['cwd'] == str(home/'changed')
                 terminal.send(b'x')
-                terminal.wait(lambda: b'\x1b[1;1Htracr' in terminal.output)
+                terminal.wait(lambda: b'\x1b[1;1HSearch' in terminal.output)
             elif scenario == 'cancel':
                 terminal.expect('Preparing resume')
                 terminal.send(b'\x1b')

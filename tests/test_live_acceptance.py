@@ -26,9 +26,9 @@ class AcceptanceTests(unittest.TestCase):
                 assert data == b'\x03'
             def wait(self, predicate):
                 assert predicate(), 'unrecognized interrupt response'
-        for replies in ([b'Ask Codex to do anything', b'Press Ctrl-C again', b'\x1b[1;1Htracr'],
-                        [b'Press Ctrl-C again', b'\x1b[1;1Htracr'],
-                        [b'\x1b[1;1Htracr']):
+        for replies in ([b'Ask Codex to do anything', b'Press Ctrl-C again', b'\x1b[1;1HSearch'],
+                        [b'Press Ctrl-C again', b'\x1b[1;1HSearch'],
+                        [b'\x1b[1;1HSearch']):
             terminal = ExitTerminal(replies)
             live.return_to_browser(terminal)
             self.assertEqual(terminal.sent, len(replies))
@@ -143,7 +143,7 @@ class AcceptanceTests(unittest.TestCase):
                 live.verify_inventory({'complete':True, 'sessions':[{**row, **mutation}]}, 'abc', '/tmp/project')
 
     def test_readiness_and_stale_output(self):
-        good = 'Loaded ID: abc Folder: /project Resume: Enter'
+        good = 'Search: ID: abc Folder: /project Resume: Enter'
         self.assertTrue(live.ready(good, 'abc', '/project'))
         self.assertFalse(live.ready(good+' Fetching metadata', 'abc', '/project'))
         terminal = live.Terminal.__new__(live.Terminal)
@@ -183,7 +183,7 @@ class SimulatedFlowTests(unittest.TestCase):
             executable = Path(temp)/'codex'
             executable.write_bytes(b'fake executable fingerprint')
             cwd = str(home/'old')
-            browser = f'Loaded ID: abc Folder: {cwd} Resume: Enter > ▸ old (1)'
+            browser = f'Search: ID: abc Folder: {cwd} Resume: Enter > ▸ old (1)'
             class FakeTerminal:
                 def __init__(self, *args):
                     self.output = bytearray(browser.encode())
@@ -206,10 +206,10 @@ class SimulatedFlowTests(unittest.TestCase):
                         self.output.extend(f' Session: {identity} Directory: {directory}'.encode())
                     elif data == b'\x03':
                         self.interrupts += 1
-                        self.output.extend(b' Press Ctrl-C again' if self.interrupts == 1 else b'\x1b[1;1Htracr')
+                        self.output.extend(b' Press Ctrl-C again' if self.interrupts == 1 else b'\x1b[1;1HSearch')
                     elif data == b'r':
-                        self.output.extend(b'Loading')
-                        self.state = 'Loading'
+                        self.output.extend(b'refreshing')
+                        self.state = 'refreshing'
                         self.refreshing = True
                 def wait(self, predicate, timeout=15):
                     if predicate(): return
