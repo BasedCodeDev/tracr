@@ -1,0 +1,25 @@
+[package]
+name = "tracr"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Browse coding-agent sessions by folder"
+license = "MIT"
+repository = "https://github.com/BasedCodeDev/tracr"
+
+[dependencies]
+clap = { version = "=4.5.32", features = ["derive"] }
+serde = { version = "=1.0.219", features = ["derive"] }
+serde_json = "=1.0.140"
+toml = { version = "=0.8.20", default-features = false, features = ["parse"] }
+thiserror = "=2.0.12"
+dirs = "=6.0.0"
+tokio = { version = "=1.44.1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "signal"] }
+
+ratatui = "=0.29.0"
+crossterm = "=0.28.1"
+signal-hook = "=0.3.18"
+libc = "=0.2.191"
+
+[dev-dependencies]
+tempfile = "=3.19.1"

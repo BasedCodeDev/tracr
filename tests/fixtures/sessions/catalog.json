@@ -1,0 +1,93 @@
+{
+  "page_size": 2,
+  "sessions": [
+    {
+      "key": {
+        "provider": "codex",
+        "source_id": "home-a",
+        "native_id": "same-id"
+      },
+      "title": "Build tracr",
+      "cwd": "../../..",
+      "created_at": 100,
+      "updated_at": 200,
+      "archived": false,
+      "source_kind": "cli",
+      "git": {
+        "branch": "main",
+        "origin_url": null,
+        "commit": null
+      }
+    },
+    {
+      "key": {
+        "provider": "codex",
+        "source_id": "home-a",
+        "native_id": "api"
+      },
+      "title": "API work",
+      "cwd": "project/packages/api",
+      "created_at": 100,
+      "updated_at": 200,
+      "archived": false,
+      "source_kind": null,
+      "git": null
+    },
+    {
+      "key": {
+        "provider": "codex",
+        "source_id": "home-a",
+        "native_id": "missing"
+      },
+      "title": "Missing folder",
+      "cwd": "does-not-exist",
+      "created_at": 100,
+      "updated_at": 202,
+      "archived": false,
+      "source_kind": "cli",
+      "git": null
+    },
+    {
+      "key": {
+        "provider": "codex",
+        "source_id": "home-a",
+        "native_id": "archive"
+      },
+      "title": "Archived task",
+      "cwd": "project",
+      "created_at": 100,
+      "updated_at": 203,
+      "archived": true,
+      "source_kind": null,
+      "git": null
+    },
+    {
+      "key": {
+        "provider": "codex",
+        "source_id": "home-b",
+        "native_id": "same-id"
+      },
+      "title": "Unicode caf\u00e9 \ud83e\udd80",
+      "cwd": "other/project",
+      "created_at": 100,
+      "updated_at": 204,
+      "archived": false,
+      "source_kind": "cli",
+      "git": null
+    },
+    {
+      "key": {
+        "provider": "codex",
+        "source_id": "home-b",
+        "native_id": "unknown"
+      },
+      "title": "No folder recorded",
+      "cwd": null,
+      "created_at": 100,
+      "updated_at": 205,
+      "archived": false,
+      "source_kind": null,
+      "git": null
+    }
+  ]
+}

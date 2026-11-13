@@ -1,0 +1,215 @@
+# tracr
+
+tracr is a Linux terminal application for browsing Codex sessions by folder,
+searching metadata globally, and resuming work in the same terminal. Browsing and
+resume pass automated checks and isolated real-Codex acceptance with Codex 0.167.2.
+Session relocation is not yet supported.
+
+## Install the preview
+
+Release tooling targets Linux x86_64 and ARM64 using static musl binaries. The
+first release is being prepared; assets are usable once a release is published at
+[GitHub Releases](https://github.com/BasedCodeDev/tracr/releases).
+
+Download `tracr-linux-x86_64` or `tracr-linux-aarch64`, plus `SHA256SUMS`,
+`LICENSE`, and `THIRD_PARTY_NOTICES.txt` from the same release. For x86_64:
+
+```sh
+# In the download directory; select exactly the checksum for this binary.
+grep '  tracr-linux-x86_64$' SHA256SUMS > selected-checksum.txt
+test "$(wc -l < selected-checksum.txt)" -eq 1
+sha256sum -c selected-checksum.txt
+mkdir -p ~/.local/bin
+install -m 755 tracr-linux-x86_64 ~/.local/bin/tracr
+~/.local/bin/tracr --version
+```
+
+For ARM64 replace `x86_64` with `aarch64`. Ensure `~/.local/bin` is on PATH.
+Install Codex separately, then run `tracr`, `tracr .`, or `tracr ~/Work/project`.
+Upgrade by repeating the checksum and install steps with a newer release; remove
+`~/.local/bin/tracr` to uninstall. Neither operation deletes Codex sessions.
+macOS and Windows are planned. See [release instructions](docs/releasing.md) for
+build prerequisites, draft releases, and current publication status.
+
+Source installation is also supported with the pinned Rust toolchain:
+`cargo install --path . --locked` (installs to Cargo's bin directory).
+
+## Build and run
+
+For the shortest build-and-run workflow:
+
+```sh
+./scripts/dev.sh                  # Build and browse live Codex sessions
+./scripts/dev.sh .                # Build and browse the current folder
+./scripts/dev.sh list --json      # Build and print the live inventory
+```
+
+The script works from any directory, finds rustup in the Cargo bin directory,
+uses the pinned toolchain when installed (otherwise installed stable), generates
+`Cargo.lock` on the first run, and builds with `--locked` before launching.
+Application paths resolve relative to the directory you launch the script from. Set `TRACR_TOOLCHAIN` to
+override toolchain selection. The first build needs crates.io connectivity.
+Use `./scripts/dev.sh --help` for script options or `./scripts/dev.sh -- --help`
+for the application's help.
+
+Install Rust using your preferred method, including the toolchain pinned in
+`rust-toolchain.toml` (1.99.1, with rustfmt and Clippy). Then run:
+
+```sh
+cargo build --locked
+cargo run --locked -- browse --fixture tests/fixtures/sessions/catalog.json
+cargo run --locked -- list --fixture tests/fixtures/sessions/catalog.json --include-archived --json
+cargo run --locked -- list --json
+cargo run --locked
+```
+
+Rust 1.99.1, Cargo, rustfmt, and Clippy are installed in the development
+machine's `~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin` directory.
+The shell does not currently include `~/.cargo/bin` on PATH. Load
+`~/.cargo/env` in your shell to expose rustup and Cargo. If rustup requests the
+pinned toolchain despite the identical version being installed as `stable`,
+`cargo +stable` selects that installed toolchain explicitly.
+
+The application builds with the checked-in `Cargo.lock`. Formatting, all-target
+Clippy, and the full Rust suite pass after fetching the test dependencies.
+The suite caught a fixture/live-source argument conflict, now fixed for either
+option ordering. Real Codex interactive acceptance passes in a normal terminal for both history formats; see [validation status](docs/validation.md).
+
+## Configuration
+
+Optional configuration is read from `$XDG_CONFIG_HOME/tracr/config.toml`, falling
+back to `~/.config/tracr/config.toml`. Override with `--config PATH`.
+
+```toml
+codex_homes = ["/home/me/.codex", "../other-codex-home"]
+```
+
+Repeated `--codex-home PATH` options replace configured homes. Otherwise configured
+homes take precedence over `CODEX_HOME`, which takes precedence over `~/.codex`.
+Relative CLI and environment paths use the invocation directory; relative paths
+in the TOML file use its parent directory. Paths are normalized lexically and do
+not need to exist. Symlink aliases remain distinct sources. A missing default
+configuration is allowed; invalid TOML and missing explicitly named files fail.
+XDG directory variables must be absolute; relative values use standard fallbacks.
+
+Use `--codex-bin /absolute/path/to/codex` to override the executable found on PATH.
+Relative executable paths containing directory components resolve against the
+invocation directory. Each configured home has its own app-server process.
+
+Fixture mode rejects explicit `--codex-home` options. Configuration is still
+validated, but no live provider is instantiated. tracr resolves state/cache paths
+without creating directories. tracr issues metadata-only requests. Codex may maintain its own indexes during
+discovery; this is not a byte-for-byte immutable filesystem operation.
+
+## Fixture format
+
+A fixture is a JSON object with `sessions`, optional `page_size` (default 100),
+and optional zero-based `fail_at_page` to simulate partial discovery failure.
+See `tests/fixtures/sessions/catalog.json` for the session schema. Relative `cwd`
+paths resolve against the fixture directory. These metadata fixtures are separate
+from the milestone 1 history-storage fixtures.
+
+Output defaults to non-archived sessions, newest activity first with session
+identity as the tie-breaker. JSON contains `sessions`, `complete`, and `error`;
+each session includes a `folder_status`. Live and fixture listings also include
+per-source diagnostics in `sources`. Text output escapes terminal controls.
+On a later-page error the command retains accumulated results and exits with 1.
+Invalid arguments exit with 2; configuration/provider errors exit with 1.
+
+## Terminal browsing
+
+`tracr` and `tracr browse` launch the terminal interface. Use
+`tracr browse --fixture tests/fixtures/sessions/catalog.json` for synthetic data.
+A terminal is required on stdin and stdout; use `tracr list` in pipelines.
+
+Use `tracr .`, `tracr ~/Work/Seb.SysAdmin`, or `tracr browse PATH` to select a
+folder and its subfolders immediately. The session pane starts focused: choose a
+session and press Enter to resume. No path still opens All sessions. You can
+navigate to other folders or search globally; clearing search restores the folder.
+
+Relative paths use the caller's current directory. Missing directories can still
+be browsed; existing files are rejected. Paths are matched lexically, without
+resolving symlink aliases. Use `tracr ./list` for a folder named `list`, and
+`tracr -- -folder` for a path beginning with a dash. Archives remain hidden until
+you toggle them. The `list` command does not accept a folder argument.
+
+The dev script builds inside the repository and launches from your caller directory,
+so relative fixture and configuration arguments also resolve there.
+
+
+The folder, session, and details panes show partial results while loading.
+Terminals narrower than 100 columns show the focused pane full-width.
+
+- Arrows or `j/k`: navigate; Tab / Shift-Tab: switch panes.
+- Left / Right: collapse or expand a folder; Enter: toggle a folder or resume a session.
+- `/`: edit global search; Enter or Escape: finish editing; Escape again: clear.
+- `a`: include archived sessions; `r`: refresh; `?`: help.
+- `q` or Ctrl-C: quit. While editing search, `q` is text.
+
+Search requires every whitespace-separated term to match some metadata field:
+title, native ID, path, provider, or Git branch. It ignores the selected folder
+while a query is active. Clearing the query restores folder filtering.
+
+Missing directories appear under Unlinked folders. Permission errors remain
+inaccessible rather than unlinked. Folder matching includes descendants using
+path components. Archive visibility affects folder counts and search.
+
+Refresh retains old results while new pages load; failed sources remain visibly
+incomplete. A successful refresh removes records no longer listed by that source.
+Details are fetched separately after that source finishes discovery. When Codex
+lists one folder but reads another, the details pane shows both without silently
+regrouping the session. Timestamps currently display as Unix seconds.
+
+Live discovery explicitly includes non-interactive and subagent source kinds
+exposed by the tested Codex protocol, and pages active/archived inventories.
+Backend-hidden attached threads are not separately traversed. Requests time out
+after 20 seconds; quitting shuts down only app servers owned by tracr.
+Press Enter in the session or details pane to resume an active Codex session in
+this terminal. tracr checks fresh metadata and the working directory before launch.
+If the destination changed since it was displayed, review it and press Enter again.
+Escape cancels preparation. Archived sessions and fixtures remain browse-only.
+
+Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
+Exiting Codex returns to tracr, preserving filters and selection and refreshing metadata.
+Ctrl-C belongs to Codex while it is running; SIGTERM to tracr terminates the owned
+child process group, with a five-second grace period. Relinking remains unavailable.
+
+Resume PTY checks (no real sessions or inference):
+
+```sh
+python tests/fixtures/app-server/resume_check.py target/debug/tracr
+```
+
+
+## Checks
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+python -m unittest discover -s tests -v
+```
+
+Rust integration tests include a Python fake app server, a 20-second RPC timeout
+case, and pseudo-terminal checks for quit, Ctrl-C, and SIGTERM restoration. They
+require Python 3 on PATH. Layout tests cover normal, narrow, and tiny terminals.
+The pseudo-terminal helper has passed against the compiled binary. The full Rust suite and normal-terminal real-Codex acceptance pass. Release musl
+artifacts require their own verification; broader terminal/version coverage remains
+release work.
+
+## Relocation investigation
+
+Codex relocation remains unavailable. Codex CLI 0.167.2 can persist a new working
+directory for reads and resume while still listing the old directory. See
+[the compatibility report](docs/codex-relocation-compatibility.md),
+[the evidence](docs/codex-relocation-evidence.json), and [the project plan](PLAN.md).
+
+The follow-up [relinking investigation](docs/codex-relinking-investigation.md) tests six strategies against installed Codex; production relocation remains unavailable.
+
+## One-command verification
+
+Run `./scripts/check.sh --offline` for cached-dependency checks, or
+`./scripts/check.sh` to allow locked dependency fetching. Add
+`--codex /absolute/path/to/codex` for isolated real-Codex acceptance without inference.
+The verifier reports passed, failed, and blocked stages and retains logs. See
+[validation status](docs/validation.md) for current blockers and coverage.

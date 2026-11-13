@@ -1,0 +1,144 @@
+{
+  "report_version": 1,
+  "standard_checks": [
+    {
+      "stage": "format",
+      "status": "passed"
+    },
+    {
+      "stage": "build",
+      "status": "passed"
+    },
+    {
+      "stage": "clippy",
+      "status": "passed"
+    },
+    {
+      "stage": "rust-tests",
+      "status": "passed"
+    },
+    {
+      "stage": "python-tests",
+      "status": "passed"
+    },
+    {
+      "stage": "terminal_check",
+      "status": "passed"
+    },
+    {
+      "stage": "folder_check",
+      "status": "passed"
+    },
+    {
+      "stage": "resume_check",
+      "status": "passed"
+    },
+    {
+      "stage": "edge_check",
+      "status": "passed"
+    },
+    {
+      "stage": "browse_check",
+      "status": "passed"
+    },
+    {
+      "stage": "real-codex",
+      "status": "passed"
+    }
+  ],
+  "live_cases": [
+    {
+      "mode": "legacy",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "fixture",
+          "status": "passed"
+        },
+        {
+          "phase": "inventory",
+          "status": "passed"
+        },
+        {
+          "phase": "browser-ready",
+          "status": "passed"
+        },
+        {
+          "phase": "startup",
+          "status": "passed",
+          "foreground_group": 249225
+        },
+        {
+          "phase": "session-and-directory",
+          "status": "passed"
+        },
+        {
+          "phase": "return-to-browser",
+          "status": "passed"
+        },
+        {
+          "phase": "daemon-cleanup",
+          "status": "passed",
+          "observed_pids": [
+            249339,
+            249436
+          ],
+          "updater_terminated": 249436,
+          "shutdown_seconds": 0.0016720919993531425
+        }
+      ],
+      "version": "codex-cli 0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b",
+      "session_id": "01a1cfe4-cdb1-7633-896b-c99850c29702",
+      "expected_directory": "/tmp/tracr-real-check-o_s9hsx8/legacy/old"
+    },
+    {
+      "mode": "paginated",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "fixture",
+          "status": "passed"
+        },
+        {
+          "phase": "inventory",
+          "status": "passed"
+        },
+        {
+          "phase": "browser-ready",
+          "status": "passed"
+        },
+        {
+          "phase": "startup",
+          "status": "passed",
+          "foreground_group": 250250
+        },
+        {
+          "phase": "session-and-directory",
+          "status": "passed"
+        },
+        {
+          "phase": "return-to-browser",
+          "status": "passed"
+        },
+        {
+          "phase": "daemon-cleanup",
+          "status": "passed",
+          "observed_pids": [
+            250363,
+            250460
+          ],
+          "updater_terminated": 250460,
+          "shutdown_seconds": 0.0016095920000225306
+        }
+      ],
+      "version": "codex-cli 0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b",
+      "session_id": "01a1cfe4-d58b-7851-aaeb-21af89c37aff",
+      "expected_directory": "/tmp/tracr-real-check-o_s9hsx8/paginated/old"
+    }
+  ],
+  "check_logs": "/tmp/tracr-check-0m6z4957",
+  "live_evidence": "/tmp/tracr-real-check-o_s9hsx8",
+  "scope": "Normal-terminal run with Codex 0.167.2; synthetic isolated legacy and paginated histories. All requested stages and live phases passed. Relocation remains unsupported."
+}

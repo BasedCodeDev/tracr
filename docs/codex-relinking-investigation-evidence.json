@@ -1,0 +1,671 @@
+{
+  "report_version": 2,
+  "production_relocation_enabled": false,
+  "untested": [
+    "two clients on shared server",
+    "batch interruption",
+    "nested group and unrelated controls",
+    "guarded reversal conflict",
+    "multi-root project",
+    "workspace-write roots and trust"
+  ],
+  "version": "codex-cli 0.167.2",
+  "executable": "/home/seb/.local/share/mise/installs/codex/0.167.2/bin/codex",
+  "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b",
+  "schema_sha256": "9dbd50b16a268b864e54f0e91d2d7a34f3cc9da4e0314f6fb588d5f87850b111",
+  "cases": [
+    {
+      "strategy": "resume",
+      "repeat": 0,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-0-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-0-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-0-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-0-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume",
+      "repeat": 0,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-0-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-0-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-0-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-0-paginated-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume",
+      "repeat": 1,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-1-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-1-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-1-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-1-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume",
+      "repeat": 1,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-1-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-1-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-1-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-1-paginated-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "settings",
+      "repeat": 0,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-0-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-0-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-0-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-0-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "settings",
+      "repeat": 0,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-0-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-0-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-0-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-0-paginated-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "settings",
+      "repeat": 1,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-1-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-1-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-1-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-1-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "settings",
+      "repeat": 1,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-1-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-1-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-1-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-1-paginated-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "settings-unloaded",
+      "repeat": 0,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "error": "thread/settings/update: {'code': -32600, 'message': 'thread not found: 01a1cfb0-2560-7353-a995-b11d5f5c7e98'}",
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-unloaded-0-legacy-ordinary/old",
+        "read_after": null,
+        "listed_after": null,
+        "resume_after": null
+      }
+    },
+    {
+      "strategy": "settings-unloaded",
+      "repeat": 0,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "error": "thread/settings/update: {'code': -32600, 'message': 'thread not found: 01a1cfb0-265a-7161-94da-2e3c9f7752cd'}",
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-unloaded-0-paginated-ordinary/old",
+        "read_after": null,
+        "listed_after": null,
+        "resume_after": null
+      }
+    },
+    {
+      "strategy": "settings-unloaded",
+      "repeat": 1,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "error": "thread/settings/update: {'code': -32600, 'message': 'thread not found: 01a1cfb0-27a0-7063-a89d-363f762f4f22'}",
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-unloaded-1-legacy-ordinary/old",
+        "read_after": null,
+        "listed_after": null,
+        "resume_after": null
+      }
+    },
+    {
+      "strategy": "settings-unloaded",
+      "repeat": 1,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "error": "thread/settings/update: {'code': -32600, 'message': 'thread not found: 01a1cfb0-289e-7941-a5db-e566555f9d26'}",
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/settings-unloaded-1-paginated-ordinary/old",
+        "read_after": null,
+        "listed_after": null,
+        "resume_after": null
+      }
+    },
+    {
+      "strategy": "resume-roots",
+      "repeat": 0,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-0-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-0-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-0-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-0-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume-roots",
+      "repeat": 0,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-0-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-0-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-0-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-0-paginated-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume-roots",
+      "repeat": 1,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-1-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-1-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-1-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-1-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume-roots",
+      "repeat": 1,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-1-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-1-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-1-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-roots-1-paginated-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume-unsubscribe",
+      "repeat": 0,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-0-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-0-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-0-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-0-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume-unsubscribe",
+      "repeat": 0,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-0-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-0-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-0-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-0-paginated-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume-unsubscribe",
+      "repeat": 1,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-1-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-1-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-1-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-1-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "resume-unsubscribe",
+      "repeat": 1,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-1-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-1-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-1-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/resume-unsubscribe-1-paginated-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "project-resume",
+      "repeat": 0,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-0-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-0-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-0-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-0-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "project-resume",
+      "repeat": 0,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-0-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-0-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-0-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-0-paginated-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "project-resume",
+      "repeat": 1,
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-1-legacy-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-1-legacy-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-1-legacy-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-1-legacy-ordinary/new folder"
+      }
+    },
+    {
+      "strategy": "project-resume",
+      "repeat": 1,
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "archive_state_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "directories": {
+        "before": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-1-paginated-ordinary/old",
+        "read_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-1-paginated-ordinary/new folder",
+        "listed_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-1-paginated-ordinary/old",
+        "resume_after": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa/project-resume-1-paginated-ordinary/new folder"
+      }
+    }
+  ],
+  "strategy_verdicts": {
+    "resume": "fail",
+    "settings": "fail",
+    "settings-unloaded": "fail",
+    "resume-roots": "fail",
+    "resume-unsubscribe": "fail",
+    "project-resume": "fail"
+  },
+  "schema_fields": {
+    "ThreadResumeParams": [
+      "approvalPolicy",
+      "approvalsReviewer",
+      "baseInstructions",
+      "config",
+      "cwd",
+      "developerInstructions",
+      "excludeTurns",
+      "history",
+      "initialTurnsPage",
+      "model",
+      "modelProvider",
+      "path",
+      "permissions",
+      "personality",
+      "runtimeWorkspaceRoots",
+      "sandbox",
+      "serviceTier",
+      "threadId"
+    ],
+    "ThreadSettingsUpdateParams": [
+      "approvalPolicy",
+      "approvalsReviewer",
+      "collaborationMode",
+      "cwd",
+      "disabledPluginIds",
+      "effort",
+      "model",
+      "multiAgentMode",
+      "permissions",
+      "personality",
+      "sandboxPolicy",
+      "serviceTier",
+      "summary",
+      "threadId"
+    ],
+    "ThreadMetadataUpdateParams": [
+      "daybreakEnabled",
+      "gitInfo",
+      "projectId",
+      "threadId"
+    ],
+    "ThreadUnsubscribeParams": [
+      "threadId"
+    ],
+    "ProjectUpdateParams": [
+      "metadata",
+      "name",
+      "projectId",
+      "roots"
+    ]
+  },
+  "requested": {
+    "strategies": [
+      "resume",
+      "settings",
+      "settings-unloaded",
+      "resume-roots",
+      "resume-unsubscribe",
+      "project-resume"
+    ],
+    "scenarios": [
+      "ordinary",
+      "missing-old"
+    ],
+    "repeat": 2
+  },
+  "skipped_scenarios": [
+    {
+      "strategy": "resume",
+      "scenario": "missing-old",
+      "reason": "basic persistence gate did not pass"
+    },
+    {
+      "strategy": "settings",
+      "scenario": "missing-old",
+      "reason": "basic persistence gate did not pass"
+    },
+    {
+      "strategy": "settings-unloaded",
+      "scenario": "missing-old",
+      "reason": "basic persistence gate did not pass"
+    },
+    {
+      "strategy": "resume-roots",
+      "scenario": "missing-old",
+      "reason": "basic persistence gate did not pass"
+    },
+    {
+      "strategy": "resume-unsubscribe",
+      "scenario": "missing-old",
+      "reason": "basic persistence gate did not pass"
+    },
+    {
+      "strategy": "project-resume",
+      "scenario": "missing-old",
+      "reason": "basic persistence gate did not pass"
+    }
+  ],
+  "coverage_note": "Basic gates are not production approval. Extended coverage remains explicitly untested.",
+  "evidence_directory": "/tmp/tracr-relink-investigation/tracr-probe-qvdkiypa",
+  "installed_aliases": {
+    "0": "/home/seb/.local/share/mise/installs/codex/0.167.2/bin/codex",
+    "0.167": "/home/seb/.local/share/mise/installs/codex/0.167.2/bin/codex",
+    "0.167.2": "/home/seb/.local/share/mise/installs/codex/0.167.2/bin/codex",
+    "global": "/home/seb/.local/share/mise/installs/codex/0.167.2/bin/codex",
+    "latest": "/home/seb/.local/share/mise/installs/codex/0.167.2/bin/codex"
+  }
+}

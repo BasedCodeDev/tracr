@@ -1,0 +1,4 @@
+[
+  {"type":"message","role":"user","content":[{"type":"input_text","text":"Remember the synthetic project at OLD_PATH/file.txt."}]},
+  {"type":"message","role":"assistant","content":[{"type":"output_text","text":"The synthetic project is at OLD_PATH/file.txt."}]}
+]

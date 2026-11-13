@@ -1,0 +1,632 @@
+{
+  "production_relocation_enabled": false,
+  "untested": [
+    "two clients on shared server",
+    "batch interruption",
+    "nested group",
+    "guarded reversal conflict",
+    "multi-root project"
+  ],
+  "version": "codex-cli 0.167.2",
+  "executable": "/home/seb/.local/share/mise/installs/codex/0.167.2/bin/codex",
+  "schema_sha256": "9dbd50b16a268b864e54f0e91d2d7a34f3cc9da4e0314f6fb588d5f87850b111",
+  "raw_evidence_directory": "/tmp/tracr-evidence/tracr-probe-8cvvvkad",
+  "cases": [
+    {
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-ordinary/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-ordinary/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-ordinary/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-ordinary/old"
+      ]
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "missing-old",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-missing-old/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-missing-old/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-missing-old/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-missing-old/old"
+      ]
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "archived",
+      "outcome": "fail",
+      "error": "thread/resume: {'code': -32600, 'message': 'session 01a1cf09-ac6a-7062-93aa-c5a9d08bb528 is archived. Run `codex unarchive 01a1cf09-ac6a-7062-93aa-c5a9d08bb528` to unarchive it first.'}",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-archived/old"
+      },
+      "listing_directories": []
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "archive-cycle",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true,
+        "archive_restored": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-archive-cycle/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-archive-cycle/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-archive-cycle/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-archive-cycle/old"
+      ]
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "project",
+      "outcome": "fail",
+      "cwd_after_project_only": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-project/old",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-project/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-project/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-project/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-project/old"
+      ],
+      "project_after_restart": {
+        "project": {
+          "id": "01a1cf09-b000-7f30-94fb-bc4731e7fab4",
+          "name": "Fixture",
+          "roots": [
+            {
+              "path": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-project/new folder"
+            }
+          ],
+          "metadata": {},
+          "position": 0,
+          "createdAt": 1794474881,
+          "updatedAt": 1794474881,
+          "recencyAt": 1794474880
+        }
+      }
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "loaded",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": false,
+        "resume_cwd": false,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "loaded_session_excluded": false,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-loaded/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-loaded/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-loaded/old"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-loaded/old"
+      ]
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "independent-server",
+      "outcome": "fail",
+      "error": "thread/resume: {'code': -32600, 'message': 'thread 01a1cf09-b33e-72d0-ba98-4ac5c7b82dc9 already has an active writer'}",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-legacy-independent-server/old"
+      },
+      "listing_directories": []
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-ordinary/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-ordinary/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-ordinary/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-ordinary/old"
+      ]
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "missing-old",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-missing-old/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-missing-old/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-missing-old/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-missing-old/old"
+      ]
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "archived",
+      "outcome": "fail",
+      "error": "thread/resume: {'code': -32600, 'message': 'session 01a1cf09-b90e-7cf3-899b-ad3516d146ee is archived. Run `codex unarchive 01a1cf09-b90e-7cf3-899b-ad3516d146ee` to unarchive it first.'}",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-archived/old"
+      },
+      "listing_directories": []
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "archive-cycle",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true,
+        "archive_restored": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-archive-cycle/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-archive-cycle/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-archive-cycle/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-archive-cycle/old"
+      ]
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "project",
+      "outcome": "fail",
+      "cwd_after_project_only": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-project/old",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-project/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-project/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-project/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-project/old"
+      ],
+      "project_after_restart": {
+        "project": {
+          "id": "01a1cf09-bd90-7442-a85a-cae3278c44f9",
+          "name": "Fixture",
+          "roots": [
+            {
+              "path": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-project/new folder"
+            }
+          ],
+          "metadata": {},
+          "position": 0,
+          "createdAt": 1794474884,
+          "updatedAt": 1794474884,
+          "recencyAt": 1794474884
+        }
+      }
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "loaded",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": false,
+        "resume_cwd": false,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "loaded_session_excluded": false,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-loaded/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-loaded/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-loaded/old"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-loaded/old"
+      ]
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "independent-server",
+      "outcome": "fail",
+      "error": "thread/resume: {'code': -32600, 'message': 'thread 01a1cf09-c11a-76c1-9a7f-cf24df49016a already has an active writer'}",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/0-paginated-independent-server/old"
+      },
+      "listing_directories": []
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-ordinary/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-ordinary/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-ordinary/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-ordinary/old"
+      ]
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "missing-old",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-missing-old/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-missing-old/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-missing-old/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-missing-old/old"
+      ]
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "archived",
+      "outcome": "fail",
+      "error": "thread/resume: {'code': -32600, 'message': 'session 01a1cf09-c697-76d3-9318-540ccae53f6c is archived. Run `codex unarchive 01a1cf09-c697-76d3-9318-540ccae53f6c` to unarchive it first.'}",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-archived/old"
+      },
+      "listing_directories": []
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "archive-cycle",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true,
+        "archive_restored": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-archive-cycle/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-archive-cycle/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-archive-cycle/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-archive-cycle/old"
+      ]
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "project",
+      "outcome": "fail",
+      "cwd_after_project_only": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-project/old",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-project/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-project/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-project/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-project/old"
+      ],
+      "project_after_restart": {
+        "project": {
+          "id": "01a1cf09-ca39-7c73-88b3-58660ef28c69",
+          "name": "Fixture",
+          "roots": [
+            {
+              "path": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-project/new folder"
+            }
+          ],
+          "metadata": {},
+          "position": 0,
+          "createdAt": 1794474887,
+          "updatedAt": 1794474887,
+          "recencyAt": 1794474887
+        }
+      }
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "loaded",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": false,
+        "resume_cwd": false,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "loaded_session_excluded": false,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-loaded/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-loaded/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-loaded/old"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-loaded/old"
+      ]
+    },
+    {
+      "history_mode": "legacy",
+      "scenario": "independent-server",
+      "outcome": "fail",
+      "error": "thread/resume: {'code': -32600, 'message': 'thread 01a1cf09-cd64-76e1-941b-1b23fc3aa10d already has an active writer'}",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-legacy-independent-server/old"
+      },
+      "listing_directories": []
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "ordinary",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-ordinary/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-ordinary/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-ordinary/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-ordinary/old"
+      ]
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "missing-old",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-missing-old/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-missing-old/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-missing-old/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-missing-old/old"
+      ]
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "archived",
+      "outcome": "fail",
+      "error": "thread/resume: {'code': -32600, 'message': 'session 01a1cf09-d32e-7701-a419-3381fb709fa4 is archived. Run `codex unarchive 01a1cf09-d32e-7701-a419-3381fb709fa4` to unarchive it first.'}",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-archived/old"
+      },
+      "listing_directories": []
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "archive-cycle",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true,
+        "archive_restored": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-archive-cycle/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-archive-cycle/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-archive-cycle/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-archive-cycle/old"
+      ]
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "project",
+      "outcome": "fail",
+      "cwd_after_project_only": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-project/old",
+      "checks": {
+        "read_cwd": true,
+        "resume_cwd": true,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-project/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-project/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-project/new folder"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-project/old"
+      ],
+      "project_after_restart": {
+        "project": {
+          "id": "01a1cf09-d7c3-7372-86ad-6b32333f663d",
+          "name": "Fixture",
+          "roots": [
+            {
+              "path": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-project/new folder"
+            }
+          ],
+          "metadata": {},
+          "position": 0,
+          "createdAt": 1794474891,
+          "updatedAt": 1794474891,
+          "recencyAt": 1794474890
+        }
+      }
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "loaded",
+      "outcome": "fail",
+      "checks": {
+        "read_cwd": false,
+        "resume_cwd": false,
+        "listing_cwd": false,
+        "history_preserved": true,
+        "identity_preserved": true,
+        "config_preserved": true,
+        "metadata_preserved": true,
+        "loaded_session_excluded": false,
+        "reversal_persisted": true
+      },
+      "reverse_after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-loaded/old",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-loaded/old",
+        "after_restart": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-loaded/old"
+      },
+      "listing_directories": [
+        "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-loaded/old"
+      ]
+    },
+    {
+      "history_mode": "paginated",
+      "scenario": "independent-server",
+      "outcome": "fail",
+      "error": "thread/resume: {'code': -32600, 'message': 'thread 01a1cf09-db5f-75b2-8564-8a7be2d8e27d already has an active writer'}",
+      "directories": {
+        "baseline": "/tmp/tracr-evidence/tracr-probe-8cvvvkad/1-paginated-independent-server/old"
+      },
+      "listing_directories": []
+    }
+  ]
+}
