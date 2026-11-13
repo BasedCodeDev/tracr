@@ -153,8 +153,8 @@ Invalid arguments exit with 2; configuration/provider errors exit with 1.
 A terminal is required on stdin and stdout; use `tracr list` in pipelines.
 
 Use `tracr .`, `tracr ~/Work/Seb.SysAdmin`, or `tracr browse PATH` to select a
-folder and its subfolders immediately. The session pane starts focused: choose a
-session and press Enter to resume. No path still opens All sessions. You can
+folder immediately, showing only sessions recorded directly there. The session
+pane starts focused: choose a session and press Enter to resume. No path still opens All sessions. You can
 navigate to other folders or search globally; clearing search restores the folder.
 
 Relative paths use the caller's current directory. Missing directories can still
@@ -181,8 +181,8 @@ title, native ID, path, provider, or Git branch. It ignores the selected folder
 while a query is active. Clearing the query restores folder filtering.
 
 Missing directories appear under Unlinked folders. Permission errors remain
-inaccessible rather than unlinked. Folder matching includes descendants using
-path components. Archive visibility affects folder counts and search.
+inaccessible rather than unlinked. Folder matching uses exact paths; select a child
+folder to see its sessions. Archive visibility affects folder counts and search.
 
 Refresh retains old results while new pages load; failed sources remain visibly
 incomplete. A successful refresh removes records no longer listed by that source.

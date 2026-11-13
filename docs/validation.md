@@ -226,3 +226,18 @@ The prerelease is now public. The README's curl-to-sh installer succeeded agains
 its public assets in a fresh temporary home, and the installed binary matched the
 release asset. The local Python suite still passes all 38 tests. ARM64 real-Codex
 acceptance remains unverified; relocation remains unsupported.
+
+## Exact-folder session filtering (unreleased)
+
+Folder selection now uses exact working-directory equality for both session lists
+and folder counts. Child folders remain navigable; global search still spans all
+folders and clearing search restores the direct-folder filter. CLI help and the
+TUI label describe the new behavior. Regression checks cover child/sibling
+exclusion, child selection, empty parents, archived direct sessions, counts, and
+empty refreshes. Folder-launch PTY checks reject child sessions, and browse/resume
+checks use the new “this folder only” label.
+
+The full standard runner passed in `/tmp/tracr-check-6opt5d6a`; the expanded archive
+count regression also passed separately. This is a source change after v0.1.0;
+that published release and existing installations retain their original behavior
+until upgraded to a later build.

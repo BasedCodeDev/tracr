@@ -294,7 +294,7 @@ impl Browser {
                 .as_ref()
                 .is_some_and(|p| self.folders.get(p) == Some(&FolderStatus::Unlinked)),
             FolderFilter::Unknown => session.cwd.as_ref().is_none_or(|p| !p.is_absolute()),
-            FolderFilter::Path(path) => session.cwd.as_ref().is_some_and(|p| p.starts_with(path)),
+            FolderFilter::Path(path) => session.cwd.as_ref().is_some_and(|p| p == path),
         }
     }
     pub fn folder_rows(&self) -> Vec<FolderRow> {

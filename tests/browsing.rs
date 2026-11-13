@@ -78,7 +78,7 @@ async fn refresh_preserves_selection_and_ignores_old_generations() {
     assert!(browser.selected.is_none());
 }
 #[tokio::test]
-async fn folder_matching_uses_components_and_unlinked_excludes_permission_errors() {
+async fn folder_matching_is_exact_and_unlinked_excludes_permission_errors() {
     let mut browser = loaded().await;
     let mut records = browser.all();
     records.truncate(2);
@@ -97,6 +97,8 @@ async fn folder_matching_uses_components_and_unlinked_excludes_permission_errors
         error: None,
     });
     browser.folder = FolderFilter::Path("/work/app".into());
+    assert!(browser.visible().is_empty());
+    browser.open_folder("/work/app/src".into());
     assert_eq!(browser.visible().len(), 1);
     browser
         .folders
@@ -382,18 +384,19 @@ async fn enter_respects_focus_search_and_pending_preparation() {
 }
 
 #[tokio::test]
-async fn initial_folder_includes_descendants_and_survives_empty_refresh() {
+async fn initial_folder_shows_direct_sessions_and_survives_empty_refresh() {
     let mut browser = loaded().await;
     let mut sessions = browser.all();
-    sessions.truncate(3);
+    sessions.truncate(4);
     for (session, path) in
         sessions
             .iter_mut()
-            .zip(["/work/app", "/work/app/src", "/work/app-other"])
+            .zip(["/work/app", "/work/app/src", "/work/app-other", "/work/app"])
     {
         session.cwd = Some(path.into());
         session.archived = false;
     }
+    sessions[3].archived = true;
     browser.open_folder("/work/app".into());
     browser.begin_refresh();
     browser.apply(Update::Page {
@@ -407,7 +410,7 @@ async fn initial_folder_includes_descendants_and_survives_empty_refresh() {
         source: 0,
         error: None,
     });
-    assert_eq!(browser.visible().len(), 2);
+    assert_eq!(browser.visible().len(), 1);
     assert!(
         browser
             .folder_rows()
@@ -415,10 +418,65 @@ async fn initial_folder_includes_descendants_and_survives_empty_refresh() {
             .any(|row| row.filter == browser.folder)
     );
     assert!(browser.expanded.contains(std::path::Path::new("/work")));
+    assert_eq!(
+        browser.visible()[0].cwd.as_deref(),
+        Some(std::path::Path::new("/work/app"))
+    );
+    assert_eq!(
+        browser
+            .folder_rows()
+            .iter()
+            .find(|row| row.filter == browser.folder)
+            .unwrap()
+            .count,
+        1
+    );
+    browser.include_archived = true;
+    assert_eq!(browser.visible().len(), 2);
+    assert!(
+        browser
+            .visible()
+            .iter()
+            .all(|s| s.cwd.as_deref() == Some(std::path::Path::new("/work/app")))
+    );
+    assert_eq!(
+        browser
+            .folder_rows()
+            .iter()
+            .find(|row| row.filter == browser.folder)
+            .unwrap()
+            .count,
+        2
+    );
+    browser.include_archived = false;
+    browser.open_folder("/work/app/src".into());
+    assert_eq!(browser.visible().len(), 1);
+    assert_eq!(
+        browser.visible()[0].cwd.as_deref(),
+        Some(std::path::Path::new("/work/app/src"))
+    );
+    browser.open_folder("/work".into());
+    assert!(browser.visible().is_empty());
+    assert_eq!(
+        browser
+            .folder_rows()
+            .iter()
+            .find(|row| row.filter == browser.folder)
+            .unwrap()
+            .count,
+        0
+    );
+    browser.open_folder("/work/app".into());
+    browser.query = "app/src".into();
+    assert_eq!(browser.visible().len(), 1);
+    assert_eq!(
+        browser.visible()[0].cwd.as_deref(),
+        Some(std::path::Path::new("/work/app/src"))
+    );
     browser.query = "app-other".into();
     assert_eq!(browser.visible().len(), 1);
     browser.query.clear();
-    assert_eq!(browser.visible().len(), 2);
+    assert_eq!(browser.visible().len(), 1);
     browser.begin_refresh();
     browser.apply(Update::Finished {
         generation: browser.generation,

@@ -221,7 +221,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 "Global search".to_owned()
             } else if let FolderFilter::Path(path) = &browser.folder {
                 format!(
-                    "{} (including subfolders)",
+                    "{} (this folder only)",
                     safe_text(&path.display().to_string())
                 )
             } else {

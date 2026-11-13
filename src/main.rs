@@ -14,7 +14,7 @@ use tracr::{
     subcommand_precedence_over_arg = true
 )]
 struct Cli {
-    /// Open this folder and its descendants.
+    /// Open sessions recorded directly in this folder.
     #[arg(value_name = "PATH", value_parser = clap::builder::OsStringValueParser::new().try_map(parse_folder))]
     path: Option<PathBuf>,
     #[arg(long, global = true)]

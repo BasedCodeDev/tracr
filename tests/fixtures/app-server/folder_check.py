@@ -46,13 +46,14 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-') as tmp:
         output = bytearray()
         try:
             deadline = time.monotonic() + 20
-            marker = b'CHILDMATCH' if path == '.' else b'matching'
+            marker = b'DIRECTMATCH' if path == '.' else b'matching'
             while marker not in output:
                 assert child.poll() is None, bytes(output[-1500:])
                 assert time.monotonic() < deadline, bytes(output[-1500:])
                 if select.select([master], [], [], .1)[0]:
                     output.extend(os.read(master, 65536))
             assert b'SIBLINGEXCLUDED' not in output
+            assert b'CHILDMATCH' not in output
             if path == '.':
                 assert b'DIRECTMATCH' in output
             # Enter on fixtures must display the browse-only reason, proving session focus.
