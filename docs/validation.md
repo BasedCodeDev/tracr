@@ -311,3 +311,17 @@ PTY test (`/tmp/tracr-check-usinkszu`). Real Codex 0.167.2 acceptance passed leg
 resume, paginated resume, and empty-folder creation with directory confirmation,
 terminal return, and daemon cleanup (`/tmp/tracr-real-check-sn6l7b3u`). All live
 checks used disposable homes and submitted no model prompts.
+
+## Interactive actions and shortcuts menu (unreleased)
+
+`?` opens a centered, grouped action menu with shortcut labels and selectable
+commands. Up/Down or j/k selects, Enter dispatches through the same command
+handlers as browser shortcuts, and Esc/? closes without changing browser state.
+Unavailable commands explain why they cannot run. The selected row scrolls into
+view, with PageUp/PageDown, Home/End, narrow layouts, and resize support.
+Queued input is drained after activation to prevent Enter from immediately
+accepting a newly opened dialog or resuming the underlying selected session.
+
+The full offline check suite passed (`/tmp/tracr-check-2dka2cdh`), including
+new Rust coverage for menu selection/cancellation, command routing and small
+layouts, and a PTY check for disabled actions, resize, search, resume and quit.

@@ -9,8 +9,11 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    text::{Line, Span},
+    widgets::{
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarState, Wrap,
+    },
 };
 use std::{
     io::{self, IsTerminal},
@@ -24,6 +27,8 @@ pub struct View {
     pub search_query: String,
     pub search_selected: Option<crate::domain::SessionKey>,
     pub help: bool,
+    pub help_selected: usize,
+    pub help_page_size: usize,
     pub details_scroll: u16,
     pub message: Option<String>,
     pub preparing: bool,
@@ -186,16 +191,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         layout[1],
     );
     if view.help {
-        let width = area.width.saturating_sub(2).min(76);
-        let height = area.height.saturating_sub(2).min(24);
-        let popup = Rect::new(
-            area.x + (area.width - width) / 2,
-            area.y + (area.height - height) / 2,
-            width,
-            height,
-        );
-        frame.render_widget(Clear, popup);
-        frame.render_widget(Paragraph::new("Up / Down or j,k: navigate\nLeft / Right or Tab / Shift-Tab: switch panes\nEnter: toggle folder, resume session, or create in an empty folder\n/: search modal; type to filter, Up/Down select\nEnter in search: open folder and select session (not resume)\na: toggle archived sessions\nr: refresh\nEsc: previous pane (close help or cancel preparation)\nCtrl-U in search: clear query\nq / Ctrl-C: quit (q inserts text in search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Esc closes search without changing the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
+        draw_help(frame, browser, view);
     }
     if let Some(selected) = view.source_picker {
         let popup = Rect::new(
@@ -225,6 +221,259 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         draw_search(frame, browser, view);
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Command {
+    PreviousPane,
+    NextPane,
+    PreviousItem,
+    NextItem,
+    ToggleFolder,
+    Resume,
+    Create,
+    Archives,
+    Search,
+    Refresh,
+    Quit,
+}
+struct MenuEntry {
+    command: Command,
+    section: &'static str,
+    shortcut: &'static str,
+    label: &'static str,
+}
+fn menu_entries(include_archived: bool) -> Vec<MenuEntry> {
+    use Command::*;
+    [
+        (
+            PreviousPane,
+            "Navigation",
+            "← / Shift-Tab / Esc",
+            "Previous pane",
+        ),
+        (NextPane, "Navigation", "→ / Tab", "Next pane"),
+        (
+            PreviousItem,
+            "Navigation",
+            "↑ / k",
+            "Previous item / scroll up",
+        ),
+        (NextItem, "Navigation", "↓ / j", "Next item / scroll down"),
+        (
+            ToggleFolder,
+            "Sessions",
+            "Enter (Folders)",
+            "Expand / collapse folder",
+        ),
+        (
+            Resume,
+            "Sessions",
+            "Enter (Sessions)",
+            "Resume selected session",
+        ),
+        (
+            Create,
+            "Sessions",
+            "Enter (empty folder)",
+            "Create new session",
+        ),
+        (
+            Archives,
+            "Sessions",
+            "a",
+            if include_archived {
+                "Hide archived sessions"
+            } else {
+                "Show archived sessions"
+            },
+        ),
+        (Search, "Search", "/", "Search all sessions"),
+        (Refresh, "General", "r", "Refresh sessions"),
+        (Quit, "General", "q / Ctrl-C", "Quit tracr"),
+    ]
+    .into_iter()
+    .map(|(command, section, shortcut, label)| MenuEntry {
+        command,
+        section,
+        shortcut,
+        label,
+    })
+    .collect()
+}
+fn unavailable(command: Command, browser: &Browser) -> Option<String> {
+    match command {
+        Command::ToggleFolder if !matches!(browser.folder, FolderFilter::Path(_)) => {
+            Some("Select a concrete folder first.".into())
+        }
+        Command::Create => {
+            if browser.loading() {
+                Some("Wait for discovery to finish.".into())
+            } else if creation_sources(browser).is_empty() {
+                Some("Fixture data is browse-only.".into())
+            } else if !matches!(browser.folder, FolderFilter::Path(_)) {
+                Some("Select a concrete folder first.".into())
+            } else if !browser.visible().is_empty() {
+                Some("Creation is available when no sessions are shown.".into())
+            } else {
+                None
+            }
+        }
+        Command::Resume => {
+            let session = browser
+                .visible()
+                .into_iter()
+                .find(|s| Some(&s.key) == browser.selected.as_ref());
+            let Some(session) = session else {
+                return Some("Select a session first.".into());
+            };
+            if creation_sources(browser).is_empty() {
+                return Some("Fixture data is browse-only.".into());
+            }
+            if let Some(reason) = crate::domain::resume_blocker(&session) {
+                return Some(reason.into());
+            }
+            match browser.details.get(&session.key) {
+                Some(Ok(Some(detail))) => crate::domain::resume_blocker(detail).map(str::to_owned),
+                Some(Ok(None)) => Some("Session no longer available; refresh the list.".into()),
+                Some(Err(error)) => Some(error.clone()),
+                None => None,
+            }
+        }
+        _ => None,
+    }
+}
+fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
+    let area = frame.area();
+    let width = area.width.saturating_sub(2).min(76);
+    let height = area.height.saturating_sub(2).min(22);
+    let popup = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(Clear, popup);
+    let border = block("Actions & shortcuts", true);
+    let inner = border.inner(popup);
+    frame.render_widget(border, popup);
+    if inner.width < 26 || inner.height < 6 {
+        frame.render_widget(
+            Paragraph::new("Enlarge terminal. Esc closes.").wrap(Wrap { trim: false }),
+            inner,
+        );
+        return;
+    }
+    let inner = Rect::new(
+        inner.x + 1,
+        inner.y,
+        inner.width.saturating_sub(2),
+        inner.height,
+    );
+    let sections = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(2),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+    let entries = menu_entries(browser.include_archived);
+    let selected = view.help_selected.min(entries.len() - 1);
+    let mut items = Vec::new();
+    let mut last_section = "";
+    let mut selected_row = 0;
+    for (i, entry) in entries.iter().enumerate() {
+        if entry.section != last_section {
+            items.push(ListItem::new(Line::styled(
+                entry.section,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            last_section = entry.section;
+        }
+        if i == selected {
+            selected_row = items.len();
+        }
+        let disabled = unavailable(entry.command, browser).is_some();
+        let style = if disabled {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default()
+        };
+        let lines = if sections[0].width >= 52 {
+            vec![Line::from(vec![
+                Span::styled(
+                    format!("{:<22}", entry.shortcut),
+                    style.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(entry.label, style),
+            ])]
+        } else {
+            let mut lines = vec![Line::styled(
+                entry.shortcut,
+                style.add_modifier(Modifier::BOLD),
+            )];
+            let mut line = String::new();
+            for word in entry.label.split_whitespace() {
+                if !line.is_empty()
+                    && line.len() + 1 + word.len()
+                        > usize::from(sections[0].width.saturating_sub(3))
+                {
+                    lines.push(Line::styled(std::mem::take(&mut line), style));
+                }
+                if !line.is_empty() {
+                    line.push(' ');
+                }
+                line.push_str(word);
+            }
+            lines.push(Line::styled(line, style));
+            lines
+        };
+        items.push(ListItem::new(lines));
+    }
+    let heights: Vec<_> = items.iter().map(ListItem::height).collect();
+    let total: usize = heights.iter().sum();
+    let scrolling = total > usize::from(sections[0].height);
+    let body = Rect::new(
+        sections[0].x,
+        sections[0].y,
+        sections[0].width.saturating_sub(u16::from(scrolling)),
+        sections[0].height,
+    );
+    let mut state = ListState::default().with_selected(Some(selected_row));
+    frame.render_stateful_widget(
+        List::new(items)
+            .highlight_symbol("> ")
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED)),
+        body,
+        &mut state,
+    );
+    if scrolling {
+        let offset = heights.iter().take(state.offset()).sum();
+        frame.render_stateful_widget(
+            Scrollbar::default(),
+            sections[0],
+            &mut ScrollbarState::new(total)
+                .position(offset)
+                .viewport_content_length(usize::from(body.height)),
+        );
+    }
+    if let Some(reason) = unavailable(entries[selected].command, browser) {
+        frame.render_widget(
+            Paragraph::new(reason).wrap(Wrap { trim: false }),
+            sections[1],
+        );
+    }
+    frame.render_widget(
+        Paragraph::new(if inner.width >= 43 {
+            "↑/↓ select · Enter activate · Esc close"
+        } else if inner.width >= 32 {
+            "↑↓ select · Enter run · Esc close"
+        } else {
+            "↑↓ · Enter run · Esc close"
+        }),
+        sections[2],
+    );
+}
+
 fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     let area = frame.area();
     let width = area.width.saturating_sub(2).min(100);
@@ -551,8 +800,31 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         return Action::Continue;
     }
     if view.help {
-        if matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
-            view.help = false;
+        let entries = menu_entries(browser.include_archived);
+        view.help_selected = view.help_selected.min(entries.len() - 1);
+        let step = view.help_page_size.max(1);
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('?') => view.help = false,
+            KeyCode::Up | KeyCode::Char('k') => {
+                view.help_selected = view.help_selected.saturating_sub(1)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                view.help_selected = (view.help_selected + 1).min(entries.len() - 1)
+            }
+            KeyCode::PageUp => view.help_selected = view.help_selected.saturating_sub(step),
+            KeyCode::PageDown => {
+                view.help_selected = (view.help_selected + step).min(entries.len() - 1)
+            }
+            KeyCode::Home => view.help_selected = 0,
+            KeyCode::End => view.help_selected = entries.len() - 1,
+            KeyCode::Enter if key.kind != KeyEventKind::Repeat => {
+                let command = entries[view.help_selected].command;
+                if unavailable(command, browser).is_none() {
+                    view.help = false;
+                    return execute_command(command, browser, view);
+                }
+            }
+            _ => {}
         }
         return Action::Continue;
     }
@@ -608,23 +880,48 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
-    match key.code {
-        KeyCode::Char('q') => return Action::Quit,
-        KeyCode::Char('?') => view.help = true,
-        KeyCode::Char('/') => {
+    let command = match key.code {
+        KeyCode::Char('?') => {
+            view.help = true;
+            view.help_selected = menu_entries(browser.include_archived)
+                .iter()
+                .position(|entry| unavailable(entry.command, browser).is_none())
+                .unwrap_or(0);
+            return Action::Continue;
+        }
+        KeyCode::Char('q') => Command::Quit,
+        KeyCode::Char('/') => Command::Search,
+        KeyCode::Char('r') => Command::Refresh,
+        KeyCode::Char('a') => Command::Archives,
+        KeyCode::Tab | KeyCode::Right => Command::NextPane,
+        KeyCode::BackTab | KeyCode::Left | KeyCode::Esc => Command::PreviousPane,
+        KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
+        KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
+        KeyCode::Enter if view.focus == 0 => Command::ToggleFolder,
+        KeyCode::Enter if view.focus == 1 && can_create(browser) => Command::Create,
+        KeyCode::Enter => Command::Resume,
+        _ => return Action::Continue,
+    };
+    execute_command(command, browser, view)
+}
+
+fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> Action {
+    match command {
+        Command::Quit => return Action::Quit,
+        Command::Search => {
             view.editing = true;
             view.search_query.clear();
             view.search_selected = None;
         }
-        KeyCode::Char('r') => return Action::Refresh,
-        KeyCode::Char('a') => browser.include_archived = !browser.include_archived,
-        KeyCode::Tab | KeyCode::Right => view.focus = (view.focus + 1) % 3,
-        KeyCode::BackTab | KeyCode::Left | KeyCode::Esc => {
+        Command::Refresh => return Action::Refresh,
+        Command::Archives => browser.include_archived = !browser.include_archived,
+        Command::NextPane => view.focus = (view.focus + 1) % 3,
+        Command::PreviousPane => {
             view.focus = (view.focus + 2) % 3;
             view.message = None;
         }
-        KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
-            let delta = if matches!(key.code, KeyCode::Up | KeyCode::Char('k')) {
+        Command::PreviousItem | Command::NextItem => {
+            let delta = if command == Command::PreviousItem {
                 -1
             } else {
                 1
@@ -647,25 +944,22 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 _ => view.details_scroll = view.details_scroll.saturating_add_signed(delta as i16),
             }
         }
-        KeyCode::Enter if view.focus == 0 => {
+        Command::ToggleFolder => {
             if let FolderFilter::Path(path) = &browser.folder {
-                let expand = !browser.expanded.contains(path);
-                if expand {
+                if !browser.expanded.remove(path) {
                     browser.expanded.insert(path.clone());
-                } else {
-                    browser.expanded.remove(path);
                 }
             }
         }
-        KeyCode::Enter if view.focus == 1 && can_create(browser) => {
+        Command::Create => {
+            view.focus = 1;
             let sources = creation_sources(browser);
             if sources.len() == 1 {
                 return Action::CreateNew(sources[0]);
             }
             view.source_picker = Some(0);
         }
-        KeyCode::Enter => return Action::ResumeSelected,
-        _ => {}
+        Command::Resume => return Action::ResumeSelected,
     }
     if view.focus != 2 {
         view.details_scroll = 0;
@@ -804,10 +1098,23 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
             }
+            let size = terminal.size()?;
+            view.help_page_size =
+                usize::from(size.height.saturating_sub(2).min(22).saturating_sub(7))
+                    / if size.width < 58 { 2 } else { 1 };
             terminal.draw(|frame| draw(frame, &browser, &view))?;
             if event::poll(Duration::from_millis(40))? {
                 if let Event::Key(key) = event::read()? {
-                    match handle_key(&mut browser, &mut view, key) {
+                    let was_help = view.help;
+                    let action = handle_key(&mut browser, &mut view, key);
+                    if was_help && !view.help && key.code == KeyCode::Enter {
+                        // An activation must not also accept a newly opened modal or
+                        // resume the underlying session through queued Enter repeats.
+                        while event::poll(Duration::ZERO)? {
+                            let _ = event::read()?;
+                        }
+                    }
+                    match action {
                         Action::Quit => break,
                         Action::Refresh => {
                             view.message = None;

@@ -774,3 +774,92 @@ fn empty_folder_creation_picker_and_validation() {
         Action::ResumeSelected
     );
 }
+
+#[tokio::test]
+async fn action_menu_navigates_cancels_and_dispatches_without_changing_context() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use tracr::tui::{Action, View, handle_key};
+    let mut browser = loaded().await;
+    let mut view = View {
+        focus: 1,
+        help_page_size: 4,
+        ..View::default()
+    };
+    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+    let selected = browser.selected.clone();
+    handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
+    handle_key(&mut browser, &mut view, key(KeyCode::PageDown));
+    assert_eq!(view.help_selected, 4);
+    handle_key(&mut browser, &mut view, key(KeyCode::Down));
+    assert_eq!(view.help_selected, 5); // Resume is disabled for fixtures.
+    assert_eq!(
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+        Action::Continue
+    );
+    assert!(view.help);
+    assert_eq!(browser.selected, selected);
+    assert_eq!(view.focus, 1);
+    handle_key(&mut browser, &mut view, key(KeyCode::Esc));
+    assert!(!view.help);
+    assert_eq!(view.focus, 1);
+    handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
+    assert_eq!(view.help_selected, 0);
+    handle_key(&mut browser, &mut view, key(KeyCode::Down));
+    handle_key(&mut browser, &mut view, key(KeyCode::Enter));
+    assert!(!view.help);
+    assert_eq!(view.focus, 2); // Next pane.
+    handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
+    handle_key(&mut browser, &mut view, key(KeyCode::End));
+    handle_key(&mut browser, &mut view, key(KeyCode::Up));
+    assert_eq!(
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+        Action::Refresh
+    );
+    assert!(!view.help);
+    handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
+    handle_key(&mut browser, &mut view, key(KeyCode::End));
+    for _ in 0..2 {
+        handle_key(&mut browser, &mut view, key(KeyCode::Up));
+    }
+    handle_key(&mut browser, &mut view, key(KeyCode::Enter));
+    assert!(view.editing);
+    assert!(!view.help);
+    assert_eq!(browser.selected, selected);
+}
+
+#[tokio::test]
+async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
+    use ratatui::{Terminal, backend::TestBackend};
+    use tracr::tui::{View, draw};
+    let browser = loaded().await;
+    for (width, height) in [(140, 40), (60, 20), (36, 15), (12, 4)] {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        let mut view = View {
+            help: true,
+            help_selected: 10,
+            ..View::default()
+        };
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        if width >= 36 {
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(text.contains("Quit tracr"), "{width}x{height}");
+            assert!(text.contains("Esc close"));
+            view.help_selected = 0;
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(text.contains("Previous pane"));
+        }
+    }
+}

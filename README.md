@@ -189,7 +189,11 @@ Terminals narrower than 100 columns show the focused pane full-width.
   archive toggle.
 - Escape outside the modal moves to the previous pane, closes help, or cancels
   pending resume preparation.
-- `a`: include archived sessions; `r`: refresh; `?`: help.
+- `a`: include archived sessions; `r`: refresh.
+- `?`: open the grouped action menu. Up/Down or `j/k` selects a command; Enter
+  closes the menu and runs it. Unavailable commands show a reason and remain
+  disabled. Esc or `?` closes without changing the browser. PageUp/PageDown and
+  Home/End navigate longer menus; the selection scrolls into view automatically.
 - `q` or Ctrl-C: quit. While editing search, `q` is text.
 
 Search requires every whitespace-separated term to match some metadata field:
