@@ -310,13 +310,6 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
         }
         1 => {
             let sessions = browser.visible();
-            let scope = if !browser.query.is_empty() {
-                Some("Global search".to_owned())
-            } else if matches!(browser.folder, FolderFilter::Path(_)) {
-                None
-            } else {
-                Some("Sessions · activity in Unix seconds".to_owned())
-            };
             if sessions.is_empty() {
                 let message = if browser.loading() {
                     "Loading sessions…"
@@ -334,26 +327,13 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                     message.to_owned()
                 };
                 frame.render_widget(
-                    Paragraph::new(match &scope {
-                        Some(scope) => format!("{scope}\n\n{message}"),
-                        None => message.to_owned(),
-                    })
-                    .wrap(Wrap { trim: false })
-                    .block(block("Sessions", view.focus == 1)),
+                    Paragraph::new(message)
+                        .wrap(Wrap { trim: false })
+                        .block(block("Sessions", view.focus == 1)),
                     area,
                 );
                 return;
             }
-            let area = if let Some(scope) = scope {
-                let panes = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(3), Constraint::Min(1)])
-                    .split(area);
-                frame.render_widget(Paragraph::new(scope).wrap(Wrap { trim: false }), panes[0]);
-                panes[1]
-            } else {
-                area
-            };
             let items: Vec<_> = sessions
                 .iter()
                 .map(|s| {
