@@ -114,15 +114,17 @@ part of this slice.
 
 ## Publishing setup status
 
-GitHub authentication for BasedCodeDev was verified outside the managed sandbox.
-That check confirmed this project had no Git repository; the empty read-only
-`.git` seen inside the sandbox was an isolation artifact. A new `main` repository
-has now been initialized from the reviewed project source.
+The public repository and HTTPS Git authentication are configured. The v0.1.0
+prerelease is published with both Linux musl assets. Both native build jobs,
+downloaded-asset verification, and x86_64 real-Codex acceptance passed. See
+[release evidence](release-0.1.0-evidence.json). ARM64 real-Codex acceptance is not
+claimed.
 
-Local musl targets and musl-gcc were absent at the last packaging attempt. Native
-artifact builds, hosted CI, and the first draft must pass before declaring
-release distribution complete. A public source push does not publish a binary
-release.
+The first draft job exposed a missing prerequisite: its folder tests also run
+`dev.sh` offline. The corrected workflow builds the development binary with locked
+dependencies before that check. It was dispatched from main for the unchanged
+v0.1.0 source tag; no tag was moved. The final x86_64 asset matches the tested
+binary byte-for-byte.
 
 ## One-command installer
 

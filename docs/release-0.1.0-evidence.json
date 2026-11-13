@@ -1,0 +1,105 @@
+{
+  "version": "0.1.0",
+  "target": "x86_64-unknown-linux-musl",
+  "binary_sha256": "e01ac20dd493e0c5edba173c20b26bcb22a0c8394356e2e544326b67888d0923",
+  "source_commit": "61d84e8",
+  "build_run": "https://github.com/BasedCodeDev/tracr/actions/runs/43428748001",
+  "live_cases": [
+    {
+      "mode": "legacy",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "fixture",
+          "status": "passed"
+        },
+        {
+          "phase": "inventory",
+          "status": "passed"
+        },
+        {
+          "phase": "browser-ready",
+          "status": "passed"
+        },
+        {
+          "phase": "startup",
+          "status": "passed",
+          "foreground_group": 716259
+        },
+        {
+          "phase": "session-and-directory",
+          "status": "passed"
+        },
+        {
+          "phase": "return-to-browser",
+          "status": "passed"
+        },
+        {
+          "phase": "daemon-cleanup",
+          "status": "passed",
+          "observed_pids": [
+            716401,
+            716502
+          ],
+          "updater_terminated": 716502,
+          "shutdown_seconds": 0.0020793570001842454
+        }
+      ],
+      "version": "codex-cli 0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b",
+      "session_id": "01a1d4fb-27f6-7160-8b97-4772e4718d5e",
+      "expected_directory": "/tmp/tracr-real-check-yz0azvs3/legacy/old"
+    },
+    {
+      "mode": "paginated",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "fixture",
+          "status": "passed"
+        },
+        {
+          "phase": "inventory",
+          "status": "passed"
+        },
+        {
+          "phase": "browser-ready",
+          "status": "passed"
+        },
+        {
+          "phase": "startup",
+          "status": "passed",
+          "foreground_group": 717362
+        },
+        {
+          "phase": "session-and-directory",
+          "status": "passed"
+        },
+        {
+          "phase": "return-to-browser",
+          "status": "passed"
+        },
+        {
+          "phase": "daemon-cleanup",
+          "status": "passed",
+          "observed_pids": [
+            717499,
+            717600
+          ],
+          "updater_terminated": 717600,
+          "shutdown_seconds": 0.0019412780020502396
+        }
+      ],
+      "version": "codex-cli 0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b",
+      "session_id": "01a1d4fb-2fe4-7c33-b11e-42b6a5a92f42",
+      "expected_directory": "/tmp/tracr-real-check-yz0azvs3/paginated/old"
+    }
+  ],
+  "scope": "Downloaded musl release binary; isolated real-Codex 0.167.2 acceptance passed on x86_64. ARM64 real-Codex acceptance is not claimed.",
+  "release_workflow": "https://github.com/BasedCodeDev/tracr/actions/runs/43429321965",
+  "release_url": "https://github.com/BasedCodeDev/tracr/releases/tag/v0.1.0",
+  "final_asset_matches_tested_binary": true,
+  "all_final_asset_checksums": "passed",
+  "public_installer": "passed in isolated temporary home; installed binary matches verified release asset"
+}

@@ -258,12 +258,11 @@ The initial scope excludes full-text search, project-file moves, cloud synchroni
 
 ## 11. Distribution and platform backlog
 
-- [ ] **Linux preview distribution:** Public `BasedCodeDev/tracr`, MIT attribution
+- [x] **Linux preview distribution:** Public `BasedCodeDev/tracr`, MIT attribution
   to Sebastiaan Fehr (seb@actuator.digital), native x86_64/ARM64 musl artifacts,
-  checksums/notices, CI and a draft-only GitHub prerelease workflow. Implementation
-  and runbook are present; writable Git setup, authentication, native artifact
-  verification, hosted CI and the first draft still need confirmation. See
-  [release runbook](docs/releasing.md).
+  checksums/notices, CI and published v0.1.0 prerelease. Both native jobs and
+  downloaded-asset verification pass; the x86_64 release binary passes isolated
+  real-Codex acceptance. See [release evidence](docs/release-0.1.0-evidence.json).
 - [ ] **macOS support:** Audit Unix process/terminal APIs and configuration paths;
   implement required portability changes; test native Intel and Apple Silicon
   builds, terminal recovery, and real-Codex resume; add matching release assets.

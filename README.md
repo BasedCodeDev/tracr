@@ -13,9 +13,8 @@ On Linux x86_64 or ARM64:
 curl -fsSL https://raw.githubusercontent.com/BasedCodeDev/tracr/main/install.sh | sh
 ```
 
-**The first binary release is still being prepared.** This command will work once
-`v0.1.0` is published on [GitHub Releases](https://github.com/BasedCodeDev/tracr/releases).
-Until then, [install from source](#install-from-source).
+The current preview is [v0.1.0](https://github.com/BasedCodeDev/tracr/releases/tag/v0.1.0).
+You can also [install from source](#install-from-source).
 
 The installer downloads the preview binary, verifies SHA-256 checksums, and
 installs to `~/.local/bin`. No Rust or `sudo` is needed. Install Codex separately,

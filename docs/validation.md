@@ -208,3 +208,21 @@ artifact, ARM64 run, hosted workflow, or draft release has been verified here.
 The publishing preflight correctly fails on this environment's inaccessible Git
 metadata. Follow [the release runbook](releasing.md) from the writable checkout;
 GitHub CLI authentication must also be restored there.
+
+## Published v0.1.0 preview (2026-11-14)
+
+The corrected [release workflow](https://github.com/BasedCodeDev/tracr/actions/runs/43429321965)
+passed native x86_64 and ARM64 checks, static musl packaging, and downloaded-asset
+verification. The first attempt exposed the offline development-launcher test's
+missing build cache in the final job; preparing its locked debug build resolved it.
+The v0.1.0 source tag was not moved.
+
+All final draft checksums verified. The final x86_64 asset is byte-identical to the
+binary that passed real-Codex 0.167.2 acceptance for both history formats, including
+session/directory verification, return to browser, and daemon cleanup. The curated
+[release evidence](release-0.1.0-evidence.json) records its hash and results.
+
+The prerelease is now public. The README's curl-to-sh installer succeeded against
+its public assets in a fresh temporary home, and the installed binary matched the
+release asset. The local Python suite still passes all 38 tests. ARM64 real-Codex
+acceptance remains unverified; relocation remains unsupported.
