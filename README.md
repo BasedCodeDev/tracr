@@ -207,7 +207,9 @@ Refresh retains old results while new pages load; failed sources remain visibly
 incomplete. A successful refresh removes records no longer listed by that source.
 Details are fetched separately after that source finishes discovery. When Codex
 lists one folder but reads another, the details pane shows both without silently
-regrouping the session. Timestamps currently display as Unix seconds.
+regrouping the session. The Sessions pane shows how long ago each session was
+last active, ordered from newest to oldest. Exact timestamps remain available
+as Unix seconds in Details and CLI output.
 
 Live discovery explicitly includes non-interactive and subagent source kinds
 exposed by the tested Codex protocol, and pages active/archived inventories.

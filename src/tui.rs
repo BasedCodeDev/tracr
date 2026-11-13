@@ -14,7 +14,7 @@ use ratatui::{
 };
 use std::{
     io::{self, IsTerminal},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Default)]
@@ -102,6 +102,27 @@ fn block(title: &str, focused: bool) -> Block<'_> {
         } else {
             Color::DarkGray
         }))
+}
+
+fn relative_time(updated_at: i64, now: i64) -> String {
+    let elapsed = now.saturating_sub(updated_at).max(0);
+    if elapsed < 60 {
+        return "just now".into();
+    }
+    for (seconds, unit) in [
+        (31_536_000, "year"),
+        (2_592_000, "month"),
+        (604_800, "week"),
+        (86_400, "day"),
+        (3_600, "hour"),
+        (60, "minute"),
+    ] {
+        if elapsed >= seconds {
+            let count = elapsed / seconds;
+            return format!("{count} {unit}{} ago", if count == 1 { "" } else { "s" });
+        }
+    }
+    unreachable!("elapsed is at least one minute")
 }
 
 pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
@@ -310,6 +331,11 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
         }
         1 => {
             let sessions = browser.visible();
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .min(i64::MAX as u64) as i64;
             if sessions.is_empty() {
                 let message = if browser.loading() {
                     "Loading sessions…"
@@ -347,7 +373,11 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                             Style::default().add_modifier(Modifier::BOLD),
                         ),
                         Line::styled(
-                            format!("{} · {}", safe_text(&s.key.provider.0), s.updated_at),
+                            format!(
+                                "{} · {}",
+                                safe_text(&s.key.provider.0),
+                                relative_time(s.updated_at, now)
+                            ),
                             Style::default().add_modifier(Modifier::DIM),
                         ),
                         Line::default(),
