@@ -153,12 +153,13 @@ async fn layouts_render_normal_narrow_and_tiny_and_search_keys_are_text() {
         &mut view,
         KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
     );
-    assert!(!view.editing);
+    assert!(view.editing);
+    assert_eq!(view.focus, 2);
     assert_eq!(browser.query, "q");
     tracr::tui::handle_key(
         &mut browser,
         &mut view,
-        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
     );
     assert!(browser.query.is_empty());
     assert!(tracr::browser::safe_text("\x1b[31m").starts_with("\\u{1b}"));
@@ -580,4 +581,52 @@ async fn guardian_metadata_is_hidden_without_dropping_other_sessions_or_pages() 
     assert!(provider.read(&session.key).await.unwrap().is_none());
     assert!(provider.prepare_resume(session).await.is_err());
     provider.close().await;
+}
+
+#[test]
+fn escape_matches_left_navigation_but_still_closes_help_and_cancels_resume() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use tracr::tui::{Action, View, handle_key};
+    let mut browser = Browser::new(vec![]);
+    browser.query = "keep filter".into();
+    for editing in [false, true] {
+        for focus in 0..3 {
+            for code in [KeyCode::Esc, KeyCode::Left] {
+                let mut view = View {
+                    focus,
+                    editing,
+                    ..View::default()
+                };
+                assert_eq!(
+                    handle_key(
+                        &mut browser,
+                        &mut view,
+                        KeyEvent::new(code, KeyModifiers::NONE)
+                    ),
+                    Action::Continue
+                );
+                assert_eq!(view.focus, (focus + 2) % 3);
+                assert_eq!(view.editing, editing);
+                assert_eq!(browser.query, "keep filter");
+            }
+        }
+    }
+    let escape = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+    let mut view = View {
+        focus: 1,
+        help: true,
+        ..View::default()
+    };
+    assert_eq!(
+        handle_key(&mut browser, &mut view, escape),
+        Action::Continue
+    );
+    assert!(!view.help);
+    assert_eq!(view.focus, 1);
+    view.preparing = true;
+    assert_eq!(
+        handle_key(&mut browser, &mut view, escape),
+        Action::CancelResume
+    );
+    assert_eq!(view.focus, 1);
 }

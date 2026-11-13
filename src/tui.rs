@@ -187,7 +187,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             height: area.height.saturating_sub(2),
         };
         frame.render_widget(Clear, popup);
-        frame.render_widget(Paragraph::new("Up / Down or j,k: navigate\nLeft / Right or Tab / Shift-Tab: switch panes\nEnter: toggle folder or resume selected active session\n/: edit global search; arrows still navigate\nEnter: toggle folders; elsewhere finish editing\na: toggle archived sessions\nr: refresh\nEsc: close help, leave search editing, or clear search\nq / Ctrl-C: quit (q inserts text during search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Clearing search restores the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
+        frame.render_widget(Paragraph::new("Up / Down or j,k: navigate\nLeft / Right or Tab / Shift-Tab: switch panes\nEnter: toggle folder or resume selected active session\n/: edit global search; arrows still navigate\nEnter: toggle folders; elsewhere finish editing\na: toggle archived sessions\nr: refresh\nEsc: previous pane (close help or cancel preparation)\nCtrl-U: clear search\nq / Ctrl-C: quit (q inserts text during search)\n\nSearch matches all whitespace-separated terms across title, ID, folder, provider and Git branch. Clearing search restores the selected folder.\n\nDirectory mismatches show listed and resume folders separately. Active Codex sessions resume in this terminal. Archived and fixture sessions are browse-only. Relinking is not available.").block(block("Help — Esc to close",true)).wrap(Wrap {trim:false}),popup);
     }
 }
 fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, view: &View) {
@@ -409,19 +409,25 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
+        browser.query.clear();
+        browser.reconcile(0);
+        return Action::Continue;
+    }
     // Search text remains editable while navigation keys operate the focused pane.
     let navigation = matches!(
         key.code,
         KeyCode::Up
             | KeyCode::Down
             | KeyCode::Left
+            | KeyCode::Esc
             | KeyCode::Right
             | KeyCode::Tab
             | KeyCode::BackTab
     ) || (key.code == KeyCode::Enter && view.focus == 0);
     if view.editing && !navigation {
         match key.code {
-            KeyCode::Esc | KeyCode::Enter => view.editing = false,
+            KeyCode::Enter => view.editing = false,
             KeyCode::Backspace => {
                 browser.query.pop();
             }
@@ -437,15 +443,13 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('q') => return Action::Quit,
         KeyCode::Char('?') => view.help = true,
         KeyCode::Char('/') => view.editing = true,
-        KeyCode::Esc => {
-            if view.message.take().is_none() {
-                browser.query.clear();
-            }
-        }
         KeyCode::Char('r') => return Action::Refresh,
         KeyCode::Char('a') => browser.include_archived = !browser.include_archived,
         KeyCode::Tab | KeyCode::Right => view.focus = (view.focus + 1) % 3,
-        KeyCode::BackTab | KeyCode::Left => view.focus = (view.focus + 2) % 3,
+        KeyCode::BackTab | KeyCode::Left | KeyCode::Esc => {
+            view.focus = (view.focus + 2) % 3;
+            view.message = None;
+        }
         KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
             let delta = if matches!(key.code, KeyCode::Up | KeyCode::Char('k')) {
                 -1

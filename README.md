@@ -174,7 +174,9 @@ Terminals narrower than 100 columns show the focused pane full-width.
 - Enter: expand or collapse the selected folder, or resume a session.
 - `/`: edit global search; arrow keys still navigate and switch panes. Enter in
   the folder pane toggles expansion; elsewhere Enter finishes editing without
-  resuming. Escape finishes editing; Escape again clears the query.
+  resuming. Escape moves to the previous pane, like Left Arrow, including while
+  editing. Ctrl-U clears the query. Escape still closes help or cancels resume
+  preparation when those are active.
 - `a`: include archived sessions; `r`: refresh; `?`: help.
 - `q` or Ctrl-C: quit. While editing search, `q` is text.
 
