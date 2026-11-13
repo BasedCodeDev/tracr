@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use std::{
     io::{self, IsTerminal},
@@ -92,6 +92,11 @@ fn block(title: &str, focused: bool) -> Block<'_> {
     Block::default()
         .borders(Borders::ALL)
         .title(title)
+        .border_type(if focused {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        })
         .border_style(Style::default().fg(if focused {
             Color::Cyan
         } else {
