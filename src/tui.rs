@@ -8,7 +8,8 @@ use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
+    text::Line,
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use std::{
@@ -256,19 +257,21 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             let items: Vec<_> = sessions
                 .iter()
                 .map(|s| {
-                    ListItem::new(format!(
-                        "{}{}\n{} · {} · {}",
-                        if s.archived { "[archived] " } else { "" },
-                        safe_text(&s.title),
-                        safe_text(
-                            &s.cwd
-                                .as_ref()
-                                .map(|p| p.display().to_string())
-                                .unwrap_or_else(|| "unknown folder".into())
+                    ListItem::new(vec![
+                        Line::styled(
+                            format!(
+                                "{}{}",
+                                if s.archived { "[archived] " } else { "" },
+                                safe_text(&s.title),
+                            ),
+                            Style::default().add_modifier(Modifier::BOLD),
                         ),
-                        safe_text(&s.key.provider.0),
-                        s.updated_at
-                    ))
+                        Line::styled(
+                            format!("{} · {}", safe_text(&s.key.provider.0), s.updated_at),
+                            Style::default().add_modifier(Modifier::DIM),
+                        ),
+                        Line::default(),
+                    ])
                 })
                 .collect();
             let mut state = ListState::default().with_selected(
