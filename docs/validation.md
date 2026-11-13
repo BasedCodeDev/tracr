@@ -229,8 +229,8 @@ acceptance remains unverified; relocation remains unsupported.
 
 ## Exact-folder session filtering (unreleased)
 
-Folder selection now uses exact working-directory equality for both session lists
-and folder counts. Child folders remain navigable; global search still spans all
+Folder selection uses exact working-directory equality for session lists.
+Folder-tree counts include the selected directory and all its descendants. Child folders remain navigable; global search still spans all
 folders and clearing search restores the direct-folder filter. CLI help and the
 TUI label describe the new behavior. Regression checks cover child/sibling
 exclusion, child selection, empty parents, archived direct sessions, counts, and
@@ -241,3 +241,9 @@ The full standard runner passed in `/tmp/tracr-check-6opt5d6a`; the expanded arc
 count regression also passed separately. This is a source change after v0.1.0;
 that published release and existing installations retain their original behavior
 until upgraded to a later build.
+
+The folder-count follow-up preserves descendant totals independently of exact
+session filtering. Tests assert parent totals of two active/three with archives
+while showing one active/two archived-inclusive direct sessions, and a parent
+with three descendant sessions but no direct sessions. Component-based counting
+excludes similarly prefixed sibling paths.

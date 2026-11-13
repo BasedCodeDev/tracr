@@ -182,7 +182,9 @@ while a query is active. Clearing the query restores folder filtering.
 
 Missing directories appear under Unlinked folders. Permission errors remain
 inaccessible rather than unlinked. Folder matching uses exact paths; select a child
-folder to see its sessions. Archive visibility affects folder counts and search.
+folder to see its sessions. Folder-tree counts include sessions in that folder and
+all its descendants, while the session pane shows only direct matches. Archive
+visibility affects folder counts and search.
 
 Refresh retains old results while new pages load; failed sources remain visibly
 incomplete. A successful refresh removes records no longer listed by that source.

@@ -429,7 +429,7 @@ async fn initial_folder_shows_direct_sessions_and_survives_empty_refresh() {
             .find(|row| row.filter == browser.folder)
             .unwrap()
             .count,
-        1
+        2
     );
     browser.include_archived = true;
     assert_eq!(browser.visible().len(), 2);
@@ -446,7 +446,7 @@ async fn initial_folder_shows_direct_sessions_and_survives_empty_refresh() {
             .find(|row| row.filter == browser.folder)
             .unwrap()
             .count,
-        2
+        3
     );
     browser.include_archived = false;
     browser.open_folder("/work/app/src".into());
@@ -464,7 +464,7 @@ async fn initial_folder_shows_direct_sessions_and_survives_empty_refresh() {
             .find(|row| row.filter == browser.folder)
             .unwrap()
             .count,
-        0
+        3
     );
     browser.open_folder("/work/app".into());
     browser.query = "app/src".into();

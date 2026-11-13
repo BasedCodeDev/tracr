@@ -306,7 +306,13 @@ impl Browser {
         let count = |f: &FolderFilter| {
             sessions
                 .iter()
-                .filter(|s| self.matches_folder(s, f))
+                // Tree totals include descendants; the session pane uses exact matches.
+                .filter(|s| match f {
+                    FolderFilter::Path(path) => {
+                        s.cwd.as_ref().is_some_and(|cwd| cwd.starts_with(path))
+                    }
+                    _ => self.matches_folder(s, f),
+                })
                 .count()
         };
         let mut rows = vec![
