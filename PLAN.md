@@ -2,7 +2,7 @@
 
 Build **tracr**, a Rust terminal application for browsing, finding, resuming, and relinking coding-agent sessions. The first release targets Linux and Codex, with a provider interface for supporting other agents later.
 
-Status: foundation, browsing/search, resume, and validation milestones pass automated checks and normal-terminal live acceptance with Codex 0.167.2 (legacy and paginated histories). Evidence is recorded in [validation status](docs/validation.md). Relocation remains blocked by the reproducible listing/read directory mismatch; release work remains open. See [compatibility findings](docs/codex-relocation-compatibility.md).
+Status: foundation, browsing/search, resume, and validation milestones pass automated checks and normal-terminal live acceptance with Codex 0.167.2 (legacy and paginated histories). Evidence is recorded in [validation status](docs/validation.md). Native relocation persistence now passes on Codex 0.167.2 and 0.169.0 using database-only listing; single-session unlinked relocation now has native writer exclusion, durable recovery journals, and a confirmation UI; folder-group moves remain open; release work remains open. See [compatibility findings](docs/codex-relocation-compatibility.md).
 
 ## 1. Terminal interface
 
@@ -87,6 +87,13 @@ Require every destination directory to exist. tracr will not move project files 
 Preserve session identity and history. Old paths inside historical messages remain unchanged.
 
 ## 4. Persistent Codex relocation
+
+The [2026-11-15 investigation](docs/codex-native-relinking-solution.md) established
+a working native mechanism: resume/settings cwd updates plus `useStateDbOnly: true`
+listing. Default listing retains the original rollout directory. The remaining
+work is safe integration and the deferred acceptance matrix, not finding a native
+persistence operation.
+
 
 **Relinking must update Codex’s own persisted association**, not merely tracr’s display or resume arguments.
 
@@ -233,6 +240,7 @@ Run formatting checks, Clippy, automated tests, and manual terminal validation b
 - [x] **Browsing and search:** Live provider, folder/session/details TUI, global metadata search, archive filtering, and CLI listing implemented. Automated browsing checks and real-Codex inventory/browser readiness pass.
 - [x] **Resume:** Terminal handoff, fresh-directory validation, source-specific launch, cancellation, and recovery implemented. Both real history formats pass session/directory verification and return to tracr.
 - [x] **Relinking investigation:** Six supported-operation strategies tested on installed Codex 0.167.2, both history formats, twice. None passes durable listing consistency. Evidence and an unsubmitted upstream issue draft are in [investigation results](docs/codex-relinking-investigation.md). Advanced safety coverage remains deferred.
+- [x] **Native relinking recheck (0.169.0):** 32 validated disposable cases failed the consistency gate. Versioned evidence, pinned source observations, and a minimal reproduction are in [the latest investigation](docs/codex-relinking-0.169.0.md). The upstream issue remains an unsubmitted draft; production session and folder-group relinking stays gated.
 - [x] **Folder launch shortcut:** `tracr PATH` and `tracr browse PATH` select a folder with session focus and show only its direct sessions; empty folders remain navigable. Dev launcher preserves caller directory. Compiled CLI and PTY smoke checks pass; full Rust tests now pass.
 - [ ] **Relinking:** Implement previews, validation, journals, execution, verification, and recovery.
 - [x] **Validation increment:** Unified runner, Rust/all-target checks, Python tests, and expanded PTY checks pass, including real Codex acceptance.
@@ -286,3 +294,124 @@ compatibility, relinking implementation, and full-release criteria open.
 - [x] Add isolated state, navigation, command preparation, and PTY creation coverage.
 
 Creation currently supports Codex. Provider-owned preparation returns a shared process-launch description, leaving room for other agents without introducing a plugin system. Publishing a new release remains separate.
+
+
+### Single-session relinking increment (2026-11-15)
+
+- Implemented database-first discovery with reconciled default-only sessions.
+- Implemented unlinked-session input/preview/confirmation, native settings update,
+  archive restoration, current-directory navigation, and journal recovery.
+- Eligibility is limited to verified versions, history formats, ordinary read-only
+  or trusted single-root workspace-write settings, and exclusive native writer access.
+- Folder-group moves, custom/multi-root permissions, and project-root updates remain
+  deferred. See [validation and testing](docs/relinking-validation.md).
+
+### Relink destination picker increment (2026-11-15)
+
+- Added an inline filesystem tree using the Folders tab's shared row labels.
+- Arrow selection fills the editable path; typed paths reveal matching folders.
+- Enter expands/collapses tree rows; the path field and Use this folder button
+  lead to the existing separate preview and confirmation.
+- Directory reads run in background workers with stale results discarded.
+- Covered partial paths, hidden/empty directories, Unicode editing, symlink cycles,
+  startup expansion, cancellation, and the complete relink flow.
+
+### Relink failure reporting increment (2026-11-15)
+
+- Added persistent, scrollable error dialogs with explicit unchanged/recovery outcomes.
+- Permission-profile restrictions now explain tracr's compatibility limitation in plain language.
+- Enter/Esc dismisses errors without retrying; recovery requires the existing R action.
+- Added typed failure categories and optional journal failure details; rejected attempts
+  are distinct from completed moves, with legacy journals still readable.
+- Added disposable terminal coverage for permission rejection and post-change failure,
+  plus narrow rendering, scrolling, dismissal, and journal compatibility checks.
+
+### Copy relink messages increment (2026-11-15)
+
+- Added c Copy message to persistent relink error dialogs, with visible copy status.
+- Copies the full report independent of width and scroll, preserving paragraph breaks.
+- Uses asynchronous native Wayland/X11 clipboard utilities with stdin, no shell,
+  and a three-second timeout; dismissal cancels pending work.
+- Added fake clipboard, backend selection, failure/timeout, repeated-key, dismissal,
+  and terminal resize/scroll coverage.
+
+### Permission-profile investigation increment (2026-11-15)
+
+- Added a disposable native profile probe and 88 versioned observations covering
+  Codex 0.167.2/0.169.0, both history formats, built-in/custom profiles, missing
+  directories, extra roots, config changes, destination layers, archives, and writers.
+- Established the native missing-child-to-parent :workspace recipe; identified
+  custom-profile fallback, restart-only changes, transient deny rules, and native
+  missing-directory failures.
+- Documented complete-policy resolution gaps, preview/consent behavior, snapshot
+  comparisons, journaling, recovery, and compatibility gates in
+  [the investigation and implementation specification](docs/codex-profile-relinking.md).
+- Production eligibility is unchanged; built-in/custom support is a subsequent increment.
+
+### Built-in permission-profile relinking (2026-11-15)
+
+- Enabled :workspace and :read-only in production on Codex 0.167.2/0.169.0,
+  retaining canonical sandbox checks and one-root limits.
+- Added bounded metadata-only profile provenance checks before preview and writer
+  acquisition, preventing custom-profile fallback from bypassing eligibility.
+- Added preview labels, versioned journal validation, strict live/restart comparisons,
+  and legacy journal recovery compatibility.
+- Added production-service acceptance for both formats/versions, child-to-parent
+  moves, archive restoration, writer exclusion, stale previews, and guarded recovery.
+- Custom profiles and reviewed permission changes remain follow-up work. See
+  [validation](docs/builtin-profile-relinking-validation.md).
+
+### Relink sessions whose original folder still exists (2026-11-15)
+
+- Relink session now accepts available or missing original folders; inaccessible
+  and unknown paths remain rejected.
+- The existing picker and confirmation move only the selected session. Files and
+  other sessions remain in place. Same-folder and symlink-equivalent targets are
+  rejected before native mutation.
+- Original-folder recreation alone no longer invalidates a preview; session
+  identity, directory, settings, archive state, destination, and writer checks remain.
+- Tested child, parent, and unrelated destinations, recovery, cancellation, file
+  preservation, and unrelated-session preservation using disposable Codex homes.
+- Next increment: a separate Folders command to move an actual directory and all
+  descendant sessions, with relative paths preserved and batch recovery designed
+  before implementation.
+
+
+### Same-filesystem folder moves (2026-11-15)
+
+- Added a separate Move folder action (`m` in Folders), shared parent picker,
+  editable name, affected-session preview, progress, and guarded `R` recovery.
+- Coordinated all configured sources and archived/descendant sessions, holding
+  native writers before a no-overwrite directory rename. Single-session and
+  batch operations share a coordination lock.
+- Added versioned private batch journals with filesystem identities, saved
+  settings and archive-restoration progress. Recovery finishes forward and
+  refuses conflicting paths, inventories, settings, and source configurations.
+- Added fake-provider failure/partial-update tests, terminal UX acceptance, and
+  disposable real-Codex tests for both formats and supported versions, including
+  competing writers and interruption after rename.
+- Cross-filesystem copying and externally moved folder repair remain deferred.
+
+
+### Shared copyable error dialogs (2026-11-15)
+
+- Extracted a reusable error-dialog component with wrapping, bounded scrolling,
+  copy feedback, keyboard handling, and cancellation of pending copy tasks.
+- Both session relinking and folder moves now supply operation-specific reports
+  to the same dialog. Folder failures include paths, known session counts, full
+  blocker details, and accurate recovery instructions.
+- Input validation remains inline; failed preview checks and execution use the
+  shared modal. Existing clipboard adapters and relocation semantics are unchanged.
+
+### Release detached idle sessions before moving (2026-11-15)
+
+- Confirmed relinks, folder moves and recovery share a bounded operational release
+  step; previews permit idle sessions and monitoring remains passive.
+- Detached idle runtimes use Codex's transient zero-delay resume/unsubscribe path.
+  Attached, active, uncertain, archived-loaded and background-terminal cases remain
+  protected with copyable explanations. Persistent defaults are unchanged.
+- Native writer acquisition remains required after release; all folder writers
+  are acquired before files move. Existing journals and recovery stay authoritative.
+- Added progress, updated status guidance, cancellation/proxy cleanup tests,
+  terminal acceptance, and a `real-release` check stage. Twenty native cases passed
+  on Codex 0.167.2/0.169.0; see `docs/idle-release-validation.md` and its evidence.

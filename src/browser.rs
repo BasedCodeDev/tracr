@@ -138,6 +138,7 @@ impl Update {
 pub struct SourceState {
     pub live: BTreeMap<SessionKey, RuntimeStatus>,
     pub live_error: Option<String>,
+    pub live_checked: bool,
     committed: BTreeMap<SessionKey, SessionSummary>,
     staging: BTreeMap<SessionKey, SessionSummary>,
     pub loading: bool,
@@ -216,6 +217,7 @@ impl Browser {
             // Preserve partial first-load observations through a cancelled refresh.
             source.committed.append(&mut source.staging);
             source.live.clear();
+            source.live_checked = false;
             source.live_error = None;
             source.loading = true;
             source.error = None;
@@ -264,11 +266,21 @@ impl Browser {
             .collect()
     }
     pub fn runtime_status(&self, key: &SessionKey) -> RuntimeStatus {
-        self.sources
-            .iter()
-            .find_map(|s| s.live.get(key))
-            .copied()
-            .unwrap_or_default()
+        for (source, spec) in self.sources.iter().zip(&self.specs) {
+            if let Some(status) = source.live.get(key) {
+                return *status;
+            }
+            if matches!(spec, SourceSpec::Codex { source: config, .. }
+                if key.provider.0 == "codex" && config.id == key.source_id)
+            {
+                return if source.live_checked {
+                    RuntimeStatus::Unloaded
+                } else {
+                    RuntimeStatus::Unknown
+                };
+            }
+        }
+        RuntimeStatus::Unknown
     }
     pub fn folder_activity(&self, filter: &FolderFilter) -> RuntimeStatus {
         let mut status = RuntimeStatus::Unknown;
@@ -418,15 +430,8 @@ impl Browser {
                 filter,
                 depth: path.components().count().saturating_sub(1),
                 label: format!(
-                    "{} {}{status}",
-                    if self.expanded.contains(&path) {
-                        "▾"
-                    } else {
-                        "▸"
-                    },
-                    path.file_name()
-                        .unwrap_or(path.as_os_str())
-                        .to_string_lossy()
+                    "{}{status}",
+                    crate::path_picker::tree_label(&path, 0, self.expanded.contains(&path))
                 ),
             });
         }
@@ -469,7 +474,12 @@ impl Browser {
                 error,
                 ..
             } => {
-                self.sources[source].live = statuses;
+                self.sources[source].live_checked = error.is_none();
+                self.sources[source].live = if error.is_none() {
+                    statuses
+                } else {
+                    BTreeMap::new()
+                };
                 self.sources[source].live_error = error;
             }
             Update::Ready {

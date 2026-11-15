@@ -1,0 +1,204 @@
+{
+  "date": "2026-11-15",
+  "cases": [
+    {
+      "mode": "legacy",
+      "scenario": "detached",
+      "status": "passed",
+      "seconds": 0.5403288939996855,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "legacy",
+      "scenario": "attached",
+      "status": "passed",
+      "seconds": 2.3055216369975824,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "legacy",
+      "scenario": "folder",
+      "status": "passed",
+      "seconds": 0.8786001119988214,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "legacy",
+      "scenario": "workspace",
+      "status": "passed",
+      "seconds": 0.5447514209990914,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "legacy",
+      "scenario": "read-only",
+      "status": "passed",
+      "seconds": 0.5489893580015632,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "detached",
+      "status": "passed",
+      "seconds": 0.5484900689989445,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "attached",
+      "status": "passed",
+      "seconds": 2.302969837001001,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "folder",
+      "status": "passed",
+      "seconds": 0.8886752910002542,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "workspace",
+      "status": "passed",
+      "seconds": 0.5503218530029699,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "read-only",
+      "status": "passed",
+      "seconds": 0.5452474869998696,
+      "version": "0.167.2",
+      "executable_sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+    },
+    {
+      "mode": "legacy",
+      "scenario": "detached",
+      "status": "passed",
+      "seconds": 0.5384972399988328,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    },
+    {
+      "mode": "legacy",
+      "scenario": "attached",
+      "status": "passed",
+      "seconds": 2.2951264770017588,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    },
+    {
+      "mode": "legacy",
+      "scenario": "folder",
+      "status": "passed",
+      "seconds": 0.8618115200006287,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    },
+    {
+      "mode": "legacy",
+      "scenario": "workspace",
+      "status": "passed",
+      "seconds": 0.5455955680008628,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    },
+    {
+      "mode": "legacy",
+      "scenario": "read-only",
+      "status": "passed",
+      "seconds": 0.5458513470002799,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "detached",
+      "status": "passed",
+      "seconds": 0.5457139079990156,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "attached",
+      "status": "passed",
+      "seconds": 2.300551733998873,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "folder",
+      "status": "passed",
+      "seconds": 0.863497742000618,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "workspace",
+      "status": "passed",
+      "seconds": 0.5396759229988675,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    },
+    {
+      "mode": "paginated",
+      "scenario": "read-only",
+      "status": "passed",
+      "seconds": 0.5385391370000434,
+      "version": "0.169.0",
+      "executable_sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+    }
+  ],
+  "final_stale_guard_recheck": [
+    {
+      "version": "codex-cli 0.169.0",
+      "sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b",
+      "mode": "legacy",
+      "scenario": "detached",
+      "status": "passed",
+      "seconds": 0.5319196560012642
+    },
+    {
+      "version": "codex-cli 0.169.0",
+      "sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b",
+      "mode": "legacy",
+      "scenario": "folder",
+      "status": "passed",
+      "seconds": 0.8422585849984898
+    },
+    {
+      "version": "codex-cli 0.169.0",
+      "sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b",
+      "mode": "paginated",
+      "scenario": "detached",
+      "status": "passed",
+      "seconds": 0.5363283420010703
+    },
+    {
+      "version": "codex-cli 0.169.0",
+      "sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b",
+      "mode": "paginated",
+      "scenario": "folder",
+      "status": "passed",
+      "seconds": 0.8420953339991684
+    }
+  ],
+  "offline_checks": {
+    "status": "passed",
+    "log_directory": "/tmp/tracr-check-t0zcmdy8",
+    "final_follow_up": "Release regressions, clippy, format and diff checks passed after the stale-metadata guard."
+  }
+}

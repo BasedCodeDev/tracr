@@ -97,6 +97,9 @@ with (home / 'requests.jsonl').open('a', buffering=1) as log:
             if settings.get('timeout'):
                 time.sleep(30)
             params = request['params']
+            if params.get('useStateDbOnly') and settings.get('db_unavailable'):
+                print(json.dumps({'id':request['id'],'error':{'code':-32603,'message':'state DB unavailable'}}),flush=True)
+                continue
             assert 'exec' in params['sourceKinds'] and 'subAgent' in params['sourceKinds']
             assert params['modelProviders'] == []
             assert 'cwd' not in params and 'projectId' not in params and 'sectionId' not in params
@@ -118,6 +121,10 @@ with (home / 'requests.jsonl').open('a', buffering=1) as log:
                     item['name'] = 'Guardian review'  # Ordinary sessions with this name must remain visible.
             if settings.get('malformed'):
                 result['data'].append({'id':'invalid'})
+            if params.get('useStateDbOnly') and settings.get('db_empty'):
+                result={'data':[],'nextCursor':None}
+            if params.get('useStateDbOnly') and settings.get('db_cwd'):
+                for row in result['data']: row['cwd']=settings['db_cwd']
             print(json.dumps({'method':'thread/status/changed','params':{}}), flush=True)
         elif method == 'thread/read':
             assert request['params']['includeTurns'] is False

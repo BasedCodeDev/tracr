@@ -4,7 +4,7 @@ use crate::{config::SourceConfig, domain::*};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::VecDeque,
+    collections::{BTreeSet, VecDeque},
     path::Path,
     process::Stdio,
     sync::{Arc, Mutex as StdMutex},
@@ -32,7 +32,7 @@ const SOURCE_KINDS: &[&str] = &[
 ];
 // The API groups Guardian with unrelated "other" subagents. Filter the exact
 // metadata marker instead of excluding that entire category or matching titles.
-pub(super) fn is_guardian(thread: &Value) -> bool {
+pub(crate) fn is_guardian(thread: &Value) -> bool {
     ["/source/subAgent/other", "/source/subagent/other"]
         .iter()
         .any(|pointer| thread.pointer(pointer).and_then(Value::as_str) == Some("guardian"))
@@ -40,7 +40,7 @@ pub(super) fn is_guardian(thread: &Value) -> bool {
 
 const DEADLINE: Duration = Duration::from_secs(20);
 
-struct Rpc {
+pub(crate) struct Rpc {
     child: Child,
     input: Option<ChildStdin>,
     output: BufReader<ChildStdout>,
@@ -56,7 +56,7 @@ impl Drop for Rpc {
     }
 }
 impl Rpc {
-    async fn start(binary: &Path, home: &Path) -> Result<Self, ProviderError> {
+    pub(crate) async fn start(binary: &Path, home: &Path) -> Result<Self, ProviderError> {
         if !home.is_dir() {
             return Err(ProviderError::Unavailable(format!(
                 "Codex home is not an accessible directory: {}",
@@ -102,7 +102,7 @@ impl Rpc {
         };
         rpc.call(
             "initialize",
-            json!({"clientInfo":{"name":"tracr", "version":env!("CARGO_PKG_VERSION")}}),
+            json!({"clientInfo":{"name":"tracr", "version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}}),
         )
         .await?;
         rpc.write(json!({"method":"initialized"})).await?;
@@ -162,7 +162,11 @@ impl Rpc {
                 .ok_or_else(|| ProviderError::InvalidData("RPC response has no result".into()));
         }
     }
-    async fn call(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
+    pub(crate) async fn call(
+        &mut self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, ProviderError> {
         if self.failed {
             return Err(ProviderError::Unavailable(
                 "server connection failed; refresh to reconnect".into(),
@@ -196,7 +200,7 @@ impl Rpc {
         }
         result
     }
-    async fn close(&mut self) {
+    pub(crate) async fn close(&mut self) {
         self.input.take();
         if timeout(Duration::from_secs(2), self.child.wait())
             .await
@@ -212,9 +216,12 @@ pub struct CodexProvider {
     source: SourceConfig,
     binary: std::path::PathBuf,
     rpc: Mutex<Rpc>,
+    listed: StdMutex<BTreeSet<SessionKey>>,
 }
 #[derive(Serialize, Deserialize)]
 struct Position {
+    #[serde(default)]
+    fallback: bool,
     archived: bool,
     cursor: Option<String>,
 }
@@ -226,6 +233,7 @@ impl CodexProvider {
             source,
             binary: binary.to_owned(),
             rpc: Mutex::new(rpc),
+            listed: StdMutex::new(BTreeSet::new()),
         })
     }
     pub async fn close(&self) {
@@ -325,7 +333,7 @@ impl SessionProvider for CodexProvider {
             FolderStatus::Available => {}
             FolderStatus::Unlinked => {
                 return Err(ProviderError::Unavailable(format!(
-                    "Folder no longer exists: {}. Relinking is not available yet.",
+                    "Folder no longer exists: {}. Select Relink session (l).",
                     cwd.display()
                 )));
             }
@@ -366,20 +374,49 @@ impl SessionProvider for CodexProvider {
             list: Capability::Supported,
             read: Capability::Supported,
             resume: Capability::Supported,
-            relocation: Capability::Unsupported {
-                reason: "Codex 0.167.2 lists the old folder after relocation".into(),
-            },
+            // Each preview verifies version and each execution verifies exclusive access.
+            relocation: Capability::Supported,
         }
     }
     async fn list(&self, cursor: Option<Cursor>) -> Result<SessionPage, ProviderError> {
         let position = match cursor {
-            None => Position {
-                archived: false,
-                cursor: None,
-            },
+            None => {
+                self.listed.lock().expect("listed lock").clear();
+                Position {
+                    fallback: false,
+                    archived: false,
+                    cursor: None,
+                }
+            }
             Some(c) => serde_json::from_str(&c.0).map_err(|_| ProviderError::InvalidCursor)?,
         };
-        let response = self.rpc.lock().await.call("thread/list", json!({"limit":100,"archived":position.archived,"cursor":position.cursor,"modelProviders":[],"sourceKinds":SOURCE_KINDS,"sortKey":"updated_at","sortDirection":"desc"})).await?;
+        let response = self.rpc.lock().await.call("thread/list", json!({"limit":100,"archived":position.archived,"cursor":position.cursor,"modelProviders":[],"sourceKinds":SOURCE_KINDS,"sortKey":"updated_at","sortDirection":"desc","useStateDbOnly":!position.fallback})).await;
+        let response = match response {
+            Ok(response) => response,
+            Err(error)
+                if !position.fallback
+                    && ["-32601", "-32602", "-32603"]
+                        .iter()
+                        .any(|code| error.to_string().contains(code)) =>
+            {
+                *self.rpc.lock().await = Rpc::start(&self.binary, &self.source.home).await?;
+                return Ok(SessionPage {
+                    sessions: Vec::new(),
+                    warnings: vec![format!(
+                        "Database listing unavailable; using reconciled discovery: {error}"
+                    )],
+                    next: Some(Cursor(
+                        serde_json::to_string(&Position {
+                            fallback: true,
+                            archived: false,
+                            cursor: None,
+                        })
+                        .expect("position"),
+                    )),
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let data = response["data"]
             .as_array()
             .ok_or_else(|| ProviderError::InvalidData("thread/list missing data array".into()))?;
@@ -390,17 +427,54 @@ impl SessionProvider for CodexProvider {
                 continue;
             }
             match self.summary(value.clone(), position.archived) {
-                Ok(summary) => sessions.push(summary),
+                Ok(mut summary) => {
+                    if self
+                        .listed
+                        .lock()
+                        .expect("listed lock")
+                        .contains(&summary.key)
+                    {
+                        continue;
+                    }
+                    if position.fallback {
+                        match self.read(&summary.key).await {
+                            Ok(Some(mut fresh)) => {
+                                fresh.archived = position.archived;
+                                summary = fresh;
+                            }
+                            Ok(None) => continue,
+                            Err(error) => {
+                                warnings.push(format!(
+                                    "Could not reconcile {}: {error}",
+                                    summary.key.native_id
+                                ));
+                                continue;
+                            }
+                        }
+                    }
+                    self.listed
+                        .lock()
+                        .expect("listed lock")
+                        .insert(summary.key.clone());
+                    sessions.push(summary);
+                }
                 Err(error) => warnings.push(error.to_string()),
             }
         }
         let next = match response.get("nextCursor") {
             Some(Value::String(cursor)) => Some(Position {
+                fallback: position.fallback,
                 archived: position.archived,
                 cursor: Some(cursor.clone()),
             }),
             None | Some(Value::Null) if !position.archived => Some(Position {
+                fallback: position.fallback,
                 archived: true,
+                cursor: None,
+            }),
+            None | Some(Value::Null) if !position.fallback => Some(Position {
+                fallback: true,
+                archived: false,
                 cursor: None,
             }),
             None | Some(Value::Null) => None,

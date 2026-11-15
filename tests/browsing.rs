@@ -836,7 +836,7 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let mut view = View {
             help: true,
-            help_selected: 10,
+            help_selected: 13,
             ..View::default()
         };
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
@@ -860,6 +860,108 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
                 .map(|cell| cell.symbol())
                 .collect();
             assert!(text.contains("Previous pane"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn native_current_directory_wins_and_unindexed_sessions_are_reconciled() {
+    for settings in [
+        serde_json::json!({"db_cwd":"/native/current"}),
+        serde_json::json!({"db_empty":true,"read_cwd":"/native/current"}),
+        serde_json::json!({"db_unavailable":true,"read_cwd":"/native/current"}),
+    ] {
+        let unavailable = settings.get("db_unavailable").is_some();
+        let (_temp, binary, source) = fake(settings);
+        let provider = CodexProvider::connect(&binary, source).await.unwrap();
+        let inventory = tracr::app::collect(&provider).await;
+        assert_eq!(inventory.complete, !unavailable);
+        assert_eq!(inventory.sessions.len(), 3);
+        assert!(
+            inventory
+                .sessions
+                .iter()
+                .all(|s| s.cwd.as_deref() == Some(Path::new("/native/current")))
+        );
+        assert_eq!(inventory.sessions.iter().filter(|s| s.archived).count(), 1);
+        provider.close().await;
+    }
+}
+
+#[tokio::test]
+async fn unlinked_rows_use_explicit_undimmed_labels_and_footer_keeps_recovery_visible() {
+    use ratatui::{
+        Terminal,
+        backend::TestBackend,
+        style::{Color, Modifier},
+    };
+    use tracr::tui::{View, draw};
+    let mut browser = loaded().await;
+    let session = browser
+        .visible()
+        .into_iter()
+        .find(|s| s.cwd.is_some())
+        .unwrap();
+    let path = session.cwd.clone().unwrap();
+    browser.sources[0]
+        .live
+        .insert(session.key.clone(), RuntimeStatus::Running);
+    for status in [
+        None,
+        Some(FolderStatus::Available),
+        Some(FolderStatus::Unknown),
+        Some(FolderStatus::Inaccessible {
+            reason: "Permission denied".into(),
+        }),
+        Some(FolderStatus::Unlinked),
+    ] {
+        browser.folders.clear();
+        if let Some(status) = status.clone() {
+            browser.folders.insert(path.clone(), status);
+        }
+        let unlinked = status == Some(FolderStatus::Unlinked);
+        for selected in [false, true] {
+            browser.selected = selected.then(|| session.key.clone());
+            for width in [12, 24, 36, 80, 140] {
+                let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+                let view = View {
+                    focus: 1,
+                    message: Some("Test message".into()),
+                    ..View::default()
+                };
+                terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+                let buffer = terminal.backend().buffer();
+                let line = |row: u16| {
+                    (0..width)
+                        .map(|col| buffer[(col, row)].symbol())
+                        .collect::<String>()
+                };
+                let footer = (21..24).map(line).collect::<Vec<_>>().join("\n");
+                assert!(footer.contains("l relink"), "{width}: {footer}");
+                assert!(footer.contains("R recover"), "{width}: {footer}");
+                assert!(line(23).contains("Test message"));
+                let mut labels = 0;
+                for row in 1..21 {
+                    for col in 0..width.saturating_sub(7) {
+                        let word = (col..col + 8)
+                            .map(|x| buffer[(x, row)].symbol())
+                            .collect::<String>();
+                        if word == "Unlinked" && buffer[(col, row)].fg == Color::Rgb(255, 165, 0) {
+                            labels += 1;
+                            assert!(!buffer[(col, row)].modifier.contains(Modifier::DIM));
+                        }
+                    }
+                }
+                assert_eq!(
+                    labels > 0,
+                    unlinked,
+                    "width={width}, selected={selected}, status={status:?}"
+                );
+                if width >= 80 {
+                    let text = (0..21).map(line).collect::<Vec<_>>().join("\n");
+                    assert!(text.contains("Running"));
+                }
+            }
         }
     }
 }

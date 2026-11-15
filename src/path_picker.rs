@@ -1,0 +1,479 @@
+//! Lazy filesystem tree shared visually with the session folder tree.
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+    sync::mpsc,
+    time::{Duration, Instant},
+};
+
+pub fn tree_label(path: &Path, depth: usize, expanded: bool) -> String {
+    format!(
+        "{}{} {}",
+        "  ".repeat(depth.min(20)),
+        if expanded { "▾" } else { "▸" },
+        path.file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy()
+    )
+}
+#[derive(Debug)]
+pub struct Row {
+    pub path: PathBuf,
+    pub depth: usize,
+    pub expanded: bool,
+    pub error: Option<String>,
+}
+struct Snapshot {
+    expanded: BTreeSet<PathBuf>,
+    rows: Vec<Row>,
+    selected: PathBuf,
+    valid: bool,
+    error: Option<String>,
+    initial: Option<String>,
+}
+pub struct Picker {
+    pub focus: usize, // path, tree, button
+    pub caret: usize, // UTF-8 byte boundary
+    pub rows: Vec<Row>,
+    pub selected: Option<PathBuf>,
+    pub valid: bool,
+    pub error: Option<String>,
+    pub loading: bool,
+    launch: PathBuf,
+    home: Option<PathBuf>,
+    expanded: BTreeSet<PathBuf>,
+    generation: u64,
+    requested: Option<u64>,
+    active: usize,
+    edited: Instant,
+    tx: mpsc::Sender<(u64, Snapshot)>,
+    rx: mpsc::Receiver<(u64, Snapshot)>,
+}
+impl Picker {
+    pub fn new(launch: PathBuf) -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            focus: 1,
+            caret: 0,
+            rows: vec![],
+            selected: None,
+            valid: false,
+            error: None,
+            loading: true,
+            launch,
+            home: dirs::home_dir(),
+            expanded: BTreeSet::new(),
+            generation: 0,
+            requested: None,
+            active: 0,
+            edited: Instant::now() - Duration::from_secs(1),
+            tx,
+            rx,
+        }
+    }
+    fn changed(&mut self) {
+        self.generation += 1;
+        self.valid = false;
+        self.loading = true;
+        self.error = None;
+        self.edited = Instant::now();
+    }
+    pub fn paste(&mut self, input: &mut String, text: &str) {
+        self.focus = 0;
+        let text: String = text.chars().filter(|c| !c.is_control()).collect();
+        self.caret = self.caret.min(input.len());
+        input.insert_str(self.caret, &text);
+        self.caret += text.len();
+        self.changed();
+    }
+    /// Returns true only when the user explicitly requests destination preview.
+    pub fn key(&mut self, input: &mut String, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Tab => self.focus = (self.focus + 1) % 3,
+            KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
+            KeyCode::Up | KeyCode::Down => {
+                if !self.rows.is_empty() {
+                    let index = self
+                        .rows
+                        .iter()
+                        .position(|r| Some(&r.path) == self.selected.as_ref())
+                        .unwrap_or(0);
+                    let next = if key.code == KeyCode::Up {
+                        index.saturating_sub(1)
+                    } else {
+                        (index + 1).min(self.rows.len() - 1)
+                    };
+                    let path = self.rows[next].path.clone();
+                    self.selected = Some(path.clone());
+                    self.changed();
+                    if let Some(text) = path.to_str() {
+                        *input = text.to_owned();
+                    } else {
+                        input.clear();
+                        self.error = Some("This folder name cannot be entered as UTF-8.".into());
+                        self.loading = false;
+                        self.requested = Some(self.generation);
+                    }
+                    self.caret = input.len();
+                }
+            }
+            KeyCode::Enter if self.focus == 1 => {
+                if let Some(path) = self.selected.clone().filter(|p| p.to_str().is_some()) {
+                    if !self.expanded.remove(&path) {
+                        self.expanded.insert(path);
+                    }
+                    self.changed();
+                }
+            }
+            KeyCode::Enter if self.focus == 0 => return !input.is_empty(),
+            KeyCode::Enter => return self.valid && !self.loading,
+            KeyCode::Left if self.focus == 0 => self.caret = previous(input, self.caret),
+            KeyCode::Right if self.focus == 0 => self.caret = next(input, self.caret),
+            KeyCode::Home if self.focus == 0 => self.caret = 0,
+            KeyCode::End if self.focus == 0 => self.caret = input.len(),
+            KeyCode::Backspace if self.focus == 0 => {
+                let pos = previous(input, self.caret);
+                input.replace_range(pos..self.caret, "");
+                self.caret = pos;
+                self.changed();
+            }
+            KeyCode::Delete if self.focus == 0 => {
+                let end = next(input, self.caret);
+                input.replace_range(self.caret..end, "");
+                self.changed();
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                input.clear();
+                self.caret = 0;
+                self.focus = 0;
+                self.changed();
+            }
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.focus = 0;
+                self.caret = self.caret.min(input.len());
+                input.insert(self.caret, c);
+                self.caret += c.len_utf8();
+                self.changed();
+            }
+            _ => {}
+        }
+        false
+    }
+    pub fn tick(&mut self, input: &mut String) {
+        while let Ok((generation, snapshot)) = self.rx.try_recv() {
+            self.active = self.active.saturating_sub(1);
+            if generation != self.generation {
+                continue;
+            }
+            if let Some(initial) = snapshot.initial {
+                *input = initial;
+                self.caret = input.len();
+            }
+            self.expanded = snapshot.expanded;
+            self.selected = Some(snapshot.selected);
+            self.rows = snapshot.rows;
+            self.valid = snapshot.valid;
+            self.error = snapshot.error;
+            self.loading = false;
+        }
+        if self.requested == Some(self.generation)
+            || self.active >= 2
+            || self.edited.elapsed() < Duration::from_millis(100)
+        {
+            return;
+        }
+        self.requested = Some(self.generation);
+        self.active += 1;
+        let (tx, generation, input, launch, home, expanded) = (
+            self.tx.clone(),
+            self.generation,
+            input.clone(),
+            self.launch.clone(),
+            self.home.clone(),
+            self.expanded.clone(),
+        );
+        // Detached bounded workers cannot stall the terminal or Tokio shutdown on a slow mount.
+        std::thread::spawn(move || {
+            let snapshot = scan(&input, &launch, home.as_deref(), expanded, generation == 0);
+            let _ = tx.send((generation, snapshot));
+        });
+    }
+}
+fn previous(text: &str, index: usize) -> usize {
+    text[..index]
+        .char_indices()
+        .next_back()
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+fn next(text: &str, index: usize) -> usize {
+    text[index..]
+        .chars()
+        .next()
+        .map(|c| index + c.len_utf8())
+        .unwrap_or(index)
+}
+fn resolve(input: &str, launch: &Path, home: Option<&Path>) -> PathBuf {
+    let raw = if input == "~" {
+        home.unwrap_or(launch).to_owned()
+    } else if let Some(rest) = input.strip_prefix("~/") {
+        home.unwrap_or(launch).join(rest)
+    } else {
+        launch.join(input)
+    };
+    let mut path = PathBuf::new();
+    for part in raw.components() {
+        match part {
+            std::path::Component::ParentDir => {
+                path.pop();
+            }
+            std::path::Component::CurDir => {}
+            _ => path.push(part.as_os_str()),
+        }
+    }
+    path
+}
+fn accessible(path: &Path) -> bool {
+    std::fs::read_dir(path).is_ok()
+}
+fn scan(
+    input: &str,
+    launch: &Path,
+    home: Option<&Path>,
+    mut expanded: BTreeSet<PathBuf>,
+    initial: bool,
+) -> Snapshot {
+    let path = resolve(input, launch, home);
+    let valid = !input.is_empty() && accessible(&path);
+    let selected = if !initial && path.is_dir() {
+        path.clone()
+    } else {
+        path.ancestors()
+            .find(|p| accessible(p))
+            .map(Path::to_owned)
+            .or_else(|| home.filter(|p| accessible(p)).map(Path::to_owned))
+            .unwrap_or_else(|| PathBuf::from("/"))
+    };
+    expanded.extend(selected.ancestors().skip(1).map(Path::to_owned));
+    if !valid || initial {
+        expanded.insert(selected.clone());
+    }
+    let mut rows = vec![];
+    visit(Path::new("/"), 0, &expanded, &mut vec![], &mut rows);
+    Snapshot {
+        expanded,
+        rows,
+        initial: initial.then(|| selected.to_string_lossy().into()),
+        selected,
+        valid: valid || initial,
+        error: if valid || initial {
+            None
+        } else {
+            Some("Choose an existing accessible directory.".into())
+        },
+    }
+}
+fn visit(
+    path: &Path,
+    depth: usize,
+    expanded: &BTreeSet<PathBuf>,
+    ancestors: &mut Vec<PathBuf>,
+    rows: &mut Vec<Row>,
+) {
+    let canonical = std::fs::canonicalize(path).ok();
+    let cycle = canonical.as_ref().is_some_and(|p| ancestors.contains(p));
+    let open = expanded.contains(path) && !cycle;
+    let index = rows.len();
+    rows.push(Row {
+        path: path.to_owned(),
+        depth,
+        expanded: open,
+        error: cycle.then(|| "Symlink cycle".into()),
+    });
+    if !open {
+        return;
+    }
+    let children = match std::fs::read_dir(path) {
+        Ok(c) => c,
+        Err(_) => {
+            rows[index].error = Some("Cannot open this folder".into());
+            return;
+        }
+    };
+    let mut dirs = vec![];
+    for entry in children {
+        match entry {
+            Ok(entry) if entry.path().is_dir() => dirs.push(entry.path()),
+            Ok(_) => {}
+            Err(_) => rows[index].error = Some("Some folders could not be read".into()),
+        }
+    }
+    dirs.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    let pushed = canonical.is_some();
+    if let Some(real) = canonical {
+        ancestors.push(real);
+    }
+    for child in dirs {
+        visit(&child, depth + 1, expanded, ancestors, rows);
+    }
+    if pushed {
+        ancestors.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn tree_reveals_typed_paths_keeps_partial_input_and_handles_cycles() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project space");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::create_dir(project.join(".hidden")).unwrap();
+        std::fs::create_dir(project.join("empty")).unwrap();
+        std::fs::write(project.join("file"), "not a directory").unwrap();
+        std::os::unix::fs::symlink(&project, project.join("loop")).unwrap();
+        let expanded = BTreeSet::from([project.clone(), project.join("loop")]);
+        let exact = scan(
+            project.to_str().unwrap(),
+            root.path(),
+            None,
+            expanded,
+            false,
+        );
+        assert!(exact.valid);
+        assert_eq!(exact.selected, project);
+        assert!(exact.rows.iter().any(|r| r.path == project.join(".hidden")));
+        assert!(!exact.rows.iter().any(|r| r.path == project.join("file")));
+        assert!(
+            exact
+                .rows
+                .iter()
+                .any(|r| r.path == project.join("loop") && r.error.is_some())
+        );
+        let partial = scan(
+            "project space/par",
+            root.path(),
+            None,
+            BTreeSet::new(),
+            false,
+        );
+        assert!(!partial.valid);
+        assert!(partial.initial.is_none());
+        assert_eq!(partial.selected, project);
+        let initial = scan(
+            "project space/missing/child",
+            root.path(),
+            None,
+            BTreeSet::new(),
+            true,
+        );
+        assert_eq!(initial.initial.as_deref(), project.to_str());
+        let empty = scan(
+            "project space/empty",
+            root.path(),
+            None,
+            BTreeSet::new(),
+            false,
+        );
+        assert!(empty.valid);
+    }
+    #[test]
+    fn unicode_editing_arrows_and_confirmation_are_separate() {
+        let root = tempfile::tempdir().unwrap();
+        let mut picker = Picker::new(root.path().into());
+        let mut input = String::new();
+        picker.paste(&mut input, "é/路径");
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        picker.key(&mut input, key(KeyCode::Left));
+        picker.key(&mut input, key(KeyCode::Backspace));
+        assert_eq!(input, "é/径");
+        picker.key(&mut input, key(KeyCode::Home));
+        picker.key(&mut input, key(KeyCode::Delete));
+        assert_eq!(input, "/径");
+        picker.rows = vec![
+            Row {
+                path: root.path().into(),
+                depth: 0,
+                expanded: false,
+                error: None,
+            },
+            Row {
+                path: root.path().join("empty"),
+                depth: 1,
+                expanded: false,
+                error: None,
+            },
+        ];
+        picker.selected = Some(root.path().into());
+        picker.key(&mut input, key(KeyCode::Down));
+        assert_eq!(input, root.path().join("empty").to_string_lossy());
+        picker.focus = 1;
+        assert!(!picker.key(&mut input, key(KeyCode::Enter)));
+        assert!(picker.expanded.contains(&root.path().join("empty")));
+        picker.valid = true;
+        picker.loading = false;
+        picker.key(&mut input, key(KeyCode::Tab));
+        assert!(picker.key(&mut input, key(KeyCode::Enter)));
+    }
+    #[test]
+    fn initially_open_folder_collapses_on_first_enter() {
+        let root = tempfile::tempdir().unwrap();
+        let mut picker = Picker::new(root.path().into());
+        let mut input = root.path().join("missing").to_string_lossy().into_owned();
+        picker.requested = Some(0);
+        picker
+            .tx
+            .send((0, scan(&input, root.path(), None, BTreeSet::new(), true)))
+            .unwrap();
+        picker.tick(&mut input);
+        assert!(picker.expanded.contains(root.path()));
+        picker.key(
+            &mut input,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        assert!(!picker.expanded.contains(root.path()));
+    }
+    #[test]
+    fn non_utf8_selection_cannot_confirm_a_lossy_destination() {
+        use std::os::unix::ffi::OsStringExt;
+        let mut picker = Picker::new("/".into());
+        let path = PathBuf::from(std::ffi::OsString::from_vec(b"/bad\xff".to_vec()));
+        picker.rows.push(Row {
+            path,
+            depth: 0,
+            expanded: false,
+            error: None,
+        });
+        let mut input = String::new();
+        picker.key(&mut input, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert!(input.is_empty());
+        assert!(picker.error.is_some());
+        assert!(!picker.valid);
+        picker.focus = 0;
+        assert!(!picker.key(
+            &mut input,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ));
+    }
+    #[test]
+    fn stale_directory_results_cannot_replace_newer_input() {
+        let root = tempfile::tempdir().unwrap();
+        let mut picker = Picker::new(root.path().into());
+        let mut input = "new unfinished path".to_owned();
+        picker.generation = 2;
+        picker.requested = Some(2);
+        picker
+            .tx
+            .send((1, scan("/", root.path(), None, BTreeSet::new(), true)))
+            .unwrap();
+        picker.tick(&mut input);
+        assert_eq!(input, "new unfinished path");
+        assert!(picker.rows.is_empty());
+    }
+}

@@ -1,0 +1,205 @@
+{
+  "date": "2026-11-15",
+  "runs": [
+    {
+      "version": "0.169.0",
+      "evidence": "/tmp/tracr-rl-q5z8b5ok",
+      "cases": [
+        {
+          "mode": "legacy",
+          "scenario": "normal",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "archived",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "workspace",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "stale",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "locked",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "shared",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "shared-working",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "shared-waiting",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "custom",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "normal",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "archived",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "workspace",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "stale",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "locked",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "shared",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "shared-working",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "shared-waiting",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "custom",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "version": "0.167.2",
+      "evidence": "/tmp/tracr-rl-rfkde66h",
+      "cases": [
+        {
+          "mode": "legacy",
+          "scenario": "normal",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "archived",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "workspace",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "stale",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "locked",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "shared",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "shared-working",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "shared-waiting",
+          "status": "passed"
+        },
+        {
+          "mode": "legacy",
+          "scenario": "custom",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "normal",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "archived",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "workspace",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "stale",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "locked",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "shared",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "shared-working",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "shared-waiting",
+          "status": "passed"
+        },
+        {
+          "mode": "paginated",
+          "scenario": "custom",
+          "status": "passed"
+        }
+      ]
+    }
+  ],
+  "user_sessions_modified": false,
+  "released": false,
+  "standard_suite": "/tmp/tracr-check-as0q6s5j",
+  "combined_suite": "/tmp/tracr-check-okfzec7h",
+  "combined_suite_note": "All stages passed except a new-session terminal placeholder expectation; after updating the idle acknowledgement, isolated real-Codex resume/create rerun passed all three cases.",
+  "resume_create_rerun": "/tmp/tracr-real-check-lk19d421",
+  "real_status": "passed",
+  "real_relink": "passed"
+}

@@ -107,7 +107,8 @@ def return_to_browser(terminal):
         def acknowledged():
             text = screen_since(terminal, mark).lower()
             return (returned() or ('again' in text and 'ctrl' in text)
-                    or (not cleared and 'ask codex to do anything' in text))
+                    or (not cleared and ('ask codex to do anything' in text
+                        or b'state=idle:app=codex' in terminal.output[mark:])))
         terminal.wait(acknowledged)
         if returned():
             return

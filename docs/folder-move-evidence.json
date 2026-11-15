@@ -1,0 +1,76 @@
+{
+  "cases": [
+    {
+      "version": "0.167.2",
+      "mode": "legacy",
+      "status": "passed",
+      "scenario": "normal"
+    },
+    {
+      "version": "0.167.2",
+      "mode": "paginated",
+      "status": "passed",
+      "scenario": "normal"
+    },
+    {
+      "version": "0.167.2",
+      "mode": "legacy",
+      "status": "passed",
+      "scenario": "locked"
+    },
+    {
+      "version": "0.167.2",
+      "mode": "paginated",
+      "status": "passed",
+      "scenario": "locked"
+    },
+    {
+      "version": "0.167.2",
+      "mode": "legacy",
+      "status": "passed",
+      "scenario": "interrupted"
+    },
+    {
+      "version": "0.167.2",
+      "mode": "paginated",
+      "status": "passed",
+      "scenario": "interrupted"
+    },
+    {
+      "version": "0.169.0",
+      "mode": "legacy",
+      "status": "passed",
+      "scenario": "normal"
+    },
+    {
+      "version": "0.169.0",
+      "mode": "paginated",
+      "status": "passed",
+      "scenario": "normal"
+    },
+    {
+      "version": "0.169.0",
+      "mode": "legacy",
+      "status": "passed",
+      "scenario": "locked"
+    },
+    {
+      "version": "0.169.0",
+      "mode": "paginated",
+      "status": "passed",
+      "scenario": "locked"
+    },
+    {
+      "version": "0.169.0",
+      "mode": "legacy",
+      "status": "passed",
+      "scenario": "interrupted"
+    },
+    {
+      "version": "0.169.0",
+      "mode": "paginated",
+      "status": "passed",
+      "scenario": "interrupted"
+    }
+  ]
+}

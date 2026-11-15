@@ -156,6 +156,7 @@ pub enum RuntimeStatus {
     #[default]
     Unknown,
     Idle,
+    Unloaded,
     Running,
     Waiting {
         approval: bool,
@@ -167,7 +168,8 @@ impl RuntimeStatus {
     pub fn from_codex(status: Option<&serde_json::Value>) -> Self {
         use serde_json::Value;
         match status.and_then(|s| s.get("type")).and_then(Value::as_str) {
-            Some("idle" | "notLoaded") => Self::Idle,
+            Some("idle") => Self::Idle,
+            Some("notLoaded") => Self::Unloaded,
             Some("systemError") => Self::Error,
             Some("active") => {
                 let Some(flags) = status
@@ -195,6 +197,10 @@ impl RuntimeStatus {
     }
     pub fn label(self) -> Option<&'static str> {
         match self {
+            Self::Unknown => Some("Status unknown"),
+            Self::Idle => Some("Idle"),
+            Self::Unloaded => Some("Unloaded"),
+            Self::Error => Some("Error"),
             Self::Running => Some("Running"),
             Self::Waiting {
                 approval: true,

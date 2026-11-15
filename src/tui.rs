@@ -20,6 +20,97 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+pub struct RelinkModal {
+    pub session: crate::domain::SessionSummary,
+    pub input: String,
+    pub picker: Option<crate::path_picker::Picker>,
+    pub preview: Option<crate::relocation::Preview>,
+    pub recovery: bool,
+    pub busy: bool,
+    pub executing: bool,
+    pub error: Option<String>,
+}
+pub fn relink_error(
+    session: &str,
+    old: &str,
+    target: &str,
+    failure: &crate::relocation::Failure,
+    needs_recovery: bool,
+) -> crate::error_dialog::ErrorDialog {
+    let title = if needs_recovery {
+        "Relink needs recovery"
+    } else {
+        "Couldn't relink session"
+    };
+    let explanation = if failure.kind == crate::relocation::FailureKind::PermissionProfile {
+        "This session uses a permission profile that tracr does not yet support for relinking. Permission profiles control what a session can access."
+    } else {
+        &failure.detail
+    };
+    let outcome = if needs_recovery {
+        "The folder may already have changed. Close this dialog and press R to inspect/recover the operation."
+    } else if failure.kind == crate::relocation::FailureKind::PermissionProfile {
+        "Its folder was not changed. Your session remains available, but tracr cannot move it with its current permission settings."
+    } else {
+        "tracr did not change the session's folder during this attempt."
+    };
+    crate::error_dialog::ErrorDialog::new(
+        title,
+        "! Relink failed",
+        format!(
+            "{explanation}\n\n{outcome}\n\nSession: {session}\nOriginal folder: {old}\nRequested destination: {target}\n\nTechnical details: {}",
+            failure.detail
+        ),
+    )
+}
+fn show_relink_failure(view: &mut View, failure: crate::relocation::Failure, needs_recovery: bool) {
+    if let Some(modal) = view.relink.take() {
+        view.error_dialog = Some(relink_error(
+            &modal.session.title,
+            &modal
+                .session
+                .cwd
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            &modal.input,
+            &failure,
+            needs_recovery,
+        ));
+    }
+}
+fn show_folder_failure(view: &mut View, message: String, recovery: bool) {
+    if let Some(modal) = view.folder_move.take() {
+        let target = modal
+            .plan
+            .as_ref()
+            .map(|p| p.target.clone())
+            .unwrap_or_else(|| std::path::Path::new(&modal.input).join(&modal.name));
+        let count = modal
+            .plan
+            .as_ref()
+            .map(|p| p.entries.len().to_string())
+            .unwrap_or_else(|| "Not yet determined".into());
+        let title = if recovery {
+            "Move needs recovery"
+        } else {
+            "Folder was not moved"
+        };
+        let outcome = if recovery {
+            "Files may already be at the destination. Close this dialog and press R to inspect and finish the move."
+        } else {
+            "tracr did not move the folder during this attempt."
+        };
+        view.error_dialog = Some(crate::error_dialog::ErrorDialog::new(
+            title,
+            "! Folder move failed",
+            format!(
+                "{outcome}\n\nOriginal folder: {}\nRequested destination: {}\nAffected sessions: {count}\n\nTechnical details:\n{message}",
+                modal.old.display(),
+                target.display()
+            ),
+        ));
+    }
+}
 #[derive(Default)]
 pub struct View {
     pub focus: usize,
@@ -33,10 +124,19 @@ pub struct View {
     pub message: Option<String>,
     pub preparing: bool,
     pub source_picker: Option<usize>,
+    pub relink: Option<RelinkModal>,
+    pub folder_move: Option<crate::folder_move_ui::Modal>,
+    pub recovery_index: usize,
+    pub error_dialog: Option<crate::error_dialog::ErrorDialog>,
 }
 fn restore() {
     let _ = terminal::disable_raw_mode();
-    let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+    let _ = execute!(
+        io::stdout(),
+        event::DisableBracketedPaste,
+        LeaveAlternateScreen,
+        crossterm::cursor::Show
+    );
 }
 // A direct flag is observed by the UI loop even if the async signal driver stalls.
 struct ShutdownSignals {
@@ -77,11 +177,20 @@ impl TerminalGuard {
     fn activate(&mut self) -> io::Result<()> {
         terminal::enable_raw_mode()?;
         self.active = true;
-        execute!(io::stdout(), EnterAlternateScreen)
+        execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            event::EnableBracketedPaste
+        )
     }
     fn suspend(&mut self) -> io::Result<()> {
         terminal::disable_raw_mode()?;
-        execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show)?;
+        execute!(
+            io::stdout(),
+            event::DisableBracketedPaste,
+            LeaveAlternateScreen,
+            crossterm::cursor::Show
+        )?;
         self.active = false;
         Ok(())
     }
@@ -130,7 +239,63 @@ fn relative_time(updated_at: i64, now: i64) -> String {
     unreachable!("elapsed is at least one minute")
 }
 
+fn footer_shortcuts(width: u16) -> (&'static str, &'static str) {
+    const FULL: &str = "←/→ panes · Enter toggle/resume · m move folder · l relink · R recover · / search · a archives · r refresh · ? help · q quit";
+    if unicode_width::UnicodeWidthStr::width(FULL) <= usize::from(width) {
+        (FULL, "")
+    } else if width >= 60 {
+        (
+            "l relink · R recover · m move folder · ←/→ panes",
+            "/ search · a archives · r refresh · ? help · q quit",
+        )
+    } else if width >= 30 {
+        ("l relink · R recover", "/ search · r refresh · ? help")
+    } else if width >= 20 {
+        ("l relink · R recover", "? help · q quit")
+    } else {
+        ("l relink", "R recover")
+    }
+}
+fn is_unlinked(browser: &Browser, session: &crate::domain::SessionSummary) -> bool {
+    session.cwd.as_ref().is_some_and(|path| {
+        browser.folders.get(path) == Some(&crate::domain::FolderStatus::Unlinked)
+    })
+}
+fn session_metadata(
+    browser: &Browser,
+    session: &crate::domain::SessionSummary,
+    now: i64,
+) -> Line<'static> {
+    let mut spans = Vec::new();
+    if is_unlinked(browser, session) {
+        spans.push(Span::styled(
+            "Unlinked",
+            Style::default()
+                .fg(Color::Rgb(255, 165, 0))
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" · "));
+    }
+    spans.push(Span::styled(
+        format!(
+            "{} · {}",
+            safe_text(&session.key.provider.0),
+            relative_time(session.updated_at, now)
+        ),
+        Style::default().add_modifier(Modifier::DIM),
+    ));
+    Line::from(spans)
+}
+
 pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
+    if let Some(dialog) = &view.error_dialog {
+        dialog.draw(frame);
+        return;
+    }
+    if let Some(modal) = &view.folder_move {
+        modal.draw(frame);
+        return;
+    }
     let area = frame.area();
     if area.width < 12 || area.height < 4 {
         frame.render_widget(Paragraph::new("tracr: enlarge terminal"), area);
@@ -183,19 +348,22 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             ));
         }
     }
+    let message = if view.preparing {
+        "Preparing resume… Esc cancels".into()
+    } else {
+        view.message
+            .as_ref()
+            .map(|m| safe_text(m))
+            .unwrap_or_else(|| issues.join(" | "))
+    };
+    let (first, second) = footer_shortcuts(area.width);
+    // Explicit rows keep messages separate and prevent wrapped hints hiding l/R.
     frame.render_widget(
-        Paragraph::new(format!(
-            "←/→ panes · Enter toggle/resume · / search · a archives · r refresh · ? help · q quit\n{}",
-            if view.preparing {
-                "Preparing resume… Esc cancels".into()
-            } else {
-                view.message
-                    .as_ref()
-                    .map(|m| safe_text(m))
-                    .unwrap_or_else(|| issues.join(" | "))
-            }
-        ))
-        .wrap(Wrap { trim: false }),
+        Paragraph::new(vec![
+            Line::from(first),
+            Line::from(second),
+            Line::from(message),
+        ]),
         layout[1],
     );
     if view.help {
@@ -228,7 +396,215 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     if view.editing {
         draw_search(frame, browser, view);
     }
+    if let Some(modal) = &view.relink {
+        if modal.preview.is_none() && modal.picker.is_some() {
+            draw_path_picker(frame, modal);
+            return;
+        }
+        let area = frame.area();
+        let width = area.width.saturating_sub(2).min(76);
+        let height = area.height.saturating_sub(2).min(21);
+        let popup = Rect::new(
+            area.x + (area.width - width) / 2,
+            area.y + (area.height - height) / 2,
+            width,
+            height,
+        );
+        frame.render_widget(Clear, popup);
+        let mut text = format!(
+            "{}\nSource: {}\nFrom: {}\nArchived: {}\n\nDestination: {}\n\n",
+            safe_text(&modal.session.title),
+            safe_text(&browser.specs.iter().find(|spec|matches!(spec,crate::browser::SourceSpec::Codex{source,..} if source.id==modal.session.key.source_id)).map(|spec|spec.label()).unwrap_or_else(||modal.session.key.source_id.0.clone())),
+            safe_text(
+                &modal
+                    .session
+                    .cwd
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            ),
+            modal.session.archived,
+            safe_text(&modal.input)
+        );
+        if let Some(preview) = &modal.preview {
+            text.push_str(&format!(
+                "Permissions: {}\nOther session settings are preserved.\nOnly this session changes folders. Project files stay where they are.\nDetached idle sessions are released automatically after confirmation.\n\n",
+                preview.profile.label()
+            ));
+        }
+        let controls = if modal.busy {
+            modal
+                .error
+                .as_deref()
+                .unwrap_or("Checking native state… Please wait.")
+        } else if modal.preview.is_some() {
+            "Enter confirms • Esc cancels"
+        } else {
+            "Type an existing folder • Enter previews • Esc cancels"
+        };
+        if let Some(error) = modal.error.as_ref().filter(|_| !modal.busy) {
+            text.push_str(&format!("\n\n{}", safe_text(error)));
+        }
+        let outer = block(
+            if modal.recovery {
+                "Inspect/recover relocation"
+            } else {
+                "Relink session"
+            },
+            true,
+        );
+        let inner = outer.inner(popup);
+        frame.render_widget(outer, popup);
+        let sections = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+        frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
+        frame.render_widget(Paragraph::new(controls), sections[1]);
+    }
 }
+
+fn draw_path_picker(frame: &mut Frame<'_>, modal: &RelinkModal) {
+    render_picker(
+        frame,
+        modal.picker.as_ref().expect("path picker"),
+        &modal.input,
+        PickerText {
+            title: "Relink session",
+            heading: &modal.session.title,
+            old: &modal
+                .session
+                .cwd
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            field: "New folder",
+            busy: modal.busy,
+            error: modal.error.as_deref(),
+        },
+    );
+}
+pub(crate) struct PickerText<'a> {
+    pub title: &'a str,
+    pub heading: &'a str,
+    pub old: &'a str,
+    pub field: &'a str,
+    pub busy: bool,
+    pub error: Option<&'a str>,
+}
+pub(crate) fn render_picker(
+    frame: &mut Frame<'_>,
+    picker: &crate::path_picker::Picker,
+    input: &str,
+    text: PickerText<'_>,
+) {
+    let area = frame.area();
+    let width = area.width.saturating_sub(2).min(84);
+    let height = area.height.saturating_sub(2).min(28);
+    let popup = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(Clear, popup);
+    let outer = block(text.title, true);
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+    if inner.height < 10 {
+        frame.render_widget(
+            Paragraph::new("Enlarge terminal to choose a folder. Esc cancels."),
+            inner,
+        );
+        return;
+    }
+    let parts = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Length(3),
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(2),
+    ])
+    .split(inner);
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(safe_text(text.heading)),
+            Line::from(format!("Previous folder: {}", safe_text(text.old))),
+        ]),
+        parts[0],
+    );
+    // Keep the caret visible in long paths without altering the input value.
+    let caret = picker.caret.min(input.len());
+    let available = usize::from(parts[1].width.saturating_sub(3));
+    let mut start = 0;
+    while unicode_width::UnicodeWidthStr::width(&input[start..caret]) >= available.max(1)
+        && start < caret
+    {
+        start += input[start..].chars().next().unwrap().len_utf8();
+    }
+    let rendered_input = safe_text(&input[start..]);
+    frame.render_widget(
+        Paragraph::new(rendered_input).block(block(text.field, picker.focus == 0)),
+        parts[1],
+    );
+    if picker.focus == 0 && !text.busy && parts[1].width > 2 {
+        let offset = unicode_width::UnicodeWidthStr::width(&input[start..caret]) as u16;
+        frame.set_cursor_position((parts[1].x + 1 + offset, parts[1].y + 1));
+    }
+    let items: Vec<_> = picker
+        .rows
+        .iter()
+        .map(|row| {
+            let mut label = crate::path_picker::tree_label(&row.path, row.depth, row.expanded);
+            if let Some(error) = &row.error {
+                label.push_str(&format!(" [{error}]"));
+            }
+            ListItem::new(safe_text(&label))
+        })
+        .collect();
+    let selected = picker
+        .rows
+        .iter()
+        .position(|r| Some(&r.path) == picker.selected.as_ref());
+    frame.render_stateful_widget(
+        List::new(items)
+            .block(block("Folders", picker.focus == 1))
+            .highlight_symbol("> ")
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
+        parts[2],
+        &mut ListState::default().with_selected(selected),
+    );
+    let ready = picker.valid && !picker.loading && !text.busy;
+    frame.render_widget(
+        Paragraph::new(if picker.focus == 2 {
+            "> [ Use this folder ]"
+        } else {
+            "  [ Use this folder ]"
+        })
+        .style(if ready {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        }),
+        parts[3],
+    );
+    let hint = if picker.focus == 1 {
+        "↑/↓ select · Enter expand/collapse"
+    } else {
+        "↑/↓ select · Enter uses folder"
+    };
+    let status = if text.busy {
+        "Checking native state… Esc cancels".into()
+    } else if let Some(error) = text.error.or(picker.error.as_deref()) {
+        safe_text(error)
+    } else if picker.loading {
+        "Loading folders…".into()
+    } else {
+        "Tab switch controls · Esc cancel".into()
+    };
+    frame.render_widget(
+        Paragraph::new(vec![Line::from(hint), Line::from(status)]),
+        parts[4],
+    );
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Command {
     PreviousPane,
@@ -237,6 +613,9 @@ enum Command {
     NextItem,
     ToggleFolder,
     Resume,
+    Relink,
+    MoveFolder,
+    Recover,
     Create,
     Archives,
     Search,
@@ -294,6 +673,9 @@ fn menu_entries(include_archived: bool) -> Vec<MenuEntry> {
                 "Show archived sessions"
             },
         ),
+        (Relink, "Sessions", "l", "Relink session"),
+        (MoveFolder, "Folders", "m", "Move folder"),
+        (Recover, "Sessions", "R", "Inspect/recover relocation"),
         (Search, "Search", "/", "Search all sessions"),
         (Refresh, "General", "r", "Refresh sessions"),
         (Quit, "General", "q / Ctrl-C", "Quit tracr"),
@@ -312,6 +694,8 @@ fn unavailable(command: Command, browser: &Browser) -> Option<String> {
         Command::ToggleFolder if !matches!(browser.folder, FolderFilter::Path(_)) => {
             Some("Select a concrete folder first.".into())
         }
+        Command::Relink => relink_unavailable(browser),
+        Command::MoveFolder => crate::folder_move_ui::unavailable(browser),
         Command::Create => {
             if browser.loading() {
                 Some("Wait for discovery to finish.".into())
@@ -506,7 +890,8 @@ fn session_title(
     let label = if usize::from(width) < label.width() + 12 {
         match status {
             crate::domain::RuntimeStatus::Running => "Running",
-            _ => "Waiting",
+            crate::domain::RuntimeStatus::Waiting { .. } => "Waiting",
+            _ => label,
         }
     } else {
         label
@@ -536,7 +921,7 @@ fn session_title(
         Span::styled(
             label,
             Style::default()
-                .fg(activity_color(status).expect("active label"))
+                .fg(activity_color(status).unwrap_or(Color::Reset))
                 .add_modifier(Modifier::BOLD),
         ),
     ])
@@ -689,14 +1074,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                             browser.runtime_status(&s.key),
                             area.width.saturating_sub(4),
                         ),
-                        Line::styled(
-                            format!(
-                                "{} · {}",
-                                safe_text(&s.key.provider.0),
-                                relative_time(s.updated_at, now)
-                            ),
-                            Style::default().add_modifier(Modifier::DIM),
-                        ),
+                        session_metadata(browser, s, now),
                         Line::default(),
                     ])
                 })
@@ -753,7 +1131,26 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                     Some(Ok(Some(_))) => String::new(),
                     None => "\nFetching metadata…".into(),
                 };
-                let extra = format!("{extra}\n\nResume: {}", resume_hint(browser, &s));
+                let runtime = browser.runtime_status(&s.key);
+                let availability = match runtime {
+                    crate::domain::RuntimeStatus::Idle => {
+                        "Codex has this session cached. Relinking will try to release it after confirmation."
+                    }
+                    crate::domain::RuntimeStatus::Unloaded => {
+                        "Released at the latest status check. Relinking can be attempted subject to folder and ownership checks."
+                    }
+                    crate::domain::RuntimeStatus::Unknown => {
+                        "Availability could not be confirmed. Relinking checks native ownership before changing the folder."
+                    }
+                    _ => {
+                        "Codex reports this session as loaded; relinking must wait until it is released."
+                    }
+                };
+                let extra = format!(
+                    "{extra}\n\nStatus: {}\n{availability}\n\nResume: {}",
+                    runtime.label().unwrap_or("Status unknown"),
+                    resume_hint(browser, &s)
+                );
                 format!(
                     "{}\n\nID: {}\nProvider: {}\nSource home: {}\nFolder: {}\nFolder status: {:?}\nCreated: {}\nLast activity: {}\nSource: {}\nArchived: {}\nGit: {:?}{}",
                     s.title,
@@ -790,7 +1187,17 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
+    CopyErrorReport,
     Continue,
+    OpenRelink,
+    OpenFolderMove,
+    PreviewFolderMove,
+    ApplyFolderMove,
+    CloseFolderMove,
+    CancelRelink,
+    PreviewRelink,
+    ApplyRelink,
+    RecoverRelink,
     Quit,
     Refresh,
     ResumeSelected,
@@ -798,6 +1205,56 @@ pub enum Action {
     CreateNew(usize),
 }
 
+fn selected_session(browser: &Browser) -> Option<crate::domain::SessionSummary> {
+    browser
+        .visible()
+        .into_iter()
+        .find(|s| Some(&s.key) == browser.selected.as_ref())
+}
+fn relink_unavailable(browser: &Browser) -> Option<String> {
+    let session = match selected_session(browser) {
+        Some(s) => s,
+        None => return Some("Select a session first.".into()),
+    };
+    if browser.loading() {
+        return Some("Wait for discovery to finish.".into());
+    }
+    let index=browser.specs.iter().position(|s|matches!(s,crate::browser::SourceSpec::Codex{source,..} if source.id==session.key.source_id));
+    let Some(index) = index else {
+        return Some("Fixture data is browse-only.".into());
+    };
+    if browser.sources[index].error.is_some() || !browser.sources[index].warnings.is_empty() {
+        return Some("Resolve source discovery warnings before relinking.".into());
+    }
+    if browser.sources[index].live.contains_key(&session.key)
+        && browser.runtime_status(&session.key) != crate::domain::RuntimeStatus::Idle
+    {
+        use crate::domain::RuntimeStatus;
+        return Some(match browser.runtime_status(&session.key) {
+            RuntimeStatus::Running => "This session is running in Codex. Close it and wait for Codex to release it before relinking.",
+            RuntimeStatus::Waiting { .. } => "This session is waiting in Codex. Close it and wait for Codex to release it before relinking.",
+            _ => "Codex still reports this session as loaded. Wait for it to be released before relinking.",
+        }.into());
+    }
+    if !matches!(
+        crate::domain::classify_folder(session.cwd.as_deref()),
+        crate::domain::FolderStatus::Available | crate::domain::FolderStatus::Unlinked
+    ) {
+        return Some("Relinking requires a known original folder that is not inaccessible.".into());
+    }
+    if browser.state_path.is_none() {
+        return Some("Persistent state is required for relocation recovery.".into());
+    }
+    None
+}
+enum FolderMoveResult {
+    Preview(Result<crate::folder_move::Plan, String>),
+    Applied(crate::folder_move::Outcome),
+}
+enum RelinkResult {
+    Preview(Result<crate::relocation::Preview, crate::relocation::Failure>),
+    Applied(crate::relocation::Outcome),
+}
 fn creation_sources(browser: &Browser) -> Vec<usize> {
     browser
         .specs
@@ -831,11 +1288,66 @@ fn resume_hint(browser: &Browser, session: &crate::domain::SessionSummary) -> St
             return reason.into();
         }
     }
+    if is_unlinked(browser, session) {
+        return relink_unavailable(browser)
+            .unwrap_or_else(|| "Folder missing — Enter or l to relink.".into());
+    }
     "Enter to resume in this terminal; the destination is checked again before launch.".into()
 }
 
 pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Action {
     if key.kind == KeyEventKind::Release {
+        return Action::Continue;
+    }
+    if let Some(dialog) = view.error_dialog.as_mut() {
+        match dialog.key(key) {
+            crate::error_dialog::Event::Copy => return Action::CopyErrorReport,
+            crate::error_dialog::Event::Close => view.error_dialog = None,
+            crate::error_dialog::Event::None => {}
+        }
+        return Action::Continue;
+    }
+    if let Some(modal) = view.folder_move.as_mut() {
+        return modal.key(key);
+    }
+    if let Some(modal) = view.relink.as_mut() {
+        if modal.busy {
+            return if !modal.executing && key.code == KeyCode::Esc {
+                Action::CancelRelink
+            } else {
+                Action::Continue
+            };
+        }
+        if modal.preview.is_none() && key.code != KeyCode::Esc {
+            if let Some(picker) = modal.picker.as_mut() {
+                modal.error = None;
+                return if picker.key(&mut modal.input, key) {
+                    Action::PreviewRelink
+                } else {
+                    Action::Continue
+                };
+            }
+        }
+        match key.code {
+            KeyCode::Esc => view.relink = None,
+            KeyCode::Char('R') if modal.recovery => return Action::RecoverRelink,
+            KeyCode::Enter => {
+                return if modal.preview.is_some() {
+                    Action::ApplyRelink
+                } else {
+                    Action::PreviewRelink
+                };
+            }
+            KeyCode::Backspace if modal.preview.is_none() => {
+                modal.input.pop();
+            }
+            KeyCode::Char(c)
+                if modal.preview.is_none() && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                modal.input.push(c)
+            }
+            _ => {}
+        }
         return Action::Continue;
     }
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
@@ -958,6 +1470,9 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('q') => Command::Quit,
         KeyCode::Char('/') => Command::Search,
         KeyCode::Char('r') => Command::Refresh,
+        KeyCode::Char('l') if view.focus == 1 => Command::Relink,
+        KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
+        KeyCode::Char('R') => Command::Recover,
         KeyCode::Char('a') => Command::Archives,
         KeyCode::Tab | KeyCode::Right => Command::NextPane,
         KeyCode::BackTab | KeyCode::Left | KeyCode::Esc => Command::PreviousPane,
@@ -974,6 +1489,9 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
 fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> Action {
     match command {
         Command::Quit => return Action::Quit,
+        Command::Relink => return Action::OpenRelink,
+        Command::MoveFolder => return Action::OpenFolderMove,
+        Command::Recover => return Action::RecoverRelink,
         Command::Search => {
             view.editing = true;
             view.search_query.clear();
@@ -1025,7 +1543,15 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
             view.source_picker = Some(0);
         }
-        Command::Resume => return Action::ResumeSelected,
+        Command::Resume => {
+            if selected_session(browser).is_some_and(|s| {
+                crate::domain::classify_folder(s.cwd.as_deref())
+                    == crate::domain::FolderStatus::Unlinked
+            }) {
+                return Action::OpenRelink;
+            }
+            return Action::ResumeSelected;
+        }
     }
     if view.focus != 2 {
         view.details_scroll = 0;
@@ -1076,6 +1602,42 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     };
     let signals = ShutdownSignals::new()?;
     let mut pending: Option<PendingResume> = None;
+    let mut relink_task: Option<tokio::task::JoinHandle<RelinkResult>> = None;
+    let mut folder_task: Option<tokio::task::JoinHandle<FolderMoveResult>> = None;
+    let (relink_tx, mut relink_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (folder_tx, mut folder_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let mut folder_relocated: Option<(std::path::PathBuf, Option<crate::domain::SessionKey>)> =
+        None;
+    let launch_dir = std::env::current_dir()?;
+    let relocation_state = browser
+        .state_path
+        .as_ref()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf());
+    if let Some(state) = &relocation_state {
+        match crate::relocation::pending(state) {
+            Ok(journals) if !journals.is_empty() => {
+                view.message = Some(format!(
+                    "{} unfinished relocation(s). Press R to inspect/recover.",
+                    journals.len()
+                ))
+            }
+            Err(error) => {
+                view.message = Some(format!("Cannot inspect relocation journals: {error}"))
+            }
+            _ => {}
+        }
+    }
+    if let Some(state) = &relocation_state {
+        match crate::folder_move::pending(state) {
+            Ok(Some(_)) => {
+                view.message = Some("Unfinished folder move. Press R to inspect/recover.".into())
+            }
+            Err(e) => view.message = Some(format!("Cannot inspect folder-move journal: {e}")),
+            _ => {}
+        }
+    }
+    let mut relocated: Option<crate::relocation::Preview> = None;
     let mut last_folder = browser.initial_folder.clone();
     let mut created: Option<(
         crate::domain::SourceId,
@@ -1084,10 +1646,64 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     )> = None;
     let outcome: Result<(), Box<dyn std::error::Error>> = async {
         loop {
-            if signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
-                || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed)
-            {
+            // Finish the bounded operation and archive restoration before exiting.
+            if (signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
+                || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed)) && relink_task.is_none() && folder_task.is_none() {
                 break;
+            }
+            while let Ok(message)=relink_rx.try_recv() {
+                if let Some(modal)=view.relink.as_mut(){modal.error=Some(message);}
+            }
+            while let Ok(message)=folder_rx.try_recv() {
+                if let Some(modal)=view.folder_move.as_mut(){modal.message=Some(message);}
+            }
+            if let Some(modal)=view.folder_move.as_mut(){modal.tick();}
+            if folder_task.as_ref().is_some_and(|t|t.is_finished()) {
+                let result=folder_task.take().expect("finished folder move").await;
+                while event::poll(Duration::ZERO)?{let _=event::read()?;}
+                match result {
+                    Ok(FolderMoveResult::Preview(Ok(plan)))=>{
+                        if let Some(modal)=view.folder_move.as_mut(){modal.busy=false;modal.message=None;modal.plan=Some(plan);}
+                    },
+                    Ok(FolderMoveResult::Applied(crate::folder_move::Outcome::Complete(plan)))=>{
+                        folder_relocated=Some((plan.target.clone(),browser.selected.clone()));
+                        browser.open_folder(plan.target);view.folder_move=None;view.focus=0;
+                        view.message=Some("Folder and sessions moved and verified.".into());discovery.refresh(&mut browser);
+                    },
+                    other=>{
+                        let (message,recovery)=match other {
+                            Ok(FolderMoveResult::Preview(Err(e)))=>(e,false),
+                            Ok(FolderMoveResult::Applied(crate::folder_move::Outcome::Failed{message,recovery}))=>(message,recovery),
+                            Err(e)=>(format!("Folder move stopped: {e}"),true),
+                            _=>unreachable!(),
+                        };
+                        show_folder_failure(&mut view,message,recovery);
+                        discovery.refresh(&mut browser);
+                    }
+                }
+            }
+            if let Some(dialog)=view.error_dialog.as_mut(){dialog.tick().await;}
+            if relink_task.as_ref().is_some_and(|t|t.is_finished()) {
+                let task=relink_task.take().expect("finished relocation");
+                while event::poll(Duration::ZERO)?{let _=event::read()?;}
+                match task.await {
+                    Ok(RelinkResult::Preview(result))=>match result {
+                        Ok(p)=>if let Some(modal)=view.relink.as_mut(){modal.busy=false;modal.input=p.target.display().to_string();modal.preview=Some(p);},
+                        Err(e)=>show_relink_failure(&mut view,e,false),
+                    },
+                    Ok(RelinkResult::Applied(crate::relocation::Outcome::Verified(p)))=>{
+                        view.relink=None;view.focus=1;if p.archived {browser.include_archived=true;}browser.open_folder(p.target.clone());
+                        browser.selected=Some(p.key.clone());relocated=Some(p);
+                        view.message=Some("Session relinked and verified.".into());discovery.refresh(&mut browser);
+                    },
+                    Ok(RelinkResult::Applied(crate::relocation::Outcome::Rejected(e)))=>{
+                        show_relink_failure(&mut view,e,false);discovery.refresh(&mut browser);
+                    },
+                    Ok(RelinkResult::Applied(crate::relocation::Outcome::Unresolved(e)))=>{
+                        show_relink_failure(&mut view,e,true);discovery.refresh(&mut browser);
+                    },
+                    Err(e)=>{show_relink_failure(&mut view,format!("Relocation stopped: {e}").into(),true);}
+                }
             }
             for _ in 0..100 {
                 match discovery.rx.try_recv() {
@@ -1099,6 +1715,11 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 last_folder = Some(path.clone());
             }
             if !browser.loading() {
+                if let Some((path,selected))=folder_relocated.take(){
+                    browser.open_folder(path);
+                    if selected.as_ref().is_some_and(|k|browser.visible().iter().any(|s|&s.key==k)){browser.selected=selected;}
+                }
+                if let Some(p)=relocated.take(){browser.open_folder(p.target);browser.selected=Some(p.key);}
                 if let Some((source, path, before)) = created.take() {
                     if let Some(session) = browser.visible().into_iter().find(|s| {
                         s.key.source_id == source
@@ -1109,8 +1730,11 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
             }
+            if let Some(modal)=view.relink.as_mut(){
+                if !modal.busy && modal.preview.is_none(){if let Some(picker)=modal.picker.as_mut(){picker.tick(&mut modal.input);}}
+            }
             discovery.check_folders(&browser);
-            if pending.is_none() {
+            if pending.is_none() && relink_task.is_none() {
                 discovery.detail(&browser);
             }
             if pending.as_ref().is_some_and(|p| p.task.is_finished()) {
@@ -1171,7 +1795,12 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     / if size.width < 58 { 2 } else { 1 };
             terminal.draw(|frame| draw(frame, &browser, &view))?;
             if event::poll(Duration::from_millis(40))? {
-                if let Event::Key(key) = event::read()? {
+                let incoming=event::read()?;
+                if let Event::Paste(text)=&incoming {
+                    if let Some(modal)=view.folder_move.as_mut(){modal.paste(text);}
+                    if let Some(modal)=view.relink.as_mut(){if !modal.busy && modal.preview.is_none(){if let Some(picker)=modal.picker.as_mut(){picker.paste(&mut modal.input,text);}}}
+                }
+                if let Event::Key(key) = incoming {
                     let was_help = view.help;
                     let action = handle_key(&mut browser, &mut view, key);
                     if was_help && !view.help && key.code == KeyCode::Enter {
@@ -1182,6 +1811,96 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                         }
                     }
                     match action {
+                        Action::OpenFolderMove=>{
+                            if let Some(reason)=crate::folder_move_ui::unavailable(&browser){view.message=Some(reason);continue;}
+                            if let FolderFilter::Path(path)=&browser.folder {
+                                view.folder_move=Some(crate::folder_move_ui::Modal::new(path.clone(),launch_dir.clone()));
+                            }
+                        },
+                        Action::CloseFolderMove=>{
+                            if let Some(task)=folder_task.take(){task.abort();}
+                            view.folder_move=None;
+                        },
+                        Action::PreviewFolderMove=>{
+                            let Some(modal)=view.folder_move.as_mut() else {continue};
+                            let Some(state)=relocation_state.clone() else {continue};
+                            let parent=match crate::relocation::destination(&modal.input,&launch_dir) {
+                                Ok(p)=>p,Err(e)=>{modal.message=Some(e);continue;}
+                            };
+                            let target=match crate::folder_move::destination(&parent,&modal.name) {
+                                Ok(p)=>p,Err(e)=>{modal.message=Some(e);continue;}
+                            };
+                            let sources=crate::folder_move_ui::sources(&browser);
+                            let old=modal.old.clone();modal.busy=true;
+                            modal.message=Some("Checking all configured Codex sources…".into());
+                            folder_task=Some(tokio::spawn(async move{
+                                FolderMoveResult::Preview(crate::folder_move::preview(sources,old,target,&state).await)
+                            }));
+                        },
+                        Action::ApplyFolderMove=>{
+                            let Some(modal)=view.folder_move.as_mut() else {continue};
+                            let Some(plan)=modal.plan.clone() else {continue};
+                            let Some(state)=relocation_state.clone() else {continue};
+                            let sources=crate::folder_move_ui::sources(&browser);
+                            let recovery=modal.recovery;modal.busy=true;modal.executing=true;
+                            let tx=folder_tx.clone();
+                            folder_task=Some(tokio::spawn(async move{
+                                FolderMoveResult::Applied(crate::folder_move::execute(plan,state,sources,recovery,tx).await)
+                            }));
+                        },
+                        Action::CopyErrorReport => {
+                            if let Some(dialog)=view.error_dialog.as_mut(){dialog.start_copy();}
+                        }
+                        Action::CancelRelink => {
+                            if let Some(task)=relink_task.take(){task.abort();}
+                            view.relink=None;
+                        }
+                        Action::OpenRelink => {
+                            if let Some(reason)=relink_unavailable(&browser){view.message=Some(reason);continue;}
+                            if let Some(session)=selected_session(&browser){let input=session.cwd.as_ref().map(|p|p.display().to_string()).unwrap_or_default();view.relink=Some(RelinkModal{session,input,picker:Some(crate::path_picker::Picker::new(launch_dir.clone())),preview:None,recovery:false,busy:false,executing:false,error:None});}
+                        }
+                        Action::RecoverRelink => {
+                            let Some(state)=&relocation_state else{view.message=Some("No persistent state directory.".into());continue};
+                            let folder=match crate::folder_move::pending(state){Ok(j)=>j,Err(e)=>{view.message=Some(e);continue;}};
+                            let count=match crate::relocation::pending(state){Ok(j)=>j.len(),Err(e)=>{view.message=Some(e);continue;}};
+                            let total=count+usize::from(folder.is_some());
+                            let index=view.recovery_index%total.max(1);
+                            view.recovery_index=(index+1)%total.max(1);
+                            view.folder_move=None;view.relink=None;
+                            if index==count {
+                                if let Some(j)=folder{view.folder_move=Some(crate::folder_move_ui::Modal::recover(j));continue;}
+                            }
+                            match crate::relocation::pending(state){
+                                Ok(journals)=>if let Some(j)=journals.get(index){
+                                    let p=j.preview.clone();
+                                    let session=crate::domain::SessionSummary{key:p.key.clone(),title:"Unfinished relocation".into(),cwd:Some(p.old.clone()),created_at:p.created_at,updated_at:0,archived:p.archived,can_accept_direct_input:None,source_kind:None,git:None};
+                                    view.relink=Some(RelinkModal{session,input:p.target.display().to_string(),picker:None,preview:Some(p),recovery:true,busy:false,executing:false,error:Some(format!("Recorded phase: {}. Enter attempts guarded completion. R cycles through {} unfinished operation(s).",j.phase,journals.len()))});
+                                }else{view.message=Some("No unfinished relocations.".into());},
+                                Err(e)=>view.message=Some(e),
+                            }
+                        }
+                        Action::PreviewRelink | Action::ApplyRelink => {
+                            let Some(modal)=view.relink.as_mut() else{continue};
+                            let Some((binary,source))=browser.specs.iter().find_map(|s|match s{crate::browser::SourceSpec::Codex{binary,source} if source.id==modal.session.key.source_id=>Some((binary.clone(),source.clone())),_=>None}) else {modal.error=Some("Session source is no longer configured.".into());continue};
+                            if action==Action::PreviewRelink {
+                                let input=modal.input.clone();let launch=launch_dir.clone();
+                                let session=modal.session.clone();modal.busy=true;modal.error=None;
+                                relink_task=Some(tokio::spawn(async move {
+                                    let destination=tokio::task::spawn_blocking(move||crate::relocation::destination(&input,&launch)).await;
+                                    let result=match destination {
+                                        Ok(Ok(target))=>crate::relocation::preview(&binary,&source,&session,target).await,
+                                        Ok(Err(error))=>Err(error.into()),Err(error)=>Err(error.to_string().into()),
+                                    };
+                                    RelinkResult::Preview(result)
+                                }));
+                            } else {
+                                let Some(p)=modal.preview.clone() else{continue};
+                                let Some(state)=relocation_state.clone() else{continue};
+                                let recovery=modal.recovery;modal.busy=true;modal.executing=true;modal.error=None;
+                                let tx=relink_tx.clone();
+                                relink_task=Some(tokio::spawn(async move {RelinkResult::Applied(crate::relocation::execute_with_progress(&binary,&source,&state,p,recovery,Some(tx)).await)}));
+                            }
+                        }
                         Action::Quit => break,
                         Action::Refresh => {
                             view.message = None;
@@ -1292,6 +2011,82 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
 #[cfg(test)]
 mod cleanup_tests {
     use super::*;
+
+    #[test]
+    fn availability_labels_and_relink_gate_follow_live_updates() {
+        use crate::{
+            browser::{SourceSpec, Update},
+            config::SourceConfig,
+            domain::*,
+        };
+        use std::collections::BTreeMap;
+        let tmp = tempfile::tempdir().unwrap();
+        let source = SourceConfig {
+            id: SourceId("test".into()),
+            home: tmp.path().to_owned(),
+        };
+        let mut browser = Browser::new(vec![SourceSpec::Codex {
+            binary: "codex".into(),
+            source,
+        }]);
+        browser.state_path = Some(tmp.path().join("state.json"));
+        let session: SessionSummary = serde_json::from_value(serde_json::json!({
+            "key": {"provider":"codex","source_id":"test","native_id":"one"},
+            "title":"Example session", "cwd":tmp.path().join("missing"),
+            "created_at":1,"updated_at":2,"archived":false,"source_kind":null,"git":null
+        }))
+        .unwrap();
+        browser.begin_refresh();
+        browser.apply(Update::Page {
+            generation: 1,
+            source: 0,
+            sessions: vec![session.clone()],
+            warnings: vec![],
+        });
+        browser.apply(Update::Finished {
+            generation: 1,
+            source: 0,
+            error: None,
+        });
+        browser.selected = Some(session.key.clone());
+        for (status, label) in [
+            (RuntimeStatus::Running, "Running"),
+            (RuntimeStatus::Idle, "Idle"),
+            (RuntimeStatus::Unloaded, "Unloaded"),
+            (RuntimeStatus::Unknown, "Status unknown"),
+        ] {
+            let statuses = if status == RuntimeStatus::Unloaded || status == RuntimeStatus::Unknown
+            {
+                BTreeMap::new()
+            } else {
+                BTreeMap::from([(session.key.clone(), status)])
+            };
+            browser.apply(Update::Live {
+                generation: 1,
+                source: 0,
+                statuses,
+                error: (status == RuntimeStatus::Unknown).then(|| "offline".into()),
+            });
+            assert_eq!(browser.runtime_status(&session.key), status);
+            for width in [18, 80] {
+                let line = session_title(&session, status, width);
+                let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                assert!(text.contains(label), "{text}");
+            }
+            let reason = relink_unavailable(&browser);
+            match status {
+                RuntimeStatus::Idle => assert!(reason.is_none()),
+                RuntimeStatus::Running => assert!(reason.unwrap().contains("running in Codex")),
+                _ => assert!(reason.is_none(), "{reason:?}"),
+            }
+            if matches!(status, RuntimeStatus::Idle | RuntimeStatus::Unloaded) {
+                assert_eq!(
+                    activity_color(browser.folder_activity(&crate::browser::FolderFilter::All)),
+                    None
+                );
+            }
+        }
+    }
 
     // Invoked only by the parent test in a fresh controlling terminal.
     #[test]

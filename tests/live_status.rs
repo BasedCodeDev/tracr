@@ -27,7 +27,7 @@ async fn passive_snapshot_paginates_maps_status_and_rejects_failures() {
     let (home, binary, source) = setup(json!({"live_threads":{
         "a":{"type":"active","activeFlags":[]},
         "b":{"type":"active","activeFlags":["waitingOnApproval","waitingOnUserInput"]},
-        "c":{"type":"idle"}, "d":{"type":"systemError"}, "e":{"type":"future"}
+        "gone":{"type":"notLoaded"}, "c":{"type":"idle"}, "d":{"type":"systemError"}, "e":{"type":"future"}
     }}));
     let mut client = LiveClient::connect(&binary, source.clone()).await.unwrap();
     let key = |id: &str| SessionKey {
@@ -37,6 +37,7 @@ async fn passive_snapshot_paginates_maps_status_and_rejects_failures() {
     };
     let status = client.snapshot().await.unwrap();
     assert_eq!(status.len(), 5);
+    assert!(!status.contains_key(&key("gone")));
     assert_eq!(status[&key("a")], RuntimeStatus::Running);
     assert_eq!(
         status[&key("b")],
@@ -87,6 +88,23 @@ fn snapshots_are_source_and_generation_scoped() {
         error: None,
     });
     assert_eq!(browser.runtime_status(&key), RuntimeStatus::Running);
+    browser.apply(Update::Live {
+        generation: 1,
+        source: 0,
+        statuses: BTreeMap::from([(key.clone(), RuntimeStatus::Idle)]),
+        error: None,
+    });
+    assert_eq!(browser.runtime_status(&key), RuntimeStatus::Idle);
+    browser.apply(Update::Live {
+        generation: 1,
+        source: 0,
+        statuses: BTreeMap::new(),
+        error: None,
+    });
+    assert_eq!(browser.runtime_status(&key), RuntimeStatus::Unloaded);
+    let mut other = key.clone();
+    other.source_id = tracr::domain::SourceId("other-home".into());
+    assert_eq!(browser.runtime_status(&other), RuntimeStatus::Unknown);
     browser.apply(Update::Live {
         generation: 1,
         source: 0,

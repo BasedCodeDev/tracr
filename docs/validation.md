@@ -1,5 +1,8 @@
 # Browse and resume validation
 
+Latest source increment: [single-session relinking validation](relinking-validation.md).
+The historical entries below describe the versions and capabilities at their recorded dates.
+
 ## Repeatable checks
 
 ```sh

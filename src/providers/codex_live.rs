@@ -1,4 +1,5 @@
-//! Passive WebSocket client for an existing Codex daemon. Never owns the daemon.
+//! Passive monitoring and a separate operational connection to an existing Codex daemon.
+//! Both own only their byte proxy, never the shared daemon.
 use crate::{
     config::SourceConfig,
     domain::{ProviderId, RuntimeStatus, SessionKey},
@@ -25,17 +26,29 @@ type Socket = WebSocketStream<Join<ChildStdout, ChildStdin>>;
 pub struct LiveClient {
     socket: Socket,
     // kill_on_drop affects only our byte proxy, never the shared daemon.
-    _proxy: Child,
+    _proxy: Option<Child>,
     sequence: u64,
     source: SourceConfig,
 }
+impl Drop for LiveClient {
+    fn drop(&mut self) {
+        if let Some(mut proxy) = self._proxy.take() {
+            let _ = proxy.start_kill();
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(async move {
+                    let _ = proxy.wait().await;
+                });
+            }
+        }
+    }
+}
 impl LiveClient {
     pub async fn connect(binary: &Path, source: SourceConfig) -> Result<Self, String> {
-        timeout(Duration::from_secs(5), Self::open(binary, source))
+        timeout(Duration::from_secs(5), Self::open(binary, source, false))
             .await
             .map_err(|_| "live status connection timed out".to_owned())?
     }
-    async fn open(binary: &Path, source: SourceConfig) -> Result<Self, String> {
+    async fn open(binary: &Path, source: SourceConfig, operational: bool) -> Result<Self, String> {
         let mut proxy = Command::new(binary)
             .args(["app-server", "proxy"])
             .env("CODEX_HOME", &source.home)
@@ -58,14 +71,14 @@ impl LiveClient {
             .map_err(|e| e.to_string())?;
         let mut client = Self {
             socket,
-            _proxy: proxy,
+            _proxy: Some(proxy),
             sequence: 0,
             source,
         };
         client
             .call(
                 "initialize",
-                json!({"clientInfo":{"name":"tracr_live", "version":env!("CARGO_PKG_VERSION")}}),
+                json!({"clientInfo":{"name":if operational {"tracr_release"} else {"tracr_live"}, "version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":operational}}),
             )
             .await?;
         client.send(json!({"method":"initialized"})).await?;
@@ -160,6 +173,9 @@ impl LiveClient {
                 continue;
             }
             let status = RuntimeStatus::from_codex(thread.get("status"));
+            if status == RuntimeStatus::Unloaded {
+                continue;
+            }
             result.insert(
                 SessionKey {
                     provider: ProviderId("codex".into()),
@@ -170,5 +186,22 @@ impl LiveClient {
             );
         }
         Ok(result)
+    }
+}
+
+/// Separate connection used only by confirmed relocation operations.
+pub(crate) struct OperationalClient(LiveClient);
+impl OperationalClient {
+    pub(crate) async fn connect(binary: &Path, source: SourceConfig) -> Result<Self, String> {
+        timeout(
+            Duration::from_secs(5),
+            LiveClient::open(binary, source, true),
+        )
+        .await
+        .map_err(|_| "release connection timed out".to_owned())?
+        .map(Self)
+    }
+    pub(crate) async fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.0.call(method, params).await
     }
 }

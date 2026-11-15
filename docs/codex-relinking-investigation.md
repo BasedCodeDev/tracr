@@ -1,5 +1,12 @@
 # Durable relinking investigation — 2026-11-12
 
+> **2026-11-15 correction:** native relocation passes with `thread/list` using
+> `useStateDbOnly: true`. The default listing mode still reports the original
+> directory. See the [working mechanism and new evidence](codex-native-relinking-solution.md).
+> The older findings below concern default listing, not all native approaches.
+
+Latest: the [Codex 0.169.0 investigation](codex-relinking-0.169.0.md) reproduced the native listing inconsistency on 2026-11-14. Relocation remains disabled.
+
 ## Verdict
 
 Production relinking remains disabled for Codex 0.167.2. Six strategies were tested

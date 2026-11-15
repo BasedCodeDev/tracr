@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-menu-') as tmp:
         t.send(b'\x1b[H')
         t.expect('Previous pane')
         t.resize(40, 140)
-        t.send(b'jjjjjjjj\r\r')  # Search: queued Enter must not select a result.
+        t.send(b'jjjjjjjjjjj\r\r')  # Search: queued Enter must not select a result.
         t.expect('Search sessions')
         t.send(b'second')
         t.expect('Task second')

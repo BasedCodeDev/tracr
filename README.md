@@ -3,7 +3,8 @@
 tracr is a Linux terminal application for browsing Codex sessions by folder,
 searching metadata globally, and resuming work in the same terminal. Browsing and
 resume pass automated checks and isolated real-Codex acceptance with Codex 0.167.2.
-Session relocation is not yet supported.
+Relink individual sessions or move a folder and its sessions together, with
+recovery support verified on Codex 0.167.2 and 0.169.0.
 
 ## Install
 
@@ -13,7 +14,7 @@ On Linux x86_64 or ARM64:
 curl -fsSL https://raw.githubusercontent.com/BasedCodeDev/tracr/main/install.sh | sh
 ```
 
-The current preview is [v0.2.0](https://github.com/BasedCodeDev/tracr/releases/tag/v0.2.0).
+The current preview is [v0.3.0](https://github.com/BasedCodeDev/tracr/releases/tag/v0.3.0).
 You can also [install from source](#install-from-source).
 
 The installer downloads the preview binary, verifies SHA-256 checksums, and
@@ -39,7 +40,7 @@ macOS and Windows support are planned.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BasedCodeDev/tracr/main/install.sh | \
-  TRACR_INSTALL_DIR="$HOME/bin" TRACR_VERSION=v0.2.0 sh
+  TRACR_INSTALL_DIR="$HOME/bin" TRACR_VERSION=v0.3.0 sh
 ```
 
 Installation directories must be absolute. License notices are saved in
@@ -128,7 +129,7 @@ invocation directory. Each configured home has its own app-server process.
 
 Fixture mode rejects explicit `--codex-home` options. Configuration is still
 validated, but no live provider is instantiated. tracr resolves state/cache paths
-without creating directories. tracr issues metadata-only requests. Codex may maintain its own indexes during
+without creating directories. Browsing issues metadata-only requests; explicitly confirmed relinking uses native session settings operations. Codex may maintain its own indexes during
 discovery; this is not a byte-for-byte immutable filesystem operation.
 
 ## Fixture format
@@ -181,7 +182,10 @@ The folder, session, and details panes show partial results while loading.
 Terminals narrower than 100 columns show the focused pane full-width.
 
 - Up / Down or `j/k`: navigate; Left / Right or Tab / Shift-Tab: switch panes.
-- Enter: expand or collapse the selected folder, or resume a session.
+- Enter: expand or collapse the selected folder, resume a session, or relink a session whose folder is missing.
+- `l` in Sessions: relink the selected session. Choose an existing destination,
+  press Enter to preview, then Enter again to confirm. Escape cancels before execution.
+- `R`: inspect/recover an unfinished relocation. Recovery never recreates the old folder.
 - `/`: open the search modal. Type to filter results; each result shows its title
   and path. Up/Down selects a result; Enter opens its folder and highlights the
   session without resuming it. Escape cancels without changing your location.
@@ -207,9 +211,16 @@ subfolders, with orange taking priority when work is waiting. Selection markers
 and focus borders remain visible independently of those colors.
 
 Status is polled every two seconds from each configured Codex home's existing
-daemon, without resuming sessions or answering approvals. Idle sessions are not
-highlighted. If monitoring fails, activity highlights are cleared and the footer
-reports that live status is unavailable; retries occur after five seconds.
+daemon, without resuming sessions or answering approvals. **Idle** means Codex
+still has the session loaded; **Unloaded** means the latest successful check found
+it released. Both labels use neutral text and leave folder colors unchanged.
+Closing a Codex window may leave a session idle briefly before Codex releases it;
+after you confirm a relink or folder move, tracr tries to release a detached idle
+session immediately. Sessions still attached to another client remain protected;
+close that client and retry. Running or waiting sessions cannot be moved. Session details explain availability.
+Before the first successful check, or if monitoring fails, sessions show **Status
+unknown**. On failure, activity highlights are cleared and the footer reports that
+live status is unavailable; retries occur after five seconds.
 Independently hosted sessions and older Codex versions without the daemon
 interface may have unknown status. Metadata browsing and `tracr list` still work.
 
@@ -242,7 +253,8 @@ Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
 Exiting Codex returns to tracr, preserving filters and selection and refreshing metadata.
 Ctrl-C belongs to Codex while it is running; SIGTERM to tracr terminates the owned
-child process group, with a five-second grace period. Relinking remains unavailable.
+child process group, with a five-second grace period. See the relinking section below
+for supported versions and permission configurations.
 
 Resume PTY checks (no real sessions or inference):
 
@@ -267,14 +279,66 @@ The pseudo-terminal helper has passed against the compiled binary. The full Rust
 artifacts require their own verification; broader terminal/version coverage remains
 release work.
 
-## Relocation investigation
+## Relink or relocate a session
 
-Codex relocation remains unavailable. Codex CLI 0.167.2 can persist a new working
-directory for reads and resume while still listing the old directory. See
-[the compatibility report](docs/codex-relocation-compatibility.md),
-[the evidence](docs/codex-relocation-evidence.json), and [the project plan](PLAN.md).
+Select the session and press `l`, or choose **Relink session** from `?`. Supply an
+existing directory using the folder tree or the editable **New folder** field
+(absolute, `~/…`, or relative to tracr's launch directory).
 
-The follow-up [relinking investigation](docs/codex-relinking-investigation.md) tests six strategies against installed Codex; production relocation remains unavailable.
+- Up/Down selects a folder and fills the path field, including while typing.
+- Enter in the tree expands or collapses the folder, just like the Folders tab.
+- Tab switches between the path field, tree, and **Use this folder** button.
+- Type or paste a path to reveal it in the tree. Ctrl+U clears the field.
+- Enter in the field or on **Use this folder** opens the preview; Esc cancels.
+
+The tree starts at the closest existing parent of the original folder. It includes
+hidden directories and loads expanded folders in the background.
+
+Review the resolved destination and confirm. On success, tracr opens that folder
+and highlights the same session. It does not start a model turn or launch a chat.
+
+Supported versions are initially Codex 0.167.2 and 0.169.0, with legacy and paginated
+histories. Close the session in other Codex clients first, even if it is idle.
+Native writer exclusion prevents changing a session owned elsewhere. Archived
+sessions are temporarily unarchived and restored. The built-in `:workspace` and
+`:read-only` profiles are supported, along with ordinary legacy read-only and trusted
+single-root workspace-write settings. The confirmation shows the permission profile.
+Custom profiles, full-access profiles, explicit extra writable roots, and multi-root
+workspaces remain blocked. A permission-profile
+rejection means tracr does not yet support moving that session with its current
+permission settings; it does not mean you selected the wrong folder.
+
+To test built-in-profile support from this checkout, run `./scripts/dev.sh .`.
+Restarting an older installed binary does not load these source changes.
+
+Failures remain in a **Couldn't relink session** dialog until you press Enter or
+Esc. The dialog explains whether tracr left the folder unchanged. If an operation
+may have changed the folder, **Relink needs recovery** directs you to close the
+dialog and press `R`. Up/Down scrolls long explanations; technical details are
+included below the session and destination. Press `c` to copy the complete message
+as plain text, with paragraph breaks but no dialog borders or visual line wrapping.
+The dialog reports copy success or failure and stays open. Clipboard support uses
+`wl-copy` on Wayland or `xclip` on X11; if the required utility is missing, tracr
+names it in the error message. Rejected attempts are recorded
+separately from completed moves and do not appear as unfinished recovery work.
+
+Relinking changes Codex's persisted directory through its API. Database-only
+listing reflects the current folder; clients using Codex's default rollout listing
+may still display the original folder. Historical messages are not rewritten.
+tracr does not move files, create destinations, or update project-root associations.
+The original folder may still exist or be missing. Selecting the same directory,
+including a symlink alias, is rejected. Use the separate **Move folder** action below to move files and descendant sessions together.
+
+Private recovery journals live in `$XDG_STATE_HOME/tracr/relocations` (default
+`~/.local/state/tracr/relocations`). If execution is interrupted, press `R` to inspect
+and attempt guarded completion. Conflicting later changes are left untouched.
+Escape cannot abandon a running mutation; forced termination leaves a journal.
+
+See [the native mechanism](docs/codex-native-relinking-solution.md),
+[implementation validation](docs/relinking-validation.md), and the
+[permission-profile investigation](docs/codex-profile-relinking.md).
+The [built-in profile validation](docs/builtin-profile-relinking-validation.md) covers
+the production implementation and its real-Codex acceptance cases.
 
 ## One-command verification
 
@@ -283,3 +347,39 @@ Run `./scripts/check.sh --offline` for cached-dependency checks, or
 `--codex /absolute/path/to/codex` for isolated real-Codex acceptance without inference.
 The verifier reports passed, failed, and blocked stages and retains logs. See
 [validation status](docs/validation.md) for current blockers and coverage.
+
+
+## Move a folder and its sessions
+
+Select an existing folder in the **Folders** pane and press **m**, or choose
+**Move folder** from `?`. Choose a destination parent using the same folder
+picker as relinking, then edit the folder name and press Enter to preview.
+The preview lists the affected sessions, including archived sessions and sessions
+in subfolders. Enter confirms; Esc cancels before execution.
+
+The destination must not exist. This version supports directory renames within
+one filesystem; it never merges directories, overwrites a destination, or falls
+back to copying across disks. Hidden files and internal symlinks move with the
+directory. Relative session paths are preserved, while unrelated sessions stay put.
+
+Every configured Codex source is checked, independent of search and archive
+visibility. Active sessions, unsupported permission settings, missing descendant
+directories, or incomplete inventories block the move. Detached idle sessions are
+released automatically after confirmation, before files move. Loaded archived
+sessions and sessions with background terminals require manual closure; automatic
+release is not yet verified for those cases. Codex storage and tracr's
+recovery storage cannot be inside the folder being moved.
+
+Progress is shown while files and session metadata are updated. These updates
+are recoverable but are not an atomic transaction across Codex and the filesystem.
+Folder failures use the same scrollable error dialog as session relinking.
+Press **c** to copy the complete report, including both paths and all error
+details; Enter or Esc closes it. If interrupted, **Move needs recovery** explains
+the unfinished operation; close the dialog and press **R** to inspect and finish it. Recovery checks directory identities and session
+settings before continuing, and refuses conflicting external changes. It does
+not automatically move files back. Folder journals live under tracr's state
+directory in `folder-moves/`, alongside existing single-session journals.
+
+Moving between filesystems and reconnecting a folder moved outside tracr are
+future increments. Avoid changing the folder or opening affected sessions in
+other applications while a move is in progress.

@@ -1,0 +1,1209 @@
+{
+  "date": "2026-11-15",
+  "conclusion": "Native directory persistence works with database-only listing; default listing retains original cwd.",
+  "production_enabled": false,
+  "no_turn_runs": [
+    {
+      "version": "codex-cli 0.169.0",
+      "sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b",
+      "evidence_directory": "/tmp/tracr-listing-relink-_b7r24vd",
+      "cases": [
+        {
+          "mode": "legacy",
+          "strategy": "resume",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-5cd5-70c1-b4a1-35f398d857f5",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "resume",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-5f12-7ef3-a216-c8b8148a6d8a",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "resume",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-6164-7e13-a913-fe7f3b074f52",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-resume-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "settings",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-63ce-7623-8b4c-c9e2d470e0f8",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "settings",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-6632-7240-8d3b-b96d589bec14",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "settings",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-688e-7bf3-8c3a-4858ff0aa935",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-legacy-settings-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "resume",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-6aef-7291-957c-2dd2bd90a3f4",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "resume",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-6d89-7812-9d20-5663696cd1ce",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "resume",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-7026-7620-a759-462d46f326e5",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-resume-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "settings",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-72d9-7943-abe8-9a43b0690a15",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "settings",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-757b-7a53-b052-2922aba1ec7e",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "settings",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-781e-7640-8aad-a24d6fba7596",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/0-paginated-settings-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "resume",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-7ad6-7603-a61d-97e0639ef802",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "legacy",
+          "strategy": "resume",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-7d34-7160-805c-b1f1b78ed9de",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "legacy",
+          "strategy": "resume",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-7f98-7fd0-8de4-1d5c5d5269c8",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-resume-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "legacy",
+          "strategy": "settings",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-81ec-7443-9315-1f4a054dd033",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "legacy",
+          "strategy": "settings",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-8417-77e1-8a54-510175ff8ee8",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "legacy",
+          "strategy": "settings",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-864e-7f20-98ca-b0ef39566d18",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-legacy-settings-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "paginated",
+          "strategy": "resume",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-88a5-76b1-8766-18efa1b88c12",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "paginated",
+          "strategy": "resume",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-8b33-7be1-9f3d-ab76ce8ef35f",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "paginated",
+          "strategy": "resume",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-8dc6-7731-8575-5e9a72a4e330",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-resume-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "paginated",
+          "strategy": "settings",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-9063-7cf2-9522-4cef77bf801a",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "paginated",
+          "strategy": "settings",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-9302-7cf0-a968-8378c634f789",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 1
+        },
+        {
+          "mode": "paginated",
+          "strategy": "settings",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-959d-73f2-9f7f-ca09ddbc777a",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-_b7r24vd/1-paginated-settings-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 1
+        }
+      ],
+      "production_approved": false
+    },
+    {
+      "version": "codex-cli 0.167.2",
+      "sha256": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b",
+      "evidence_directory": "/tmp/tracr-listing-relink-ttb219o_",
+      "cases": [
+        {
+          "mode": "legacy",
+          "strategy": "resume",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-6162-7463-b260-093f1472cded",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "resume",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-63d6-7530-a671-ecdd0d69a8c9",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "resume",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-662d-7652-85a0-a1e103528f93",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-resume-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "settings",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-6895-73d0-a5e2-4e8b562c98b9",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "settings",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-6aed-71d0-809c-d128d0dcb81d",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "legacy",
+          "strategy": "settings",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-6d47-7021-a469-de3e6072e95b",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-legacy-settings-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "resume",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-6fb1-7672-913c-5e7b85d82339",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "resume",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-725d-7d00-b3f9-796eaabda33a",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "resume",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-7508-75c1-8a67-1ceb3a127e75",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-resume-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "settings",
+          "scenario": "ordinary",
+          "outcome": "pass",
+          "id": "01a1dcd9-77ca-78c1-a0a0-315ded44af45",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-ordinary/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-ordinary/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-ordinary/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-ordinary/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-ordinary/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "settings",
+          "scenario": "missing-old",
+          "outcome": "pass",
+          "id": "01a1dcd9-7a84-7733-ba79-4d8a2037f321",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-missing-old/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-missing-old/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-missing-old/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-missing-old/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-missing-old/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true
+          },
+          "repeat": 0
+        },
+        {
+          "mode": "paginated",
+          "strategy": "settings",
+          "scenario": "archived",
+          "outcome": "pass",
+          "id": "01a1dcd9-7d33-72f0-8944-d71f04178585",
+          "observations": {
+            "database_first": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-archived/new folder",
+            "default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-archived/old",
+            "database_after_default": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-archived/new folder",
+            "read": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-archived/new folder",
+            "destination_filter_contains_id": true
+          },
+          "resume": "/tmp/tracr-listing-relink-ttb219o_/0-paginated-settings-archived/new folder",
+          "checks": {
+            "unrelated_unchanged": true,
+            "db_first": true,
+            "db_after_default": true,
+            "read": true,
+            "filter": true,
+            "resume": true,
+            "history": true,
+            "old_filter_excludes_id": true,
+            "second_restart": true,
+            "reverse_db": true,
+            "reverse_read": true,
+            "reverse_resume": true,
+            "reverse_history": true,
+            "archive_restored": true
+          },
+          "repeat": 0
+        }
+      ],
+      "production_approved": false
+    }
+  ],
+  "organic_run": {
+    "evidence_directory": "/tmp/tracr-turn-relink-s6lld26i",
+    "version": "0.169.0",
+    "cases": [
+      {
+        "mode": "legacy",
+        "strategy": "resume",
+        "id": "01a1dcd9-ec6d-7902-a6ae-f33dee02b1cd",
+        "read": "/tmp/tracr-turn-relink-s6lld26i/legacy-resume/new",
+        "list": "/tmp/tracr-turn-relink-s6lld26i/legacy-resume/old",
+        "db_list": "/tmp/tracr-turn-relink-s6lld26i/legacy-resume/new",
+        "resume": "/tmp/tracr-turn-relink-s6lld26i/legacy-resume/new",
+        "expected": "/tmp/tracr-turn-relink-s6lld26i/legacy-resume/new",
+        "history_before_count": 1,
+        "history_after_count": 1
+      },
+      {
+        "mode": "legacy",
+        "strategy": "turn",
+        "id": "01a1dcd9-ed73-7243-b065-ce4ad6bd0f35",
+        "read": "/tmp/tracr-turn-relink-s6lld26i/legacy-turn/new",
+        "list": "/tmp/tracr-turn-relink-s6lld26i/legacy-turn/old",
+        "db_list": "/tmp/tracr-turn-relink-s6lld26i/legacy-turn/new",
+        "resume": "/tmp/tracr-turn-relink-s6lld26i/legacy-turn/new",
+        "expected": "/tmp/tracr-turn-relink-s6lld26i/legacy-turn/new",
+        "history_before_count": 1,
+        "history_after_count": 2
+      },
+      {
+        "mode": "paginated",
+        "strategy": "resume",
+        "id": "01a1dcd9-ee95-7f73-beb5-8d80c5b4f831",
+        "read": "/tmp/tracr-turn-relink-s6lld26i/paginated-resume/new",
+        "list": "/tmp/tracr-turn-relink-s6lld26i/paginated-resume/old",
+        "db_list": "/tmp/tracr-turn-relink-s6lld26i/paginated-resume/new",
+        "resume": "/tmp/tracr-turn-relink-s6lld26i/paginated-resume/new",
+        "expected": "/tmp/tracr-turn-relink-s6lld26i/paginated-resume/new",
+        "history_before_count": 2,
+        "history_after_count": 2
+      },
+      {
+        "mode": "paginated",
+        "strategy": "turn",
+        "id": "01a1dcd9-ef9f-7653-9b41-0652548c6564",
+        "read": "/tmp/tracr-turn-relink-s6lld26i/paginated-turn/new",
+        "list": "/tmp/tracr-turn-relink-s6lld26i/paginated-turn/old",
+        "db_list": "/tmp/tracr-turn-relink-s6lld26i/paginated-turn/new",
+        "resume": "/tmp/tracr-turn-relink-s6lld26i/paginated-turn/new",
+        "expected": "/tmp/tracr-turn-relink-s6lld26i/paginated-turn/new",
+        "history_before_count": 2,
+        "history_after_count": 4
+      }
+    ]
+  },
+  "scripts_sha256": {
+    "scripts/probe_codex_listing.py": "fcfa5d7b8c591c25d0b1f68540936542b8d93e117f2f574f686bfef0fa7a945a",
+    "scripts/probe_codex_organic_listing.py": "d931703182d2ccf7c62fc8e8f9d3a9c7dd9adf210dfb95fee5df0b3f31762501"
+  }
+}
