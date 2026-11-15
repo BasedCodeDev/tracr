@@ -513,18 +513,24 @@ async fn arrows_navigate_panes_and_folders_outside_search() {
         assert_eq!(view.editing, editing);
         handle_key(&mut browser, &mut view, key(KeyCode::Enter));
         assert!(!browser.expanded.contains(&path));
-        for expected in [1, 0] {
+        for expected in [1, 1, 1] {
             handle_key(&mut browser, &mut view, key(KeyCode::Right));
             assert_eq!(view.focus, expected);
             assert!(!browser.expanded.contains(&path));
         }
-        handle_key(&mut browser, &mut view, key(KeyCode::Left));
-        assert_eq!(view.focus, 1);
+        for _ in 0..3 {
+            handle_key(&mut browser, &mut view, key(KeyCode::Left));
+            assert_eq!(view.focus, 0);
+        }
         handle_key(&mut browser, &mut view, key(KeyCode::Down));
-        handle_key(&mut browser, &mut view, key(KeyCode::Tab));
-        assert_eq!(view.focus, 0);
-        handle_key(&mut browser, &mut view, key(KeyCode::BackTab));
-        assert_eq!(view.focus, 1);
+        for expected in [1, 0, 1, 0] {
+            handle_key(&mut browser, &mut view, key(KeyCode::Tab));
+            assert_eq!(view.focus, expected);
+        }
+        for expected in [1, 0] {
+            handle_key(&mut browser, &mut view, key(KeyCode::BackTab));
+            assert_eq!(view.focus, expected);
+        }
         assert_eq!(browser.query, "codex");
     }
 }
@@ -581,7 +587,7 @@ fn escape_matches_left_navigation_but_still_closes_help_and_cancels_resume() {
                     ),
                     Action::Continue
                 );
-                assert_eq!(view.focus, (focus + 1) % 2);
+                assert_eq!(view.focus, 0);
                 assert_eq!(view.editing, editing);
                 assert_eq!(browser.query, "keep filter");
             }
@@ -806,7 +812,7 @@ async fn action_menu_navigates_cancels_and_dispatches_without_changing_context()
     handle_key(&mut browser, &mut view, key(KeyCode::Down));
     handle_key(&mut browser, &mut view, key(KeyCode::Enter));
     assert!(!view.help);
-    assert_eq!(view.focus, 0); // Next pane.
+    assert_eq!(view.focus, 1); // Select Sessions stays on Sessions.
     handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
     view.help_selected = 3;
     assert_eq!(

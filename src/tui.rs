@@ -805,6 +805,7 @@ enum Command {
     Help,
     PreviousPane,
     NextPane,
+    CyclePane,
     PreviousItem,
     NextItem,
     ToggleFolder,
@@ -878,15 +879,15 @@ fn menu_entries(browser: &Browser, focus: usize) -> Vec<MenuEntry> {
         (
             PreviousPane,
             "Navigation",
-            "← / Shift-Tab / Esc",
-            "Previous pane",
+            "← / Esc",
+            "Select Folders",
             None,
         ),
         (
             NextPane,
             "Navigation",
-            "→ / Tab",
-            "Next pane",
+            "→",
+            "Select Sessions",
             Some(("←/→ Tabs", "←/→ Tabs")),
         ),
         (
@@ -1875,8 +1876,13 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
         KeyCode::Char('R') => Command::Recover,
         KeyCode::Char('a') => Command::Archives,
-        KeyCode::Tab | KeyCode::Right => Command::NextPane,
-        KeyCode::BackTab | KeyCode::Left | KeyCode::Esc => Command::PreviousPane,
+        KeyCode::Tab => Command::CyclePane,
+        KeyCode::BackTab => {
+            view.message = None;
+            Command::CyclePane
+        }
+        KeyCode::Right => Command::NextPane,
+        KeyCode::Left | KeyCode::Esc => Command::PreviousPane,
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
         KeyCode::Enter if view.focus == 0 => Command::ToggleFolder,
@@ -1910,9 +1916,10 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
         Command::Refresh => return Action::Refresh,
         Command::Archives => browser.include_archived = !browser.include_archived,
-        Command::NextPane => view.focus = (view.focus + 1) % 2,
+        Command::CyclePane => view.focus = (view.focus + 1) % 2,
+        Command::NextPane => view.focus = 1,
         Command::PreviousPane => {
-            view.focus = (view.focus + 1) % 2;
+            view.focus = 0;
             view.message = None;
         }
         Command::PreviousItem | Command::NextItem => {

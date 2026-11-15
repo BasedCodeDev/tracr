@@ -489,3 +489,10 @@ Creation currently supports Codex. Provider-owned preparation returns a shared p
   folder, with a five-second deadline and no fallback to another repository.
 - Selection fills a worktree root; Use this folder revalidates it and opens the
   existing relink preview. Folder moves retain the original picker.
+
+### Directional arrow navigation
+
+- Left selects Folders and Right selects Sessions in the browser, without wrapping.
+  Tab/Shift-Tab retain cycling; Escape selects Folders outside modal contexts.
+- In the relink list, Left selects Folders and Right selects Worktrees. Repeated
+  selection does nothing, preserving drafts and avoiding redundant discovery.

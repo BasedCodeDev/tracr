@@ -185,7 +185,8 @@ so relative fixture and configuration arguments also resolve there.
 The folder and session panes show partial results while loading.
 Terminals narrower than 100 columns show the focused pane full-width.
 
-- Up / Down or `j/k`: navigate; Left / Right or Tab / Shift-Tab: switch panes.
+- Up / Down or `j/k`: navigate; Left selects Folders, Right selects Sessions
+  without wrapping. Tab / Shift-Tab cycle between panes.
 - Enter: expand or collapse the selected folder, resume a session, or relink a session whose folder is missing.
 - `n` in Sessions: create a new session in the selected folder.
 - `l` in Sessions: relink the selected session. Choose an existing destination,
@@ -196,7 +197,7 @@ Terminals narrower than 100 columns show the focused pane full-width.
   session without resuming it. Escape cancels without changing your location.
   Ctrl-U clears the modal input. Empty input lists all sessions allowed by the
   archive toggle.
-- Escape outside the modal moves to the previous pane, closes help, or cancels
+- Escape outside the modal selects Folders, closes help, or cancels
   pending resume preparation.
 - `i` in Sessions: open session information; `c` copies it, and Enter/Esc/`i` closes it.
 - `a`: include archived sessions; `r`: refresh.
@@ -370,7 +371,8 @@ The [built-in profile validation](docs/builtin-profile-relinking-validation.md) 
 the production implementation and its real-Codex acceptance cases.
 
 The session relink picker has **Folders** and **Worktrees** views. With the list
-focused, Left/Right switches views; within the path field those keys move the
+focused, Left selects Folders and Right selects Worktrees without wrapping;
+within the path field those keys move the
 caret. Worktrees lists all Git-registered checkouts for the session’s original
 repository, including external locations. Up/Down or Enter fills the destination
 with the selected worktree root; **Use this folder** still opens the preview,

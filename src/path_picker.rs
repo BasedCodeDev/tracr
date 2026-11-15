@@ -204,6 +204,10 @@ impl Picker {
             .as_mut()
             .filter(|_| self.focus == 1 && matches!(key.code, KeyCode::Left | KeyCode::Right))
         {
+            let want_worktrees = key.code == KeyCode::Right;
+            if w.active == want_worktrees {
+                return false;
+            }
             if w.active {
                 w.draft = Some(input.clone());
                 w.caret = self.caret;

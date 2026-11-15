@@ -107,14 +107,34 @@ async fn tabs_restore_independent_paths_and_enter_only_fills() {
     assert!(!picker.key(&mut input, key(KeyCode::Right)));
     settle(&mut picker, &mut input).await;
     assert_eq!(input, folder); // First visit does not choose a destination.
+    for _ in 0..3 {
+        assert!(!picker.key(&mut input, key(KeyCode::Right)));
+        assert!(picker.worktrees_active());
+        assert!(!picker.worktrees.as_ref().unwrap().loading);
+        assert_eq!(input, folder);
+    }
+
     assert!(!picker.key(&mut input, key(KeyCode::Down)));
     assert_eq!(input, main.to_str().unwrap());
     assert!(!picker.key(&mut input, key(KeyCode::Enter)));
     assert!(picker.worktree_validation(&input).is_some());
+    for _ in 0..3 {
+        picker.key(&mut input, key(KeyCode::Right));
+        assert_eq!(input, main.to_str().unwrap());
+        assert!(picker.worktree_validation(&input).is_some());
+        assert!(!picker.worktrees.as_ref().unwrap().loading);
+    }
     picker.key(&mut input, key(KeyCode::Left));
     settle(&mut picker, &mut input).await;
     assert_eq!(input, folder);
     assert_eq!(picker.selected, selected);
+    for _ in 0..3 {
+        picker.key(&mut input, key(KeyCode::Left));
+        assert!(!picker.worktrees_active());
+        assert_eq!(input, folder);
+        assert_eq!(picker.selected, selected);
+    }
+
     assert_eq!(
         picker
             .rows
