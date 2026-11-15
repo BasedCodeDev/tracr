@@ -1,0 +1,25 @@
+{
+  "version": "0.3.0",
+  "source_commit": "9006113a7890ab836d83637fd2bd7e7eb36f21c7",
+  "build_run": "https://github.com/BasedCodeDev/tracr/actions/runs/43686560875",
+  "native_checks": {
+    "x86_64": "passed",
+    "aarch64": "passed"
+  },
+  "static_binary_and_packaged_terminal_checks": {
+    "x86_64": "passed",
+    "aarch64": "passed"
+  },
+  "uploaded_asset_checksums": "passed",
+  "anonymous_public_install": "passed",
+  "repeat_install": "passed",
+  "arm64_real_codex": "not tested",
+  "codex_relocation_acceptance": "See idle-release-evidence.json and folder-move-evidence.json",
+  "assets": {
+    "LICENSE": "d159d46676b072f453798c9c36e1b4ed6a96c3bfd29cc65b98b2dc848c0746a0",
+    "SHA256SUMS": "7b64d8d3690b907d40e319f2aac3a3f57d33b375db32c5741b6bb8840d0b4778",
+    "THIRD_PARTY_NOTICES.txt": "f1948dd15fb9c020cc70f4f7504693a40019399a9cefebf78424246e424d36eb",
+    "tracr-linux-aarch64": "2bd1c42e3fb6327c1b0823fab438b1f4f76ff5b9cbd17d0998c4ae660453d0c5",
+    "tracr-linux-x86_64": "4c9535c440a1eba9efb09be1f4e241807ca452a347338859215d82c790ae1617"
+  }
+}
