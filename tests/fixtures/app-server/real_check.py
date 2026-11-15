@@ -49,9 +49,9 @@ def history_visible(text, expected_messages):
 
 
 def ready(text, tid, cwd):
-    return (tid in text and cwd in text and 'Folders' in text
+    return ('Sessions' in text and 'Folders' in text
             and 'Fetching metadata' not in text and 'Loading' not in text and 'refreshing' not in text
-            and 'Resume: Enter' in text)
+            and 'i Info' in text)
 
 def verify_inventory(inventory, tid, cwd):
     assert inventory['complete'], 'inventory incomplete'
@@ -99,7 +99,7 @@ def return_to_browser(terminal):
     # Ctrl-C can clear residual composer input before it arms Codex's exit
     # confirmation. Require a fresh, recognized redraw between interrupts.
     start = len(terminal.output)
-    returned = lambda: b'toggle/resume' in terminal.output[start:]
+    returned = lambda: b'Sessions' in terminal.output[start:]
     cleared = False
     for _ in range(2):
         mark = len(terminal.output)
@@ -202,6 +202,7 @@ def run_case(binary, codex, home, mode):
         phase = 'browser-ready'
         terminal = Terminal(cmd+[cwd], env)
         terminal.wait(lambda: ready(terminal.text(), tid, cwd))
+        terminal.inspect('ID: ' + tid)
         passed(phase)
         phase = 'startup'
         mark = len(terminal.output)
@@ -214,7 +215,7 @@ def run_case(binary, codex, home, mode):
             blocker = startup_blocker(raw)
             if blocker:
                 raise Blocked(blocker)
-            assert b'toggle/resume' not in terminal.output[handoff:], 'Codex exited before acceptance'
+            assert b'Sessions' not in terminal.output[handoff:], 'Codex exited before acceptance'
             return history_visible(text, fixture['expected_messages']) and os.tcgetpgrp(terminal.master) != terminal.child.pid
         terminal.wait(started, timeout=30)
         passed(phase, foreground_group=os.tcgetpgrp(terminal.master))
@@ -229,6 +230,7 @@ def run_case(binary, codex, home, mode):
         phase = 'return-to-browser'
         return_to_browser(terminal)
         terminal.wait(lambda: ready(terminal.text(), tid, cwd))
+        terminal.inspect('ID: ' + tid)
         assert os.tcgetpgrp(terminal.master) == terminal.child.pid, 'foreground not restored'
         assert re.search(r'> [▾▸] old \(1\)', terminal.text()), 'selected folder not restored'
         # Source metadata must be fetched again, not merely retained in the screen.

@@ -84,7 +84,11 @@ fn show_folder_failure(view: &mut View, message: String, recovery: bool) {
             .plan
             .as_ref()
             .map(|p| p.target.clone())
-            .unwrap_or_else(|| std::path::Path::new(&modal.input).join(&modal.name));
+            .unwrap_or_else(|| {
+                modal
+                    .target()
+                    .unwrap_or_else(|_| std::path::PathBuf::from(&modal.input))
+            });
         let count = modal
             .plan
             .as_ref()
@@ -120,7 +124,7 @@ pub struct View {
     pub help: bool,
     pub help_selected: usize,
     pub help_page_size: usize,
-    pub details_scroll: u16,
+    pub info: Option<InfoModal>,
     pub message: Option<String>,
     pub preparing: bool,
     pub source_picker: Option<usize>,
@@ -239,23 +243,72 @@ fn relative_time(updated_at: i64, now: i64) -> String {
     unreachable!("elapsed is at least one minute")
 }
 
-fn footer_shortcuts(width: u16) -> (&'static str, &'static str) {
-    const FULL: &str = "←/→ panes · Enter toggle/resume · m move folder · l relink · R recover · / search · a archives · r refresh · ? help · q quit";
-    if unicode_width::UnicodeWidthStr::width(FULL) <= usize::from(width) {
-        (FULL, "")
-    } else if width >= 60 {
-        (
-            "l relink · R recover · m move folder · ←/→ panes",
-            "/ search · a archives · r refresh · ? help · q quit",
-        )
-    } else if width >= 30 {
-        ("l relink · R recover", "/ search · r refresh · ? help")
-    } else if width >= 20 {
-        ("l relink · R recover", "? help · q quit")
-    } else {
-        ("l relink", "R recover")
-    }
+fn footer_shortcuts(width: u16, browser: &Browser, focus: usize) -> (String, String) {
+    let entries = menu_entries(browser, focus);
+    let fit = |context: bool| {
+        let hints: Vec<_> = entries
+            .iter()
+            .filter(|e| (e.section != "General" && e.section != "Navigation") == context)
+            .filter_map(|e| e.footer)
+            .collect();
+        let full = hints.iter().map(|h| h.0).collect::<Vec<_>>().join(" · ");
+        if unicode_width::UnicodeWidthStr::width(full.as_str()) <= usize::from(width) {
+            return full;
+        }
+        let mut line = String::new();
+        for (_, short) in hints {
+            let short = if width < 15 {
+                match short {
+                    "? Help" => "?",
+                    "q Quit" => "q",
+                    _ => short,
+                }
+            } else {
+                short
+            };
+            let candidate = if line.is_empty() {
+                short.to_owned()
+            } else {
+                format!("{line} · {short}")
+            };
+            if unicode_width::UnicodeWidthStr::width(candidate.as_str()) > usize::from(width) {
+                break;
+            }
+            line = candidate;
+        }
+        line
+    };
+    (fit(false), fit(true))
 }
+
+fn draw_footer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    shared: &str,
+    context: &str,
+    message: &str,
+    separate_message: bool,
+) {
+    use ratatui::layout::Alignment;
+    let row = |offset| Rect::new(area.x, area.y + offset, area.width, 1);
+    let shared_width =
+        unicode_width::UnicodeWidthStr::width(shared).min(area.width as usize) as u16;
+    let controls = Rect::new(area.right() - shared_width, area.y, shared_width, 1);
+    frame.render_widget(Paragraph::new(shared).alignment(Alignment::Right), controls);
+    frame.render_widget(Paragraph::new(context).alignment(Alignment::Right), row(1));
+    let feedback = if separate_message {
+        row(2)
+    } else {
+        Rect::new(
+            area.x,
+            area.y,
+            area.width.saturating_sub(shared_width + 2),
+            1,
+        )
+    };
+    frame.render_widget(Paragraph::new(message), feedback);
+}
+
 fn is_unlinked(browser: &Browser, session: &crate::domain::SessionSummary) -> bool {
     session.cwd.as_ref().is_some_and(|path| {
         browser.folders.get(path) == Some(&crate::domain::FolderStatus::Unlinked)
@@ -267,6 +320,16 @@ fn session_metadata(
     now: i64,
 ) -> Line<'static> {
     let mut spans = Vec::new();
+    if browser
+        .details
+        .get(&session.key)
+        .is_some_and(|detail| matches!(detail, Ok(Some(detail)) if detail.cwd != session.cwd))
+    {
+        spans.push(Span::styled(
+            "Folder changed · i Info · ",
+            Style::default().fg(Color::Rgb(255, 165, 0)),
+        ));
+    }
     if is_unlinked(browser, session) {
         spans.push(Span::styled(
             "Unlinked",
@@ -293,32 +356,17 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         return;
     }
     if let Some(modal) = &view.folder_move {
-        modal.draw(frame);
+        modal.draw(frame, browser);
+        return;
+    }
+    if let Some(info) = &view.info {
+        info.dialog.draw(frame);
         return;
     }
     let area = frame.area();
     if area.width < 12 || area.height < 4 {
         frame.render_widget(Paragraph::new("tracr: enlarge terminal"), area);
         return;
-    }
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(3)])
-        .split(area);
-    if area.width >= 100 {
-        let panes = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(25),
-                Constraint::Percentage(40),
-                Constraint::Percentage(35),
-            ])
-            .split(layout[0]);
-        for (index, pane) in panes.iter().enumerate() {
-            draw_pane(frame, *pane, index, browser, view);
-        }
-    } else {
-        draw_pane(frame, layout[0], view.focus, browser, view);
     }
     let mut issues: Vec<_> = browser
         .diagnostics()
@@ -356,15 +404,37 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             .map(|m| safe_text(m))
             .unwrap_or_else(|| issues.join(" | "))
     };
-    let (first, second) = footer_shortcuts(area.width);
-    // Explicit rows keep messages separate and prevent wrapped hints hiding l/R.
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(first),
-            Line::from(second),
-            Line::from(message),
-        ]),
+    let (first, second) = footer_shortcuts(area.width, browser, view.focus);
+    let separate_message = !message.is_empty()
+        && unicode_width::UnicodeWidthStr::width(message.as_str())
+            + unicode_width::UnicodeWidthStr::width(first.as_str())
+            + 2
+            > usize::from(area.width);
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(if separate_message { 3 } else { 2 }),
+        ])
+        .split(area);
+    if area.width >= 100 {
+        let panes = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+            .split(layout[0]);
+        for (index, pane) in panes.iter().enumerate() {
+            draw_pane(frame, *pane, index, browser, view);
+        }
+    } else {
+        draw_pane(frame, layout[0], view.focus, browser, view);
+    }
+    draw_footer(
+        frame,
         layout[1],
+        &first,
+        &second,
+        &message,
+        separate_message,
     );
     if view.help {
         draw_help(frame, browser, view);
@@ -384,7 +454,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         frame.render_stateful_widget(
             List::new(items)
                 .block(block(
-                    "Codex home — ↑/↓ select · Enter creates · Esc cancels",
+                    "Choose harness — ↑/↓ select · Enter creates · Esc cancels",
                     true,
                 ))
                 .highlight_symbol("> ")
@@ -478,6 +548,7 @@ fn draw_path_picker(frame: &mut Frame<'_>, modal: &RelinkModal) {
             field: "New folder",
             busy: modal.busy,
             error: modal.error.as_deref(),
+            sidebar: None,
         },
     );
 }
@@ -488,6 +559,7 @@ pub(crate) struct PickerText<'a> {
     pub field: &'a str,
     pub busy: bool,
     pub error: Option<&'a str>,
+    pub sidebar: Option<(&'a [Line<'static>], u16, &'a std::cell::Cell<u16>)>,
 }
 pub(crate) fn render_picker(
     frame: &mut Frame<'_>,
@@ -496,7 +568,10 @@ pub(crate) fn render_picker(
     text: PickerText<'_>,
 ) {
     let area = frame.area();
-    let width = area.width.saturating_sub(2).min(84);
+    let width = area
+        .width
+        .saturating_sub(2)
+        .min(if text.sidebar.is_some() { 120 } else { 84 });
     let height = area.height.saturating_sub(2).min(28);
     let popup = Rect::new(
         area.x + (area.width - width) / 2,
@@ -515,21 +590,33 @@ pub(crate) fn render_picker(
         );
         return;
     }
+    let heading = if picker.is_folder_move() {
+        format!(
+            "Previous folder: {}\n{}",
+            safe_text(text.old),
+            safe_text(text.heading)
+        )
+    } else {
+        format!(
+            "{}\nPrevious folder: {}",
+            safe_text(text.heading),
+            safe_text(text.old)
+        )
+    };
+    let heading = Paragraph::new(heading).wrap(Wrap { trim: false });
+    let heading_height = heading
+        .line_count(inner.width)
+        .min(usize::from(inner.height.saturating_sub(8)))
+        .max(2) as u16;
     let parts = Layout::vertical([
-        Constraint::Length(2),
+        Constraint::Length(heading_height),
         Constraint::Length(3),
         Constraint::Min(1),
         Constraint::Length(1),
         Constraint::Length(2),
     ])
     .split(inner);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(safe_text(text.heading)),
-            Line::from(format!("Previous folder: {}", safe_text(text.old))),
-        ]),
-        parts[0],
-    );
+    frame.render_widget(heading, parts[0]);
     // Keep the caret visible in long paths without altering the input value.
     let caret = picker.caret.min(input.len());
     let available = usize::from(parts[1].width.saturating_sub(3));
@@ -563,12 +650,44 @@ pub(crate) fn render_picker(
         .rows
         .iter()
         .position(|r| Some(&r.path) == picker.selected.as_ref());
+    let tree_area = if let Some((lines, scroll, limit)) = text.sidebar {
+        let regions = if parts[2].width >= 90 {
+            Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .split(parts[2])
+        } else {
+            Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .split(parts[2])
+        };
+        let panel = block("Sessions · PgUp/PgDn", false);
+        let body = panel.inner(regions[1]);
+        frame.render_widget(panel, regions[1]);
+        let sections = Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).split(body);
+        let content = lines
+            .get(..lines.len().saturating_sub(2))
+            .unwrap_or_default();
+        let paragraph = Paragraph::new(content.to_vec()).wrap(Wrap { trim: false });
+        let max = paragraph
+            .line_count(sections[0].width)
+            .saturating_sub(sections[0].height as usize)
+            .min(u16::MAX as usize) as u16;
+        limit.set(max);
+        frame.render_widget(paragraph.scroll((scroll.min(max), 0)), sections[0]);
+        if let Some(message) = lines.last() {
+            frame.render_widget(
+                Paragraph::new(message.clone()).wrap(Wrap { trim: false }),
+                sections[1],
+            );
+        }
+        regions[0]
+    } else {
+        parts[2]
+    };
     frame.render_stateful_widget(
         List::new(items)
             .block(block("Folders", picker.focus == 1))
             .highlight_symbol("> ")
             .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
-        parts[2],
+        tree_area,
         &mut ListState::default().with_selected(selected),
     );
     let ready = picker.valid && !picker.loading && !text.busy;
@@ -597,7 +716,11 @@ pub(crate) fn render_picker(
     } else if picker.loading {
         "Loading folders…".into()
     } else {
-        "Tab switch controls · Esc cancel".into()
+        if picker.is_folder_move() {
+            "End with / to keep the current folder name.".into()
+        } else {
+            "Tab switch controls · Esc cancel".into()
+        }
     };
     frame.render_widget(
         Paragraph::new(vec![Line::from(hint), Line::from(status)]),
@@ -607,12 +730,14 @@ pub(crate) fn render_picker(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Command {
+    Help,
     PreviousPane,
     NextPane,
     PreviousItem,
     NextItem,
     ToggleFolder,
     Resume,
+    Info,
     Relink,
     MoveFolder,
     Recover,
@@ -627,72 +752,166 @@ struct MenuEntry {
     section: &'static str,
     shortcut: &'static str,
     label: &'static str,
+    footer: Option<(&'static str, &'static str)>,
 }
-fn menu_entries(include_archived: bool) -> Vec<MenuEntry> {
+fn menu_entries(browser: &Browser, focus: usize) -> Vec<MenuEntry> {
     use Command::*;
-    [
+    let mut entries = vec![
+        (
+            Help,
+            "General",
+            "?",
+            "Help / actions",
+            Some(("? Help", "? Help")),
+        ),
+        (
+            Quit,
+            "General",
+            "q / Ctrl-C",
+            "Quit tracr",
+            Some(("q Quit", "q Quit")),
+        ),
+        (
+            Search,
+            "General",
+            "/",
+            "Search all sessions",
+            Some(("/ Search", "/ Search")),
+        ),
+        (
+            Refresh,
+            "General",
+            "r",
+            "Refresh sessions",
+            Some(("r Refresh", "r Refresh")),
+        ),
+        (
+            Archives,
+            "General",
+            "a",
+            if browser.include_archived {
+                "Hide archived sessions"
+            } else {
+                "Show archived sessions"
+            },
+            Some(("a Archives", "a Archives")),
+        ),
+        (
+            Recover,
+            "General",
+            "R",
+            "Inspect/recover relocation",
+            Some(("R Recover", "R Recover")),
+        ),
         (
             PreviousPane,
             "Navigation",
             "← / Shift-Tab / Esc",
             "Previous pane",
+            None,
         ),
-        (NextPane, "Navigation", "→ / Tab", "Next pane"),
+        (
+            NextPane,
+            "Navigation",
+            "→ / Tab",
+            "Next pane",
+            Some(("←/→ Tabs", "←/→ Tabs")),
+        ),
         (
             PreviousItem,
             "Navigation",
             "↑ / k",
             "Previous item / scroll up",
-        ),
-        (NextItem, "Navigation", "↓ / j", "Next item / scroll down"),
-        (
-            ToggleFolder,
-            "Sessions",
-            "Enter (Folders)",
-            "Expand / collapse folder",
+            None,
         ),
         (
-            Resume,
-            "Sessions",
-            "Enter (Sessions)",
-            "Resume selected session",
+            NextItem,
+            "Navigation",
+            "↓ / j",
+            "Next item / scroll down",
+            None,
         ),
-        (
-            Create,
-            "Sessions",
-            "Enter (empty folder)",
-            "Create new session",
-        ),
-        (
-            Archives,
-            "Sessions",
-            "a",
-            if include_archived {
-                "Hide archived sessions"
-            } else {
-                "Show archived sessions"
-            },
-        ),
-        (Relink, "Sessions", "l", "Relink session"),
-        (MoveFolder, "Folders", "m", "Move folder"),
-        (Recover, "Sessions", "R", "Inspect/recover relocation"),
-        (Search, "Search", "/", "Search all sessions"),
-        (Refresh, "General", "r", "Refresh sessions"),
-        (Quit, "General", "q / Ctrl-C", "Quit tracr"),
-    ]
-    .into_iter()
-    .map(|(command, section, shortcut, label)| MenuEntry {
-        command,
-        section,
-        shortcut,
-        label,
-    })
-    .collect()
+    ];
+    if focus == 0 {
+        entries.extend([
+            (
+                ToggleFolder,
+                "Folders",
+                "Enter",
+                "Expand / collapse folder",
+                Some(("Enter Expand/collapse", "Enter Toggle")),
+            ),
+            (
+                MoveFolder,
+                "Folders",
+                "m",
+                "Move folder",
+                Some(("m Move folder", "m Move")),
+            ),
+        ]);
+    } else {
+        entries.push(if can_create(browser) && browser.visible().is_empty() {
+            (
+                Create,
+                "Sessions",
+                "Enter / n",
+                "Create new session",
+                Some(("Enter/n New session", "Enter/n New")),
+            )
+        } else {
+            (
+                Resume,
+                "Sessions",
+                "Enter",
+                "Resume selected session",
+                Some(("Enter Resume", "Enter Resume")),
+            )
+        });
+        if !browser.visible().is_empty() || !can_create(browser) {
+            entries.push((
+                Create,
+                "Sessions",
+                "n",
+                "Create new session",
+                Some(("n New session", "n New")),
+            ));
+        }
+        entries.extend([
+            (
+                Info,
+                "Sessions",
+                "i",
+                "Session information",
+                Some(("i Info", "i Info")),
+            ),
+            (
+                Relink,
+                "Sessions",
+                "l",
+                "Relink session",
+                Some(("l Relink", "l Relink")),
+            ),
+        ]);
+    }
+    entries
+        .into_iter()
+        .map(|(command, section, shortcut, label, footer)| MenuEntry {
+            command,
+            section,
+            shortcut,
+            label,
+            footer,
+        })
+        .collect()
 }
+
 fn unavailable(command: Command, browser: &Browser) -> Option<String> {
     match command {
         Command::ToggleFolder if !matches!(browser.folder, FolderFilter::Path(_)) => {
             Some("Select a concrete folder first.".into())
+        }
+        Command::Info if selected_session(browser).is_none() => {
+            Some("Select a session first.".into())
         }
         Command::Relink => relink_unavailable(browser),
         Command::MoveFolder => crate::folder_move_ui::unavailable(browser),
@@ -703,8 +922,6 @@ fn unavailable(command: Command, browser: &Browser) -> Option<String> {
                 Some("Fixture data is browse-only.".into())
             } else if !matches!(browser.folder, FolderFilter::Path(_)) {
                 Some("Select a concrete folder first.".into())
-            } else if !browser.visible().is_empty() {
-                Some("Creation is available when no sessions are shown.".into())
             } else {
                 None
             }
@@ -766,7 +983,7 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         Constraint::Length(1),
     ])
     .split(inner);
-    let entries = menu_entries(browser.include_archived);
+    let entries = menu_entries(browser, view.focus);
     let selected = view.help_selected.min(entries.len() - 1);
     let mut items = Vec::new();
     let mut last_section = "";
@@ -866,9 +1083,10 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     );
 }
 
-fn activity_color(status: crate::domain::RuntimeStatus) -> Option<Color> {
+pub(crate) fn activity_color(status: crate::domain::RuntimeStatus) -> Option<Color> {
     match status {
         crate::domain::RuntimeStatus::Running => Some(Color::Green),
+        crate::domain::RuntimeStatus::Idle => Some(Color::Rgb(255, 255, 170)),
         crate::domain::RuntimeStatus::Waiting { .. } => Some(Color::Rgb(255, 165, 0)),
         _ => None,
     }
@@ -1093,101 +1311,203 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 &mut state,
             );
         }
-        _ => {
-            let selected = browser
-                .all()
-                .into_iter()
-                .find(|s| Some(&s.key) == browser.selected.as_ref());
-            let text = if let Some(s) = selected {
-                let owner = browser
-                    .sources
-                    .iter()
-                    .zip(&browser.specs)
-                    .find(|(_, spec)| match spec {
-                        crate::browser::SourceSpec::Codex { source, .. } => {
-                            source.id == s.key.source_id
-                        }
-                        crate::browser::SourceSpec::Fixture(_) => true,
-                    })
-                    .map(|(_, spec)| spec.label())
-                    .unwrap_or_default();
-                let path = s
-                    .cwd
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "unknown".into());
-                let status = s.cwd.as_ref().and_then(|p| browser.folders.get(p));
-                let extra = match browser.details.get(&s.key) {
-                    Some(Ok(Some(detail))) if detail.cwd != s.cwd => format!(
-                        "\nDIRECTORY MISMATCH\nListed folder: {path}\nResume folder: {}",
-                        detail
-                            .cwd
-                            .as_ref()
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_else(|| "unknown".into())
-                    ),
-                    Some(Err(error)) => format!("\nDetails error: {error}"),
-                    Some(Ok(None)) => "\nSession no longer available".into(),
-                    Some(Ok(Some(_))) => String::new(),
-                    None => "\nFetching metadata…".into(),
-                };
-                let runtime = browser.runtime_status(&s.key);
-                let availability = match runtime {
-                    crate::domain::RuntimeStatus::Idle => {
-                        "Codex has this session cached. Relinking will try to release it after confirmation."
-                    }
-                    crate::domain::RuntimeStatus::Unloaded => {
-                        "Released at the latest status check. Relinking can be attempted subject to folder and ownership checks."
-                    }
-                    crate::domain::RuntimeStatus::Unknown => {
-                        "Availability could not be confirmed. Relinking checks native ownership before changing the folder."
-                    }
-                    _ => {
-                        "Codex reports this session as loaded; relinking must wait until it is released."
-                    }
-                };
-                let extra = format!(
-                    "{extra}\n\nStatus: {}\n{availability}\n\nResume: {}",
-                    runtime.label().unwrap_or("Status unknown"),
-                    resume_hint(browser, &s)
-                );
-                format!(
-                    "{}\n\nID: {}\nProvider: {}\nSource home: {}\nFolder: {}\nFolder status: {:?}\nCreated: {}\nLast activity: {}\nSource: {}\nArchived: {}\nGit: {:?}{}",
-                    s.title,
-                    s.key.native_id,
-                    s.key.provider.0,
-                    owner,
-                    path,
+        _ => {}
+    }
+}
+
+fn session_information(
+    browser: &Browser,
+    s: &crate::domain::SessionSummary,
+) -> crate::info_content::Information {
+    use crate::domain::{FolderStatus, RuntimeStatus};
+    use crate::info_content::{Information, Row, Section, local_date};
+    let value = |value: Option<&str>| {
+        value
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Not recorded")
+            .to_owned()
+    };
+    let owner = browser
+        .specs
+        .iter()
+        .find_map(|spec| match spec {
+            crate::browser::SourceSpec::Codex { source, .. } if source.id == s.key.source_id => {
+                Some(source.home.display().to_string())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| "Not recorded".into());
+    let path = s
+        .cwd
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "Not recorded".into());
+    let folder_state = match s.cwd.as_ref().and_then(|p| browser.folders.get(p)) {
+        Some(FolderStatus::Available) => "Available".into(),
+        Some(FolderStatus::Unlinked) => "Missing".into(),
+        Some(FolderStatus::Inaccessible { reason }) => format!("Inaccessible: {reason}"),
+        _ => "Unknown".into(),
+    };
+    let mut notices = vec![];
+    let mut location = vec![Row::new("Folder", path.clone())];
+    match browser.details.get(&s.key) {
+        Some(Ok(Some(detail))) if detail.cwd != s.cwd => {
+            notices.push("Folder differs from Codex's current resume destination.".into());
+            location = vec![
+                Row::new("Listed folder", path),
+                Row::new(
+                    "Resume folder",
+                    detail
+                        .cwd
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "Not recorded".into()),
+                ),
+            ];
+        }
+        Some(Err(error)) => notices.push(format!("Could not load session information: {error}")),
+        Some(Ok(None)) => notices.push("Session no longer available".into()),
+        None => notices.push("Fetching metadata…".into()),
+        _ => (),
+    }
+    if is_unlinked(browser, s) || crate::domain::resume_blocker(s).is_some() {
+        notices.push(resume_hint(browser, s));
+    }
+    let runtime = browser.runtime_status(&s.key);
+    let mut status = Row::new(
+        "Status",
+        if runtime == RuntimeStatus::Unknown {
+            "Unknown"
+        } else {
+            runtime.label().unwrap_or("Unknown")
+        },
+    );
+    status.color = activity_color(runtime);
+    status.note = Some(
+        match runtime {
+            RuntimeStatus::Idle => "Cached by Codex; release is attempted when moving.",
+            RuntimeStatus::Unloaded => "Released at the last check; moving still checks ownership.",
+            RuntimeStatus::Running => "Working in Codex; close the session before moving.",
+            RuntimeStatus::Waiting { .. } => "Waiting in Codex; close the session before moving.",
+            RuntimeStatus::Unknown => "Live state unavailable; moving checks native ownership.",
+            RuntimeStatus::Error => "Codex reported an error; moving checks native ownership.",
+        }
+        .into(),
+    );
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let activity = if s.updated_at == 0 {
+        "Not recorded".into()
+    } else {
+        format!(
+            "{}\n{}",
+            relative_time(s.updated_at, now),
+            local_date(s.updated_at)
+        )
+    };
+    location.extend([
+        Row::new("Folder state", folder_state),
+        Row::new(
+            "Git branch",
+            value(s.git.as_ref().and_then(|g| g.branch.as_deref())),
+        ),
+        Row::new(
+            "Repository",
+            value(s.git.as_ref().and_then(|g| g.origin_url.as_deref())),
+        ),
+    ]);
+    Information {
+        title: s.title.clone(),
+        notices,
+        sections: vec![
+            Section {
+                title: "Session",
+                rows: vec![
                     status,
-                    s.created_at,
-                    s.updated_at,
-                    s.source_kind.as_deref().unwrap_or("unknown"),
-                    s.archived,
-                    s.git,
-                    extra
-                )
-            } else {
-                "No session selected".into()
-            };
-            frame.render_widget(
-                Paragraph::new(
-                    text.split('\n')
-                        .map(safe_text)
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
-                .block(block("Details", view.focus == 2))
-                .wrap(Wrap { trim: false })
-                .scroll((view.details_scroll, 0)),
-                area,
+                    Row::new("Last activity", activity),
+                    Row::new("Created", local_date(s.created_at)),
+                    Row::new(
+                        "Agent",
+                        if s.key.provider.0 == "codex" {
+                            "Codex".into()
+                        } else {
+                            s.key.provider.0.clone()
+                        },
+                    ),
+                    Row::new("Archived", if s.archived { "Yes" } else { "No" }),
+                ],
+            },
+            Section {
+                title: "Location",
+                rows: location,
+            },
+            Section {
+                title: "Technical details",
+                rows: vec![
+                    Row::new("Session ID", s.key.native_id.clone()),
+                    Row::new("Codex home", owner),
+                    Row::new(
+                        "Session source",
+                        if s.source_kind.as_deref() == Some("cli") {
+                            "CLI".into()
+                        } else {
+                            value(s.source_kind.as_deref())
+                        },
+                    ),
+                    Row::new(
+                        "Git commit",
+                        value(s.git.as_ref().and_then(|g| g.commit.as_deref())),
+                    ),
+                ],
+            },
+        ],
+    }
+}
+
+pub struct InfoModal {
+    pub session: crate::domain::SessionSummary,
+    pub dialog: crate::error_dialog::ErrorDialog,
+    warning: Option<String>,
+}
+impl InfoModal {
+    pub fn new(browser: &Browser, session: crate::domain::SessionSummary) -> Self {
+        let mut dialog = crate::error_dialog::ErrorDialog::information("Session information", "");
+        dialog.set_information(session_information(browser, &session));
+        Self {
+            session,
+            dialog,
+            warning: None,
+        }
+    }
+    pub fn refresh(&mut self, browser: &Browser) {
+        let current = browser
+            .all()
+            .into_iter()
+            .find(|s| s.key == self.session.key);
+        let missing = current.is_none() && !browser.loading();
+        if let Some(current) = current {
+            self.session = current;
+        }
+        let mut body = session_information(browser, &self.session);
+        if missing {
+            body.notices.insert(
+                0,
+                "Session no longer available in the current inventory.".into(),
             );
         }
+        if let Some(warning) = &self.warning {
+            body.notices.insert(0, warning.clone());
+        }
+        self.dialog.set_information(body);
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     CopyErrorReport,
+    CopyInformation,
+    CloseInformation,
     Continue,
     OpenRelink,
     OpenFolderMove,
@@ -1260,15 +1580,12 @@ fn creation_sources(browser: &Browser) -> Vec<usize> {
         .specs
         .iter()
         .enumerate()
-        .filter_map(|(i, spec)| {
-            matches!(spec, crate::browser::SourceSpec::Codex { .. }).then_some(i)
-        })
+        .filter_map(|(i, spec)| spec.creation_source_id().map(|_| i))
         .collect()
 }
 fn can_create(browser: &Browser) -> bool {
     !browser.loading()
         && matches!(browser.folder, FolderFilter::Path(_))
-        && browser.visible().is_empty()
         && !creation_sources(browser).is_empty()
 }
 
@@ -1306,6 +1623,16 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             crate::error_dialog::Event::None => {}
         }
         return Action::Continue;
+    }
+    if let Some(info) = view.info.as_mut() {
+        match info.dialog.key(key) {
+            crate::error_dialog::Event::Copy => return Action::CopyInformation,
+            crate::error_dialog::Event::Close => {
+                view.info = None;
+                return Action::CloseInformation;
+            }
+            crate::error_dialog::Event::None => return Action::Continue,
+        }
     }
     if let Some(modal) = view.folder_move.as_mut() {
         return modal.key(key);
@@ -1378,7 +1705,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         return Action::Continue;
     }
     if view.help {
-        let entries = menu_entries(browser.include_archived);
+        let entries = menu_entries(browser, view.focus);
         view.help_selected = view.help_selected.min(entries.len() - 1);
         let step = view.help_page_size.max(1);
         match key.code {
@@ -1433,7 +1760,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                     browser.selected = Some(session.key.clone());
                     browser.reconcile(0);
                     view.focus = 1;
-                    view.details_scroll = 0;
+
                     view.message = None;
                     view.editing = false;
                 }
@@ -1461,7 +1788,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
     let command = match key.code {
         KeyCode::Char('?') => {
             view.help = true;
-            view.help_selected = menu_entries(browser.include_archived)
+            view.help_selected = menu_entries(browser, view.focus)
                 .iter()
                 .position(|entry| unavailable(entry.command, browser).is_none())
                 .unwrap_or(0);
@@ -1470,6 +1797,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('q') => Command::Quit,
         KeyCode::Char('/') => Command::Search,
         KeyCode::Char('r') => Command::Refresh,
+        KeyCode::Char('i') if view.focus == 1 => Command::Info,
+        KeyCode::Char('n') if view.focus == 1 => Command::Create,
         KeyCode::Char('l') if view.focus == 1 => Command::Relink,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
         KeyCode::Char('R') => Command::Recover,
@@ -1479,7 +1808,11 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
         KeyCode::Enter if view.focus == 0 => Command::ToggleFolder,
-        KeyCode::Enter if view.focus == 1 && can_create(browser) => Command::Create,
+        KeyCode::Enter
+            if view.focus == 1 && can_create(browser) && browser.visible().is_empty() =>
+        {
+            Command::Create
+        }
         KeyCode::Enter => Command::Resume,
         _ => return Action::Continue,
     };
@@ -1488,6 +1821,12 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
 
 fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> Action {
     match command {
+        Command::Help => view.help = true,
+        Command::Info => {
+            if let Some(session) = selected_session(browser) {
+                view.info = Some(InfoModal::new(browser, session));
+            }
+        }
         Command::Quit => return Action::Quit,
         Command::Relink => return Action::OpenRelink,
         Command::MoveFolder => return Action::OpenFolderMove,
@@ -1499,9 +1838,9 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
         Command::Refresh => return Action::Refresh,
         Command::Archives => browser.include_archived = !browser.include_archived,
-        Command::NextPane => view.focus = (view.focus + 1) % 3,
+        Command::NextPane => view.focus = (view.focus + 1) % 2,
         Command::PreviousPane => {
-            view.focus = (view.focus + 2) % 3;
+            view.focus = (view.focus + 1) % 2;
             view.message = None;
         }
         Command::PreviousItem | Command::NextItem => {
@@ -1525,7 +1864,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                     }
                 }
                 1 => browser.move_selection(delta),
-                _ => view.details_scroll = view.details_scroll.saturating_add_signed(delta as i16),
+                _ => {}
             }
         }
         Command::ToggleFolder => {
@@ -1536,6 +1875,10 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
         }
         Command::Create => {
+            if let Some(reason) = unavailable(Command::Create, browser) {
+                view.message = Some(reason);
+                return Action::Continue;
+            }
             view.focus = 1;
             let sources = creation_sources(browser);
             if sources.len() == 1 {
@@ -1552,9 +1895,6 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
             return Action::ResumeSelected;
         }
-    }
-    if view.focus != 2 {
-        view.details_scroll = 0;
     }
     browser.reconcile(0);
     Action::Continue
@@ -1683,6 +2023,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 }
             }
             if let Some(dialog)=view.error_dialog.as_mut(){dialog.tick().await;}
+            if let Some(info)=view.info.as_mut(){info.refresh(&browser);info.dialog.tick().await;}
             if relink_task.as_ref().is_some_and(|t|t.is_finished()) {
                 let task=relink_task.take().expect("finished relocation");
                 while event::poll(Duration::ZERO)?{let _=event::read()?;}
@@ -1733,6 +2074,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if let Some(modal)=view.relink.as_mut(){
                 if !modal.busy && modal.preview.is_none(){if let Some(picker)=modal.picker.as_mut(){picker.tick(&mut modal.input);}}
             }
+            if let Some(modal)=view.folder_move.as_mut(){ modal.monitor(&browser); }
             discovery.check_folders(&browser);
             if pending.is_none() && relink_task.is_none() {
                 discovery.detail(&browser);
@@ -1751,7 +2093,12 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             Ok(Some(command.session.clone())),
                         );
                         if ready.observed_cwd.as_ref() != Some(&command.cwd) {
-                            view.focus = 2;
+                            view.focus = 1;
+                            let mut info = InfoModal::new(&browser, command.session.clone());
+                            info.dialog.title = "Session folder changed".into();
+                            info.warning = Some(format!("Previously displayed folder: {}\nCurrent resume folder: {}\n\nResume was stopped. Close this dialog, then press Enter in Sessions to request resume in the updated folder. The destination will be checked again.", ready.observed_cwd.as_ref().map(|p|p.display().to_string()).unwrap_or_else(||"Unknown".into()), command.cwd.display()));
+                            info.refresh(&browser);
+                            view.info = Some(info);
                             view.message = Some(format!(
                                 "Resume folder changed to {}. Review it, then press Enter again.",
                                 command.cwd.display()
@@ -1818,16 +2165,15 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             }
                         },
                         Action::CloseFolderMove=>{
+                            if let Some(modal)=view.folder_move.as_mut(){modal.stop_release().await;}
                             if let Some(task)=folder_task.take(){task.abort();}
                             view.folder_move=None;
                         },
                         Action::PreviewFolderMove=>{
                             let Some(modal)=view.folder_move.as_mut() else {continue};
                             let Some(state)=relocation_state.clone() else {continue};
-                            let parent=match crate::relocation::destination(&modal.input,&launch_dir) {
-                                Ok(p)=>p,Err(e)=>{modal.message=Some(e);continue;}
-                            };
-                            let target=match crate::folder_move::destination(&parent,&modal.name) {
+                            modal.stop_release().await;
+                            let target=match modal.target() {
                                 Ok(p)=>p,Err(e)=>{modal.message=Some(e);continue;}
                             };
                             let sources=crate::folder_move_ui::sources(&browser);
@@ -1839,6 +2185,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                         },
                         Action::ApplyFolderMove=>{
                             let Some(modal)=view.folder_move.as_mut() else {continue};
+                            modal.stop_release().await;
                             let Some(plan)=modal.plan.clone() else {continue};
                             let Some(state)=relocation_state.clone() else {continue};
                             let sources=crate::folder_move_ui::sources(&browser);
@@ -1847,6 +2194,12 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             folder_task=Some(tokio::spawn(async move{
                                 FolderMoveResult::Applied(crate::folder_move::execute(plan,state,sources,recovery,tx).await)
                             }));
+                        },
+                        Action::CloseInformation => {
+                            while event::poll(Duration::ZERO)? { let _ = event::read()?; }
+                        },
+                        Action::CopyInformation => {
+                            if let Some(info)=view.info.as_mut(){ info.dialog.start_copy(); }
                         },
                         Action::CopyErrorReport => {
                             if let Some(dialog)=view.error_dialog.as_mut(){dialog.start_copy();}
@@ -1928,11 +2281,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                     continue;
                                 }
                             };
-                            let crate::browser::SourceSpec::Codex { source, .. } = spec else {
-                                continue;
-                            };
+                            let Some(source_id) = spec.creation_source_id().cloned() else { continue; };
                             created = Some((
-                                source.id.clone(),
+                                source_id,
                                 path,
                                 browser.all().into_iter().map(|s| s.key).collect(),
                             ));
@@ -1949,8 +2300,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             terminal.autoresize()?;
                             view.message = match result {
                                 Ok(status) if status.success() => view.message.take(),
-                                Ok(status) => Some(format!("Codex exited with {status}.")),
-                                Err(error) => Some(format!("Could not start Codex: {error}")),
+                                Ok(status) => Some(format!("Harness exited with {status}.")),
+                                Err(error) => Some(format!("Could not start session: {error}")),
                             };
                             discovery.refresh(&mut browser);
                             while event::poll(Duration::ZERO)? {
@@ -2072,6 +2423,10 @@ mod cleanup_tests {
                 let line = session_title(&session, status, width);
                 let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
                 assert!(text.contains(label), "{text}");
+                assert_eq!(
+                    line.spans.last().unwrap().style.fg,
+                    Some(activity_color(status).unwrap_or(Color::Reset))
+                );
             }
             let reason = relink_unavailable(&browser);
             match status {
@@ -2082,7 +2437,11 @@ mod cleanup_tests {
             if matches!(status, RuntimeStatus::Idle | RuntimeStatus::Unloaded) {
                 assert_eq!(
                     activity_color(browser.folder_activity(&crate::browser::FolderFilter::All)),
-                    None
+                    if status == RuntimeStatus::Idle {
+                        Some(Color::Rgb(255, 255, 170))
+                    } else {
+                        None
+                    }
                 );
             }
         }

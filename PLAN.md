@@ -12,7 +12,7 @@ Use **Ratatui and Crossterm** with three areas:
 |---|---|
 | Folder sidebar | Unlinked/Unknown folders and an expandable directory tree with descendant session counts |
 | Session list | Title, last activity, provider, and archive status |
-| Details pane | Full title, session ID, working directory, timestamps, source, and available Git metadata |
+| Session information modal | Grouped property table with title, status, location, readable dates, and technical metadata |
 
 Default to non-archived sessions ordered by recent activity. Include interactive and non-interactive sessions, identifying their source when available. Provide an archive visibility toggle.
 
@@ -406,7 +406,8 @@ Creation currently supports Codex. Provider-owned preparation returns a shared p
 ### Release detached idle sessions before moving (2026-11-15)
 
 - Confirmed relinks, folder moves and recovery share a bounded operational release
-  step; previews permit idle sessions and monitoring remains passive.
+  step; previews permit idle sessions and ordinary browsing remains passive.
+  The folder-move destination dialog now also runs guarded idle release checks.
 - Detached idle runtimes use Codex's transient zero-delay resume/unsubscribe path.
   Attached, active, uncertain, archived-loaded and background-terminal cases remain
   protected with copyable explanations. Persistent defaults are unchanged.
@@ -415,3 +416,67 @@ Creation currently supports Codex. Provider-owned preparation returns a shared p
 - Added progress, updated status guidance, cancellation/proxy cleanup tests,
   terminal acceptance, and a `real-release` check stage. Twenty native cases passed
   on Codex 0.167.2/0.169.0; see `docs/idle-release-validation.md` and its evidence.
+
+### On-demand session information
+
+- Replace the permanent Details pane with a centered, copyable Info modal (`i`
+  in Sessions and the Sessions action menu). Two-pane navigation gives Sessions
+  70% of wide layouts; narrow layouts retain the focused-pane view.
+- Preserve metadata discovery, live status, pinned session identity, scrolling,
+  keyboard isolation, and selection/focus when the modal closes.
+- Display directory mismatch labels during browsing. A changed destination found
+  when resuming opens a warning and requires a separate resume request after
+  dismissal; queued keys cannot launch the session.
+
+### Session information presentation
+
+- Group properties into Session, Location, and Technical details with muted labels,
+  readable values, and no cell grid. Stack labels on narrow terminals.
+- Keep the title and footer fixed while full paths, IDs, and notices wrap and scroll.
+- Show relative activity plus local timestamps with timezone, explicit missing
+  metadata, and concise explanations of live states.
+- Generate clipboard reports from the same fields; copy feedback stays in the
+  footer and preserves the scroll position.
+
+### Contextual controls
+
+- Share command metadata between the footer and action menu, filtering folder
+  and session actions by the focused pane.
+- Keep global controls in a fixed order beginning with Help and Quit, contextual
+  actions on the second row, and diagnostics on the third.
+- Shorten or omit whole hints on narrow terminals; retain all relevant actions
+  and existing availability explanations in the menu.
+
+### Direct folder-move destination
+
+- Replace parent/name steps with one destination field; trailing `/` preserves
+  the source name, otherwise use the exact destination path.
+- Show Previous folder above Final path and preserve typed paths across picker
+  refreshes. Tree navigation fills an existing directory with a trailing `/`.
+- Preview before confirmation; Escape returns to editing. Keep existing move
+  protections and journal recovery without reinterpreting recorded targets.
+
+### Automatic move-dialog readiness
+
+- Run one destination-independent guarded idle release at a time while the
+  destination dialog is open, retrying each eligible session at least five
+  seconds apart. Cancel checks before preview, confirmation, or dismissal.
+- Keep the passive live feed authoritative, and never remove a row on release
+  failure. Include descendant and archived sessions in the compact Session/Status
+  table; archived sessions are not eligible for automatic release.
+- Keep a fixed short status footer, clamp scrolling as rows disappear, and
+  preserve all final native ownership checks before mutation.
+
+### Footer alignment
+
+- Right-align shared and contextual action rows without changing their order.
+- Place feedback at the left of the shared row when a two-column gap fits;
+  otherwise give it a third row. Empty feedback uses only two rows.
+- Measure terminal display width and retain whole-entry shortcut fitting.
+
+### Create sessions in populated folders
+
+- Offer `n New session` and the Create action in Sessions for any selected folder,
+  retaining Enter-to-resume and Enter-to-create for empty folders.
+- Discover creation choices through source capabilities; launch one directly or
+  show a harness-neutral configuration picker for multiple sources.

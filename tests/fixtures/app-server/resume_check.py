@@ -44,21 +44,27 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout'):
             deadline = time.monotonic() + 12
             while not predicate():
                 if time.monotonic() > deadline:
-                    raise AssertionError(f'{action} timeout: {bytes(output[-1800:])!r}')
+                    raise AssertionError(f'{action} timeout: {screen.text()[-2500:]}')
                 if select.select([master], [], [], .05)[0]:
                     output.extend(os.read(master, 65536))
         try:
             wait(lambda: b'Task first' in output)
             # Wait for discovery and detail readiness, then resume from the initially focused sessions pane.
             wait(lambda: (home / 'requests.jsonl').exists() and 'thread/read' in (home / 'requests.jsonl').read_text())
-            import re
-            wait(lambda: 'DIRECTORY MISMATCH' in re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b' ', output).decode(errors='replace'))
+            os.write(master,b'i')
+            wait(lambda: "Folder differs from Codex's current resume destination." in screen.text())
+            os.write(master,b'i')
+            wait(lambda: 'Session information' not in screen.text())
             session_id = 'first'
             if action == 'normal':
                 os.write(master, b'/second\r')
-                wait(lambda: 'ID: second' in screen.text())
-                os.write(master, b'\tjjj')
-                wait(lambda: 'Provider: codex' in screen.line(1, 157))
+                wait(lambda: '> Task second' in screen.text() and 'Search sessions' not in screen.text())
+                os.write(master,b'i')
+                wait(lambda: "Folder differs from Codex's current resume destination." in screen.text())
+                os.write(master,b'\x1b[F')
+                wait(lambda: 'Session ID second' in screen.text())
+                os.write(master,b'i')
+                wait(lambda: 'Session information' not in screen.text())
                 session_id = 'second'
             os.write(master, b'\r')
             wait(lambda: (home / 'launch.json').exists())
@@ -70,16 +76,20 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout'):
             if action in ('sigterm', 'kill-timeout'):
                 child.send_signal(signal.SIGTERM)
             else:
+                return_mark=len(output)
                 os.write(master, b'\x03' if action == 'ctrl-c' else b'x')
                 wait(lambda: os.tcgetpgrp(master) == child.pid)
                 # Wait for refreshed browser before quitting.
-                wait(lambda: output.count(b'toggle/resume') >= 2)
+                wait(lambda: b'Sessions' in output[return_mark:])
                 if action == 'normal':
                     wait(lambda: '> Task second' in screen.text())
                     assert 'Search sessions' not in screen.text()
-                    wait(lambda: 'Provider: codex' in screen.line(1, 157))
-                    os.write(master, b'j')
-                    wait(lambda: 'Source home:' in screen.line(1, 157))
+                    os.write(master,b'i')
+                    wait(lambda: 'Session information' in screen.text())
+                    os.write(master,b'\x1b[F')
+                    wait(lambda: 'Session ID second' in screen.text())
+                    os.write(master,b'i')
+                    wait(lambda: 'Session information' not in screen.text())
                 os.write(master, b'q')
             wait(lambda: child.poll() is not None)
             assert child.returncode == 0, bytes(output)

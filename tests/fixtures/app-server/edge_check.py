@@ -23,7 +23,7 @@ for scenario in ['changed', 'cancel', 'missing', 'direct', 'launch']:
         unrelated = subprocess.Popen(['sleep', '60'])
         terminal = Terminal([binary, '--config', str(home/'config.toml'), '--codex-home', temp, '--codex-bin', str(executable), str(home/'listed')])
         try:
-            terminal.expect('DIRECTORY MISMATCH')
+            terminal.inspect('DIRECTORY MISMATCH')
             before_handoff = len(terminal.output)
             if scenario == 'changed':
                 settings.write_text(json.dumps({'read_cwd': str(home/'changed')}))
@@ -37,13 +37,18 @@ for scenario in ['changed', 'cancel', 'missing', 'direct', 'launch']:
                 executable.unlink()
             terminal.send(b'\r\r')
             if scenario == 'changed':
-                terminal.expect('Resume folder changed')
+                terminal.expect('Session folder changed')
+                terminal.expect(str(home/'resume'))
+                terminal.expect(str(home/'changed'))
+                terminal.send(b'\r')
+                terminal.wait(lambda: 'Session folder changed' not in terminal.text())
                 assert not (home/'launch.json').exists()
                 terminal.send(b'\r')
                 terminal.wait(lambda: (home/'launch.json').exists())
                 assert json.loads((home/'launch.json').read_text())['cwd'] == str(home/'changed')
+                return_mark=len(terminal.output)
                 terminal.send(b'x')
-                terminal.wait(lambda: b'toggle/resume' in terminal.output[before_handoff:])
+                terminal.wait(lambda: b'Sessions' in terminal.output[return_mark:])
             elif scenario == 'cancel':
                 terminal.expect('Preparing resume')
                 terminal.send(b'\x1b')

@@ -17,7 +17,7 @@ for attached in [False,True]:
         env={'HOME':str(root),'XDG_STATE_HOME':str(root/'state'),'PATH':str(root)+':/usr/bin:/bin','WAYLAND_DISPLAY':'tracr-test','COPY_CAPTURE':str(capture)}
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         try:
-            t.expect('ID: session');t.expect('Idle')
+            t.inspect('ID: session');t.expect('Idle')
             t.send(b'l');t.expect('Use this folder')
             t.send(b'\x15'+str(new).encode()+b'\r');t.expect('Enter confirms')
             assert 'thread/resume' not in (home/'live_requests.jsonl').read_text()

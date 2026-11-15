@@ -24,6 +24,14 @@ pub enum SourceSpec {
     Fixture(PathBuf),
 }
 impl SourceSpec {
+    /// A configured source that can launch a fresh session.
+    pub fn creation_source_id(&self) -> Option<&SourceId> {
+        match self {
+            Self::Codex { source, .. } => Some(&source.id),
+            Self::Fixture(_) => None,
+        }
+    }
+
     pub fn prepare_new(&self, cwd: &std::path::Path) -> Result<LaunchCommand, String> {
         match self {
             Self::Codex { binary, source } => {
@@ -302,6 +310,9 @@ impl Browser {
             match self.runtime_status(&session.key) {
                 waiting @ RuntimeStatus::Waiting { .. } => return waiting,
                 RuntimeStatus::Running => status = RuntimeStatus::Running,
+                RuntimeStatus::Idle if status != RuntimeStatus::Running => {
+                    status = RuntimeStatus::Idle
+                }
                 _ => {}
             }
         }

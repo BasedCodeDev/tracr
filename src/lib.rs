@@ -23,3 +23,5 @@ pub mod folder_move;
 mod folder_move_ui;
 
 pub mod error_dialog;
+
+pub mod info_content;

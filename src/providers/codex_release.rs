@@ -5,6 +5,59 @@ use serde_json::{Value, json};
 use std::{collections::HashSet, path::Path, time::Duration};
 use tokio::time::{sleep, timeout};
 
+/// Native release identity; independent of any proposed destination.
+struct ReleaseContext {
+    key: crate::domain::SessionKey,
+    old: std::path::PathBuf,
+    recovery_target: Option<std::path::PathBuf>,
+    archived: bool,
+    created_at: i64,
+    version: String,
+    fingerprint: Value,
+    profile: crate::relocation_profile::Profile,
+}
+impl ReleaseContext {
+    fn matches(&self, thread: &Value) -> bool {
+        thread["id"].as_str() == Some(&self.key.native_id)
+            && thread["createdAt"].as_i64() == Some(self.created_at)
+    }
+}
+
+/// Explicit move-dialog operation. No destination, journal, or filesystem mutation.
+pub(crate) async fn release_idle(
+    binary: &Path,
+    source: &SourceConfig,
+    session: &crate::domain::SessionSummary,
+) -> Result<ReleaseOutcome, String> {
+    timeout(Duration::from_secs(30), async {
+        let mut rpc = Rpc::start(binary, &source.home)
+            .await
+            .map_err(|e| e.to_string())?;
+        let (thread, archived) = r::listed(&mut rpc, &session.key.native_id).await?;
+        let old = session.cwd.clone().ok_or("Missing session directory")?;
+        if thread["cwd"].as_str() != old.to_str()
+            || thread["createdAt"].as_i64() != Some(session.created_at)
+        {
+            return Err("Session changed before release".into());
+        }
+        let detail = r::read(&mut rpc, &session.key.native_id).await?;
+        let context = ReleaseContext {
+            key: session.key.clone(),
+            old,
+            recovery_target: None,
+            archived,
+            created_at: session.created_at,
+            version: r::version(binary).await?,
+            fingerprint: r::fingerprint(&thread),
+            profile: r::recorded_profile(source, &detail).await?,
+        };
+        rpc.close().await;
+        release_inner(binary, source, &context).await
+    })
+    .await
+    .map_err(|_| "Idle release check timed out".to_owned())?
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReleaseOutcome {
     Released,
@@ -36,7 +89,20 @@ pub async fn release(
 ) -> Result<ReleaseOutcome, String> {
     timeout(
         Duration::from_secs(30),
-        release_inner(binary, source, preview, recovery),
+        release_inner(
+            binary,
+            source,
+            &ReleaseContext {
+                key: preview.key.clone(),
+                old: preview.old.clone(),
+                recovery_target: recovery.then(|| preview.target.clone()),
+                archived: preview.archived,
+                created_at: preview.created_at,
+                version: preview.version.clone(),
+                fingerprint: preview.fingerprint.clone(),
+                profile: preview.profile,
+            },
+        ),
     )
     .await
     .map_err(|_| {
@@ -73,8 +139,7 @@ async fn loaded(client: &mut OperationalClient, id: &str) -> Result<bool, String
 async fn release_inner(
     binary: &Path,
     source: &SourceConfig,
-    p: &r::Preview,
-    recovery: bool,
+    p: &ReleaseContext,
 ) -> Result<ReleaseOutcome, String> {
     if p.key.source_id != source.id || p.key.provider.0 != "codex" {
         return Err("Release source does not match the session".into());
@@ -94,7 +159,7 @@ async fn release_inner(
         .call("thread/read", json!({"threadId":id,"includeTurns":false}))
         .await?;
     let thread = &live["thread"];
-    if !r::matches_thread(thread, p) {
+    if !p.matches(thread) {
         return Err("Release session identity changed".into());
     }
     match RuntimeStatus::from_codex(thread.get("status")) {
@@ -103,7 +168,12 @@ async fn release_inner(
         _ => return Ok(ReleaseOutcome::Busy),
     }
     let cwd = thread["cwd"].as_str().ok_or("Missing release directory")?;
-    if cwd != p.old.to_string_lossy() && !(recovery && cwd == p.target.to_string_lossy()) {
+    if cwd != p.old.to_string_lossy()
+        && !p
+            .recovery_target
+            .as_ref()
+            .is_some_and(|path| cwd == path.to_string_lossy())
+    {
         return Err("Session directory changed before release".into());
     }
     let mut metadata = Rpc::start(binary, &source.home)
@@ -113,9 +183,9 @@ async fn release_inner(
     if archived || p.archived {
         return Err("Automatic release of loaded archived sessions is not yet verified. Close the session and retry once it is unloaded.".into());
     }
-    if !r::matches_thread(&before, p)
+    if !p.matches(&before)
         || before["cwd"] != thread["cwd"]
-        || (!recovery && r::fingerprint(&before) != p.fingerprint)
+        || (p.recovery_target.is_none() && r::fingerprint(&before) != p.fingerprint)
     {
         return Err("Session changed before release".into());
     }
@@ -149,12 +219,11 @@ async fn release_inner(
         )
         .await?;
     // Unsubscribe even if validation fails; dropping the connection also handles cancellation.
-    let validation =
-        if !r::matches_thread(&resumed["thread"], p) || resumed["cwd"].as_str() != Some(cwd) {
-            Err("Session changed during release".to_owned())
-        } else {
-            r::simple_permissions(&resumed, Path::new(cwd), p.profile).map_err(|e| e.to_string())
-        };
+    let validation = if !p.matches(&resumed["thread"]) || resumed["cwd"].as_str() != Some(cwd) {
+        Err("Session changed during release".to_owned())
+    } else {
+        r::simple_permissions(&resumed, Path::new(cwd), p.profile).map_err(|e| e.to_string())
+    };
     client
         .call("thread/unsubscribe", json!({"threadId":id}))
         .await?;

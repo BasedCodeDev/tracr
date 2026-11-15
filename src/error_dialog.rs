@@ -18,6 +18,8 @@ pub struct ErrorDialog {
     pub title: String,
     pub summary: String,
     body: String,
+    information: bool,
+    content: Option<crate::info_content::Information>,
     pub scroll: u16,
     pub scroll_limit: Cell<u16>,
     pub copy_status: Option<String>,
@@ -33,14 +35,33 @@ impl ErrorDialog {
             title: title.into(),
             summary: summary.into(),
             body: body.into(),
+            information: false,
+            content: None,
             scroll: 0,
             scroll_limit: Cell::new(0),
             copy_status: None,
             copy_task: None,
         }
     }
+    pub fn information(title: impl Into<String>, body: impl Into<String>) -> Self {
+        let mut dialog = Self::new(title, "", body);
+        dialog.information = true;
+        dialog
+    }
+    pub fn set_body(&mut self, body: String) {
+        self.body = body;
+    }
+    pub fn set_information(&mut self, content: crate::info_content::Information) {
+        self.content = Some(content);
+    }
     pub fn report(&self) -> String {
-        format!("{}\n\n{}", self.title, self.body)
+        format!(
+            "{}\n\n{}",
+            self.title,
+            self.content
+                .as_ref()
+                .map_or_else(|| self.body.clone(), |content| content.report())
+        )
     }
     pub fn key(&mut self, key: KeyEvent) -> Event {
         if key.kind == KeyEventKind::Release {
@@ -50,6 +71,7 @@ impl ErrorDialog {
         match key.code {
             KeyCode::Char('c') if self.copy_task.is_none() => return Event::Copy,
             KeyCode::Enter | KeyCode::Esc => return Event::Close,
+            KeyCode::Char('i') if self.information => return Event::Close,
             KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
             KeyCode::Down => {
                 self.scroll = self.scroll.saturating_add(1).min(self.scroll_limit.get())
@@ -59,6 +81,7 @@ impl ErrorDialog {
                 self.scroll = self.scroll.saturating_add(10).min(self.scroll_limit.get())
             }
             KeyCode::Home => self.scroll = 0,
+            KeyCode::End => self.scroll = self.scroll_limit.get(),
             _ => {}
         }
         Event::None
@@ -66,7 +89,9 @@ impl ErrorDialog {
     pub fn start_copy(&mut self) {
         if self.copy_task.is_none() {
             self.copy_status = Some("Copying message…".into());
-            self.scroll = 0;
+            if !self.information {
+                self.scroll = 0;
+            }
             self.copy_task = Some(tokio::spawn(crate::clipboard::copy(self.report())));
         }
     }
@@ -78,13 +103,19 @@ impl ErrorDialog {
                 Ok(Err(e)) => e,
                 Err(e) => format!("Copy failed: {e}"),
             });
-            self.scroll = 0;
+            if !self.information {
+                self.scroll = 0;
+            }
         }
     }
     pub fn draw(&self, frame: &mut Frame<'_>) {
         let area = frame.area();
-        let width = area.width.min(76);
-        let height = area.height.min(24);
+        if area.width < 12 || area.height < 4 {
+            frame.render_widget(Paragraph::new("tracr: enlarge terminal"), area);
+            return;
+        }
+        let width = area.width.min(if self.information { 80 } else { 76 });
+        let height = area.height.min(if self.information { 28 } else { 24 });
         let popup = Rect::new(
             area.x + (area.width - width) / 2,
             area.y + (area.height - height) / 2,
@@ -98,8 +129,17 @@ impl ErrorDialog {
             .title(safe_text(&self.title));
         let inner = outer.inner(popup);
         frame.render_widget(outer, popup);
+        if let Some(content) = &self.content {
+            self.scroll_limit.set(content.draw(
+                frame,
+                inner,
+                self.scroll,
+                self.copy_status.as_deref(),
+            ));
+            return;
+        }
         let parts = Layout::vertical([
-            Constraint::Length(1),
+            Constraint::Length(if self.information { 0 } else { 1 }),
             Constraint::Min(1),
             Constraint::Length(3),
         ])
@@ -127,7 +167,11 @@ impl ErrorDialog {
         self.scroll_limit.set(max);
         frame.render_widget(body.scroll((self.scroll.min(max), 0)), parts[1]);
         frame.render_widget(
-            Paragraph::new("c Copy message\nEnter/Esc close\n↑/↓ scroll · Home top"),
+            Paragraph::new(if self.information {
+                "c Copy information\nEnter/Esc/i close\n↑/↓ PgUp/PgDn scroll · Home/End"
+            } else {
+                "c Copy message\nEnter/Esc close\n↑/↓ scroll · Home top"
+            }),
             parts[2],
         );
     }

@@ -93,6 +93,19 @@ class Terminal:
                 raise RuntimeError(f'terminal process exited unexpectedly: {self.child.returncode}')
     def expect(self, text):
         self.wait(lambda: text in self.text())
+    def inspect(self, expected):
+        self.expect('Sessions')
+        self.wait(lambda: 'Loading' not in self.text())
+        self.send(b'i')
+        self.expect('Session information')
+        if expected.startswith('ID: '):
+            self.send(b'\x1b[F')
+            expected='Session ID '+expected[4:]
+        elif expected == 'DIRECTORY MISMATCH':
+            expected="Folder differs from Codex's current resume destination."
+        self.expect(expected)
+        self.send(b'i')
+        self.wait(lambda: 'Session information' not in self.text())
     def finish(self):
         self.send(b'q')
         self.wait(lambda: self.child.poll() is not None)

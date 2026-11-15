@@ -15,12 +15,12 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
     command=[binary,'--codex-home',str(home),'--codex-bin',fake,str(old)]
     t=Terminal(command,env)
     try:
-        t.expect('ID: session')
+        t.inspect('ID: session')
         t.expect('Unlinked · codex')
-        t.expect('Folder missing — Enter or l to relink.')
-        t.expect('l relink');t.expect('R recover')
+        t.inspect('Folder missing — Enter or l to relink.')
+        t.expect('l Relink');t.expect('R Recover')
         t.resize(24, 36)
-        t.expect('l relink');t.expect('R recover')
+        t.expect('n New');t.expect('? Help · q Quit')
         t.resize(80, 240)
         t.send(b'l');t.expect('New folder');t.expect('Use this folder')
         t.wait(lambda:'Loading folders' not in t.text())
@@ -38,14 +38,14 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
         t.resize(80, 240);t.expect('Use this folder')
         t.send(b'\x15\x1b[200~'+str(new).encode()+b'\x1b[201~\r');t.expect('Enter confirms')
         t.send(b'\r');t.expect('Session relinked and verified.')
-        t.expect('ID: session')
+        t.inspect('ID: session')
         t.wait(lambda:'Unlinked · codex' not in t.text())
         assert json.loads((home/'native.json').read_text())['cwd']==str(new)
         t.finish()
     finally:t.close()
     reopened=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(new)],env)
     try:
-        reopened.expect('ID: session')
+        reopened.inspect('ID: session')
         assert 'Unlinked · codex' not in reopened.text()
         reopened.finish()
     finally:reopened.close()
@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
         t.expect('unfinished relocation')
         t.send(b'R');t.expect('Inspect/recover relocation')
         t.send(b'\r');t.expect('Session relinked and verified.')
-        t.expect('ID: session');t.finish()
+        t.inspect('ID: session');t.finish()
     finally:t.close()
     requests=(home/'requests.jsonl').read_text()
     assert 'turn/start' not in requests
@@ -66,11 +66,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
     (new/'sentinel').write_text('unchanged')
     t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(new)],env)
     try:
-        t.expect('ID: session');t.send(b'l');t.expect('New folder')
+        t.inspect('ID: session');t.send(b'l');t.expect('New folder')
         t.send(b'\x15'+str(child).encode()+b'\r');t.expect('Enter confirms')
         t.expect('Project files stay where they are.')
         t.send(b'\r');t.expect('Session relinked and verified.')
-        t.expect('ID: session')
+        t.inspect('ID: session')
         assert json.loads((home/'native.json').read_text())['cwd']==str(child)
         assert (new/'sentinel').read_text()=='unchanged'
         t.finish()
@@ -94,7 +94,7 @@ for uncertain in (False, True):
         command=[binary,'--codex-home',str(home),'--codex-bin',fake,str(old)]
         t=Terminal(command,env)
         try:
-            t.expect('ID: session');t.send(b'l');t.expect('New folder')
+            t.inspect('ID: session');t.send(b'l');t.expect('New folder')
             t.send(b'\x15'+str(new).encode()+b'\r')
             if uncertain:
                 t.expect('Enter confirms');t.send(b'\r')
@@ -120,7 +120,7 @@ for uncertain in (False, True):
             t.expect('Message copied')
             t.send(b'\x1b[H');t.resize(80,240);t.expect('! Relink failed')
             t.send(b'\x1b' if uncertain else b'\r')
-            t.expect('R recover');t.finish()
+            t.expect('R Recover');t.finish()
         finally:t.close()
         if uncertain:
             journal=json.loads(next((state/'tracr/relocations').glob('*.json')).read_text())
@@ -133,7 +133,7 @@ for uncertain in (False, True):
         # A rejected attempt is terminal, not unfinished recovery on restart.
         t=Terminal(command,env)
         try:
-            t.expect('ID: session' if not uncertain else 'unfinished relocation')
+            t.inspect('ID: session') if not uncertain else t.expect('unfinished relocation')
             if not uncertain:assert 'unfinished relocation' not in t.text()
             t.finish()
         finally:t.close()

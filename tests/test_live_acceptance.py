@@ -26,9 +26,9 @@ class AcceptanceTests(unittest.TestCase):
                 assert data == b'\x03'
             def wait(self, predicate):
                 assert predicate(), 'unrecognized interrupt response'
-        for replies in ([b'Ask Codex to do anything', b'Press Ctrl-C again', b'toggle/resume'],
-                        [b'Press Ctrl-C again', b'toggle/resume'],
-                        [b'toggle/resume']):
+        for replies in ([b'Ask Codex to do anything', b'Press Ctrl-C again', b'Sessions'],
+                        [b'Press Ctrl-C again', b'Sessions'],
+                        [b'Sessions']):
             terminal = ExitTerminal(replies)
             live.return_to_browser(terminal)
             self.assertEqual(terminal.sent, len(replies))
@@ -143,7 +143,7 @@ class AcceptanceTests(unittest.TestCase):
                 live.verify_inventory({'complete':True, 'sessions':[{**row, **mutation}]}, 'abc', '/tmp/project')
 
     def test_readiness_and_stale_output(self):
-        good = 'Folders ID: abc Folder: /project Resume: Enter'
+        good = 'Folders Sessions i Info ID: abc Folder: /project Resume: Enter'
         self.assertTrue(live.ready(good, 'abc', '/project'))
         self.assertFalse(live.ready(good+' Fetching metadata', 'abc', '/project'))
         terminal = live.Terminal.__new__(live.Terminal)
@@ -183,7 +183,7 @@ class SimulatedFlowTests(unittest.TestCase):
             executable = Path(temp)/'codex'
             executable.write_bytes(b'fake executable fingerprint')
             cwd = str(home/'old')
-            browser = f'Folders ID: abc Folder: {cwd} Resume: Enter > ▸ old (1)'
+            browser = f'Folders Sessions i Info ID: abc Folder: {cwd} Resume: Enter > ▸ old (1)'
             class FakeTerminal:
                 def __init__(self, *args):
                     self.output = bytearray(browser.encode())
@@ -206,7 +206,7 @@ class SimulatedFlowTests(unittest.TestCase):
                         self.output.extend(f' Session: {identity} Directory: {directory}'.encode())
                     elif data == b'\x03':
                         self.interrupts += 1
-                        self.output.extend(b' Press Ctrl-C again' if self.interrupts == 1 else b'toggle/resume')
+                        self.output.extend(b' Press Ctrl-C again' if self.interrupts == 1 else b'Sessions')
                     elif data == b'r':
                         self.output.extend(b'refreshing')
                         self.state = 'refreshing'
@@ -217,6 +217,8 @@ class SimulatedFlowTests(unittest.TestCase):
                         self.state = browser
                         self.refreshing = False
                     if not predicate(): raise AssertionError('unexplained timeout')
+                def inspect(self, expected):
+                    assert expected in self.state
                 def finish(self):
                     pass
                 def close(self):

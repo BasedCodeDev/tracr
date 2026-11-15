@@ -8,3 +8,4 @@ __pycache__/
 /.agents/
 /.aws/
 /.codex/
+/tasks.txt

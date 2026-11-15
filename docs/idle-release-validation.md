@@ -1,8 +1,10 @@
 # Automatic idle release before relocation
 
-Implemented for Codex 0.167.2 and 0.169.0. Release happens only after the user
-confirms a session relink or folder move, including recovery. Preview and passive
-status monitoring never resume sessions.
+Implemented for Codex 0.167.2 and 0.169.0. Release happens while the user has the folder-move destination dialog open,
+and after confirmed relinks, folder moves, and recovery. Ordinary browsing and
+passive status monitoring never resume sessions. The move dialog serializes
+guarded checks, retries eligible idle sessions no more frequently than every
+five seconds, and cancels its worker before preview, confirmation, or dismissal.
 
 A dedicated connection to the existing daemon checks fresh loaded status,
 identity, directory, archive state, recorded permission profile, and background

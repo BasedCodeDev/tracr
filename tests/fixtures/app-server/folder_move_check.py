@@ -14,18 +14,17 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
     env={**os.environ,'XDG_STATE_HOME':str(root/'state')}
     t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
     try:
-        t.expect('ID: session')
-        t.send(b'\x1b[Dm');t.expect('Destination parent')
-        # Parent is already the containing directory; move focus tree -> button.
-        t.send(b'\t\r');t.expect('Folder name:')
-        t.send(b'\x15moved\r');t.expect('Enter confirms')
+        t.inspect('ID: session')
+        t.send(b'\x1b[Dm');t.expect('Destination folder')
+        # Edit the exact destination directly; no separate naming screen.
+        t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r');t.expect('Enter confirms')
         t.expect('1 sessions')
         t.send(b'\x1b')
         t.wait(lambda: 'Enter confirms' not in t.text())
         assert old.exists() and not (root/'moved').exists()
-        t.send(b'm');t.expect('Destination parent')
-        t.send(b'\t\r');t.expect('Folder name:')
-        t.send(b'\x15moved\r');t.expect('Enter confirms')
+        t.expect('Destination folder')
+        t.expect(str(root/'moved'))
+        t.send(b'\r');t.expect('Enter confirms')
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
         assert not old.exists()
         assert (root/'moved/file').read_text()=='unchanged'
@@ -40,6 +39,16 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
         t.expect('Unfinished folder move')
         t.send(b'R');t.expect('Inspect/recover folder move')
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
+        t.finish();t.close()
+        archive=root/'archive';archive.mkdir()
+        t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(root/'moved')],env)
+        t.inspect('ID: session')
+        t.send(b'\x1b[Dm');t.expect('Destination folder')
+        t.send(b'\x1b[Z\x15'+(str(archive)+'/').encode()+b'\r');t.expect('Enter confirms')
+        t.expect(str(archive/'moved'))
+        t.send(b'\r');t.expect('Folder and sessions moved and verified.')
+        assert (archive/'moved/file').read_text()=='unchanged'
+        assert json.loads((home/'native.json').read_text())['cwd']==str(archive/'moved')
         t.finish()
     finally:t.close()
     print('folder move picker, name, cancel, confirmation, selection and recovery: passed')
@@ -60,9 +69,8 @@ for recovery in (False, True):
              'PATH':str(root)+':/usr/bin:/bin','COPY_CAPTURE':str(capture)}
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         try:
-            t.expect('ID: session');t.send(b'\x1b[Dm');t.expect('Destination parent')
-            t.send(b'\t\r');t.expect('Folder name:')
-            t.send(b'\x15moved\r')
+            t.inspect('ID: session');t.send(b'\x1b[Dm');t.expect('Destination folder')
+            t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r')
             if recovery:
                 t.expect('Enter confirms');t.send(b'\r')
             t.expect('! Folder move failed');t.expect('c Copy message')

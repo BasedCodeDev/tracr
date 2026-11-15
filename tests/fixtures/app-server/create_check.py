@@ -31,9 +31,9 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         t.expect('Create new session')
         assert 'All sessions' not in t.text()
         t.send(b'\r')
-        t.expect('Codex home —')
+        t.expect('Choose harness —')
         t.send(b'\x1b')
-        t.wait(lambda: 'Codex home —' not in t.text())
+        t.wait(lambda: 'Choose harness —' not in t.text())
         assert not any((h/'launch.json').exists() for h in homes)
         t.send(b'\r\x1b[B\r\r')
         t.wait(lambda: (homes[1]/'launch.json').exists())
@@ -43,17 +43,39 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         assert not (homes[0]/'launch.json').exists()
         saved = state/'tracr/browser-state.json'
         assert json.loads(saved.read_text())['folder'] == str(project)
+        return_mark=len(t.output)
         t.send(b'x')
-        t.expect('ID: created')
+        t.wait(lambda: b'i Info' in t.output[return_mark:])
+        t.expect('New session')
+        t.inspect('ID: created')
         assert '> New session' in t.text()
+        t.send(b'n');t.expect('Choose harness —')
+        t.send(b'\x1b');t.wait(lambda:'Choose harness —' not in t.text())
         t.finish()
     finally:
         t.close()
+    # A single configured harness creates directly even in a nonempty folder.
+    (homes[1]/'launch.json').unlink()
+    single=[binary,'--config',str(config),'--codex-bin',str(fake),'--codex-home',str(homes[1]),str(project)]
+    t=Terminal(single,env)
+    try:
+        t.inspect('ID: created')
+        t.send(b'\x1b[D');t.send(b'n');t.send(b'?');t.expect('Actions & shortcuts')
+        assert not (homes[1]/'launch.json').exists()
+        t.send(b'\x1b');t.wait(lambda:'Actions & shortcuts' not in t.text())
+        t.send(b'\x1b[Cn')
+        t.wait(lambda:(homes[1]/'launch.json').exists())
+        launch=json.loads((homes[1]/'launch.json').read_text())
+        assert launch['args']==['--cd',str(project)] and launch['cwd']==str(project)
+        assert 'Choose harness' not in t.text()
+        mark=len(t.output);t.send(b'x');t.wait(lambda:b'i Info' in t.output[mark:])
+        t.finish()
+    finally:t.close()
     # Plain invocation restores the folder; explicit path overrides it.
     for extra, expected in [([], 'ID: created'), ([str(root/'missing')], 'Create new session')]:
         t = Terminal(args+extra, env)
         try:
-            t.expect(expected)
+            t.inspect(expected) if expected.startswith('ID:') else t.expect(expected)
             if extra:
                 t.send(b'\r\r')
                 t.expect('Cannot create a session')

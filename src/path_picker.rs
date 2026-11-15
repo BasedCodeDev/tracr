@@ -41,6 +41,7 @@ pub struct Picker {
     pub error: Option<String>,
     pub loading: bool,
     launch: PathBuf,
+    move_source: Option<PathBuf>,
     home: Option<PathBuf>,
     expanded: BTreeSet<PathBuf>,
     generation: u64,
@@ -62,6 +63,7 @@ impl Picker {
             error: None,
             loading: true,
             launch,
+            move_source: None,
             home: dirs::home_dir(),
             expanded: BTreeSet::new(),
             generation: 0,
@@ -71,6 +73,15 @@ impl Picker {
             tx,
             rx,
         }
+    }
+    pub fn for_move(launch: PathBuf, source: PathBuf, input: &str) -> Self {
+        let mut picker = Self::new(launch);
+        picker.move_source = Some(source);
+        picker.caret = input.len();
+        picker
+    }
+    pub fn is_folder_move(&self) -> bool {
+        self.move_source.is_some()
     }
     fn changed(&mut self) {
         self.generation += 1;
@@ -109,6 +120,9 @@ impl Picker {
                     self.changed();
                     if let Some(text) = path.to_str() {
                         *input = text.to_owned();
+                        if self.move_source.is_some() && !input.ends_with('/') {
+                            input.push('/');
+                        }
                     } else {
                         input.clear();
                         self.error = Some("This folder name cannot be entered as UTF-8.".into());
@@ -197,9 +211,20 @@ impl Picker {
             self.home.clone(),
             self.expanded.clone(),
         );
+        let move_source = self.move_source.clone();
         // Detached bounded workers cannot stall the terminal or Tokio shutdown on a slow mount.
         std::thread::spawn(move || {
-            let snapshot = scan(&input, &launch, home.as_deref(), expanded, generation == 0);
+            let mut snapshot = scan(&input, &launch, home.as_deref(), expanded, generation == 0);
+            if let Some(old) = move_source {
+                snapshot.initial = None;
+                let result = crate::folder_move::resolve_destination(&input, &old, &launch);
+                snapshot.valid = result.as_ref().is_ok_and(|path| matches!(std::fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound));
+                snapshot.error = result.err();
+                if !snapshot.valid && snapshot.error.is_none() {
+                    snapshot.error =
+                        Some("Destination already exists; choose a new folder path.".into());
+                }
+            }
             let _ = tx.send((generation, snapshot));
         });
     }
@@ -460,6 +485,35 @@ mod tests {
             &mut input,
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
         ));
+    }
+    #[test]
+    fn move_picker_preserves_exact_input_and_tree_selection_adds_slash() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("old");
+        std::fs::create_dir(&old).unwrap();
+        let mut input = root.path().join("new name").display().to_string();
+        let mut picker = Picker::for_move(root.path().into(), old, &input);
+        let expected = input.clone();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while picker.loading {
+            picker.tick(&mut input);
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(input, expected);
+        assert!(picker.valid);
+        picker.key(&mut input, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert!(input.ends_with('/'));
+        let selected = picker.selected.clone().unwrap();
+        assert_eq!(Path::new(&input), selected);
+        let expected = input.clone();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while picker.loading {
+            picker.tick(&mut input);
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(input, expected);
     }
     #[test]
     fn stale_directory_results_cannot_replace_newer_input() {

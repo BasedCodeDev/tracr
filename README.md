@@ -158,9 +158,13 @@ folder immediately, showing only sessions recorded directly there. The session
 pane starts focused: choose a session and press Enter to resume. Without a path, tracr restores the last visited folder; the first launch starts in your current directory. You can
 navigate to other folders or search globally; selecting a result opens its folder.
 
-When a folder has no sessions shown, the Sessions pane offers **Create new session — Enter**.
+In Sessions, press **n** or choose **Create new session** from `?` to start a
+new session in the selected folder, including folders with existing sessions.
+When no sessions are shown, Enter also creates a session; otherwise Enter resumes
+the selected session.
 This opens Codex interactively in that folder and returns to tracr when you exit.
-With multiple configured Codex homes, choose where to store the new session first.
+A single configured creation source launches directly. With multiple sources,
+**Choose harness** lets you select the configuration to use before launch.
 The folder must already exist. Hidden archives can be shown with `a`; fixture data
 and the Unlinked/Unknown aggregate views cannot create sessions.
 
@@ -178,11 +182,12 @@ The dev script builds inside the repository and launches from your caller direct
 so relative fixture and configuration arguments also resolve there.
 
 
-The folder, session, and details panes show partial results while loading.
+The folder and session panes show partial results while loading.
 Terminals narrower than 100 columns show the focused pane full-width.
 
 - Up / Down or `j/k`: navigate; Left / Right or Tab / Shift-Tab: switch panes.
 - Enter: expand or collapse the selected folder, resume a session, or relink a session whose folder is missing.
+- `n` in Sessions: create a new session in the selected folder.
 - `l` in Sessions: relink the selected session. Choose an existing destination,
   press Enter to preview, then Enter again to confirm. Escape cancels before execution.
 - `R`: inspect/recover an unfinished relocation. Recovery never recreates the old folder.
@@ -193,6 +198,7 @@ Terminals narrower than 100 columns show the focused pane full-width.
   archive toggle.
 - Escape outside the modal moves to the previous pane, closes help, or cancels
   pending resume preparation.
+- `i` in Sessions: open session information; `c` copies it, and Enter/Esc/`i` closes it.
 - `a`: include archived sessions; `r`: refresh.
 - `?`: open the grouped action menu. Up/Down or `j/k` selects a command; Enter
   closes the menu and runs it. Unavailable commands show a reason and remain
@@ -213,10 +219,11 @@ and focus borders remain visible independently of those colors.
 Status is polled every two seconds from each configured Codex home's existing
 daemon, without resuming sessions or answering approvals. **Idle** means Codex
 still has the session loaded; **Unloaded** means the latest successful check found
-it released. Both labels use neutral text and leave folder colors unchanged.
+it released. Idle uses pale yellow, including folders containing idle sessions;
+Unloaded stays neutral. Waiting and running take priority over idle folder colors.
 Closing a Codex window may leave a session idle briefly before Codex releases it;
-after you confirm a relink or folder move, tracr tries to release a detached idle
-session immediately. Sessions still attached to another client remain protected;
+tracr tries to release detached idle sessions while the folder-move dialog is
+open and after you confirm an individual relink. Sessions still attached to another client remain protected;
 close that client and retry. Running or waiting sessions cannot be moved. Session details explain availability.
 Before the first successful check, or if monitoring fails, sessions show **Status
 unknown**. On failure, activity highlights are cleared and the footer reports that
@@ -232,11 +239,33 @@ visibility affects folder counts and search.
 
 Refresh retains old results while new pages load; failed sources remain visibly
 incomplete. A successful refresh removes records no longer listed by that source.
+The browser has two panes: Folders and Sessions. The footer and `?` action menu
+follow the selected pane: folder expansion and moving belong to Folders; resume,
+Info, and relinking belong to Sessions. Shared controls stay in the same order,
+with Help and Quit first. Both action rows are right-aligned. Feedback shares
+the upper row on the left when it fits; otherwise it gets a third row.
+Narrow terminals omit trailing footer hints; the full
+set remains available in `?`. Recovery is shared by both panes.
+ Press **i** in Sessions, or
+choose **Session information** in the action menu, to open a centered information
+modal. Use arrows, PageUp/PageDown, Home/End to scroll, **c** to copy the information,
+and **i**, Enter, or Escape to close it. The selected session and pane are preserved.
+
+Information is grouped into Session, Location, and Technical details, with aligned
+labels and wrapped values. Narrow terminals stack labels above values. The title
+and copy controls stay visible while scrolling, and copying keeps your position.
+Missing metadata reads “Not recorded”; uncertain states read “Unknown”.
+
+Browsing never opens Info automatically. If a fresh resume check discovers a
+changed destination, tracr stops the launch and opens **Session folder changed**
+with both paths. Close that warning and press Enter separately in Sessions to
+request resume again; the destination is checked again before launch.
+
 Details are fetched separately after that source finishes discovery. When Codex
-lists one folder but reads another, the details pane shows both without silently
+lists one folder but reads another, Session information shows both without silently
 regrouping the session. The Sessions pane shows how long ago each session was
 last active, ordered from newest to oldest. Exact timestamps remain available
-as Unix seconds in Details and CLI output.
+as local dates with a timezone in Session information, and as Unix seconds in CLI output.
 
 Live discovery explicitly includes non-interactive and subagent source kinds
 exposed by the tested Codex protocol, and pages active/archived inventories.
@@ -245,7 +274,7 @@ from discovery, search, and folder counts. Ordinary sessions with the same title
 and other subagents remain visible.
 Backend-hidden attached threads are not separately traversed. Requests time out
 after 20 seconds; quitting shuts down only app servers owned by tracr.
-Press Enter in the session or details pane to resume an active Codex session in
+Press Enter in the Sessions pane to resume an active Codex session in
 this terminal. tracr checks fresh metadata and the working directory before launch.
 If the destination changed since it was displayed, review it and press Enter again.
 Escape cancels preparation. Archived sessions and fixtures remain browse-only.
@@ -352,10 +381,20 @@ The verifier reports passed, failed, and blocked stages and retains logs. See
 ## Move a folder and its sessions
 
 Select an existing folder in the **Folders** pane and press **m**, or choose
-**Move folder** from `?`. Choose a destination parent using the same folder
-picker as relinking, then edit the folder name and press Enter to preview.
+**Move folder** from `?`. Choose a destination folder using the same directory browser as relinking.
+End the path with `/` to preserve the original folder name: moving `project`
+to `/archive/` produces `/archive/project`. Without a trailing slash, the path
+is the exact new location, so `/archive/renamed` also renames the folder.
+The previous folder and final path appear above the field. A compact Sessions
+table beside the folder tree shows live states throughout the source subtree,
+including archives. While this dialog is open, tracr automatically attempts to
+release eligible detached idle sessions. Sessions still open in Codex stay
+protected; closing them lets a later check release them. PageUp/PageDown scroll
+the table. Narrow terminals stack
+it below the tree. These hints do not replace the final safety checks. Press Enter to
+preview, then Enter to confirm; Escape returns from the preview to editing.
 The preview lists the affected sessions, including archived sessions and sessions
-in subfolders. Enter confirms; Esc cancels before execution.
+in subfolders. Enter confirms; Escape returns to editing, where Escape cancels.
 
 The destination must not exist. This version supports directory renames within
 one filesystem; it never merges directories, overwrites a destination, or falls
@@ -365,7 +404,8 @@ directory. Relative session paths are preserved, while unrelated sessions stay p
 Every configured Codex source is checked, independent of search and archive
 visibility. Active sessions, unsupported permission settings, missing descendant
 directories, or incomplete inventories block the move. Detached idle sessions are
-released automatically after confirmation, before files move. Loaded archived
+released automatically while choosing a destination and checked again after
+confirmation, before files move. Loaded archived
 sessions and sessions with background terminals require manual closure; automatic
 release is not yet verified for those cases. Codex storage and tracr's
 recovery storage cannot be inside the folder being moved.

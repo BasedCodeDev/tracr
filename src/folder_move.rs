@@ -141,6 +141,46 @@ fn resolved(path: &Path) -> Result<PathBuf> {
     let parent = path.parent().ok_or("Cannot resolve protected path")?;
     Ok(resolved(parent)?.join(path.file_name().ok_or("Invalid protected path")?))
 }
+/// Resolve the final path, preserving a trailing slash as an explicit nesting request.
+pub fn resolve_destination(input: &str, old: &Path, launch: &Path) -> Result<PathBuf> {
+    if input.is_empty() {
+        return Err("Enter a destination folder.".into());
+    }
+    let raw = if input == "~" {
+        dirs::home_dir().ok_or("Home directory unavailable")?
+    } else if let Some(rest) = input.strip_prefix("~/") {
+        dirs::home_dir()
+            .ok_or("Home directory unavailable")?
+            .join(rest)
+    } else {
+        let path = PathBuf::from(input);
+        if path.is_absolute() {
+            path
+        } else {
+            launch.join(path)
+        }
+    };
+    let target = if input.ends_with('/') {
+        raw.join(old.file_name().ok_or("Cannot move a filesystem root")?)
+    } else {
+        raw
+    };
+    if matches!(input.rsplit('/').next(), Some(".") | Some("..")) {
+        return Err("Destination must include a new folder name.".into());
+    }
+    let parent = target
+        .parent()
+        .ok_or("Destination must have a parent folder")?;
+    let parent =
+        fs::canonicalize(parent).map_err(|e| format!("Destination parent is unavailable: {e}"))?;
+    identity(&parent)?;
+    Ok(parent.join(
+        target
+            .file_name()
+            .ok_or("Destination must include a folder name")?,
+    ))
+}
+
 pub fn destination(parent: &Path, name: &str) -> Result<PathBuf> {
     if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0') {
         return Err("Folder name must be one nonempty name, without slashes.".into());

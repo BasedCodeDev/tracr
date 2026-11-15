@@ -317,3 +317,38 @@ async fn cross_filesystem_and_busy_coordinator_are_rejected() {
     ));
     assert!(old.exists());
 }
+
+#[test]
+fn destination_input_distinguishes_nesting_from_rename() {
+    let root = tempfile::tempdir().unwrap();
+    let old = root.path().join("项目 old");
+    let parent = root.path().join("archive");
+    std::fs::create_dir(&old).unwrap();
+    std::fs::create_dir(&parent).unwrap();
+    let resolve = |input: &str| folder_move::resolve_destination(input, &old, root.path());
+    assert_eq!(resolve("archive/").unwrap(), parent.join("项目 old"));
+    assert_eq!(
+        resolve("archive/new name").unwrap(),
+        parent.join("new name")
+    );
+    assert_eq!(resolve("renamed").unwrap(), root.path().join("renamed"));
+    assert_eq!(
+        resolve("/").unwrap(),
+        std::path::Path::new("/").join("项目 old")
+    );
+    assert_eq!(
+        resolve(&format!("{}/", parent.display())).unwrap(),
+        parent.join("项目 old")
+    );
+    // Existing destinations remain exact; preview rejects them instead of nesting.
+    assert_eq!(resolve("archive").unwrap(), parent);
+    assert!(resolve("").is_err());
+    assert!(resolve("missing/new").is_err());
+    assert!(resolve("archive/..").is_err());
+    assert!(resolve("archive/.").is_err());
+    let home = dirs::home_dir().unwrap();
+    assert_eq!(
+        resolve("~/").unwrap(),
+        std::fs::canonicalize(home).unwrap().join("项目 old")
+    );
+}
