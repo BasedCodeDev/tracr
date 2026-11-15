@@ -233,6 +233,7 @@ fn failure_dialog_is_explicit_scrollable_and_only_dismisses() {
                     "/new folder",
                     &relocation::Failure {
                         kind: relocation::FailureKind::PermissionProfile,
+                        terminals: None,
                         detail: "native profile".into(),
                     },
                     recovery,

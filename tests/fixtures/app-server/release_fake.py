@@ -50,7 +50,23 @@ if sys.argv[1:]==['app-server','proxy']:
             elif method == 'thread/read':
                 result = {'thread':dict(id='session', createdAt=100, cwd=settings['cwd'], path=str(home/'sessions/fixture.jsonl'), status=settings.get('status',{'type':'idle'}))}
             elif method == 'thread/backgroundTerminals/list':
-                result = {'data':[{}] if settings.get('terminals') else [],'nextCursor':None}
+                entries=settings.get('terminals', [])
+                if entries is True: entries=[dict(processId='p1',itemId='i1',command='sleep 300',cwd=settings['cwd'])]
+                if entries is False: entries=[]
+                start=int(params.get('cursor') or 0);size=settings.get('terminal_page_size',100)
+                result={'data':entries[start:start+size], 'nextCursor':str(start+size) if start+size<len(entries) else None}
+                if settings.get('malformed_terminals'): result={'data':None}
+                if settings.get('repeated_cursor'): result={'data':[], 'nextCursor':'1'}
+            elif method == 'thread/backgroundTerminals/terminate':
+                entries=settings.get('terminals', [])
+                if entries is True: entries=[dict(processId='p1',itemId='i1',command='sleep 300',cwd=settings['cwd'])]
+                mode=settings.get('terminate_mode','success')
+                if mode != 'remains': entries=[e for e in entries if e['processId']!=params['processId']]
+                if settings.get('new_terminal'): entries.append(settings.pop('new_terminal'))
+                if settings.get('active_after_stop'): settings['status']={'type':'active','activeFlags':[]}
+                settings['terminals']=entries
+                (home/'native.json').write_text(json.dumps(settings))
+                result={} if mode=='malformed' else {'terminated':mode!='false_removed'}
             elif method == 'thread/resume':
                 assert params == {'threadId':'session','excludeTurns':True,'config':{'thread_unload_delay_secs':0}},params
                 if settings.get('stall'): time.sleep(60)

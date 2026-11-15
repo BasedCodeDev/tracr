@@ -64,6 +64,44 @@ pub fn relink_error(
     )
 }
 fn show_relink_failure(view: &mut View, failure: crate::relocation::Failure, needs_recovery: bool) {
+    view.terminal_recovery = None;
+    if !needs_recovery {
+        if let Some(modal) = view
+            .relink
+            .as_mut()
+            .filter(|modal| !modal.recovery && modal.preview.is_some())
+        {
+            let old = modal
+                .session
+                .cwd
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            let dialog = if failure.kind == crate::relocation::FailureKind::StillLoaded {
+                Some(crate::terminal_recovery::Dialog::still_loaded(
+                    &modal.session.title,
+                    &old,
+                    &modal.input,
+                ))
+            } else {
+                failure.terminals.clone().map(|blocker| {
+                    crate::terminal_recovery::Dialog::new(
+                        blocker,
+                        &modal.session.title,
+                        &old,
+                        &modal.input,
+                    )
+                })
+            };
+            if let Some(dialog) = dialog {
+                modal.busy = false;
+                modal.executing = false;
+                view.terminal_recovery = Some(dialog);
+                return;
+            }
+        }
+    }
+
     if let Some(modal) = view.relink.take() {
         view.error_dialog = Some(relink_error(
             &modal.session.title,
@@ -117,6 +155,7 @@ fn show_folder_failure(view: &mut View, message: String, recovery: bool) {
 }
 #[derive(Default)]
 pub struct View {
+    pub terminal_recovery: Option<crate::terminal_recovery::Dialog>,
     pub history: crate::git_history::History,
     pub git_hidden: bool,
     pub git_size_limited: bool,
@@ -549,6 +588,11 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
 }
 
 pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
+    if let Some(dialog) = &view.terminal_recovery {
+        dialog.draw(frame);
+        return;
+    }
+
     if let Some(dialog) = &view.error_dialog {
         dialog.draw(frame);
         return;
@@ -729,7 +773,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         );
         if let Some(preview) = &modal.preview {
             text.push_str(&format!(
-                "Permissions: {}\nOther session settings are preserved.\nOnly this session changes folders. Project files stay where they are.\nDetached idle sessions are released automatically after confirmation.\n\n",
+                "Permissions: {}\nOther session settings are preserved.\nOnly this session changes folders. Project files stay where they are.\nDetached idle sessions are released automatically after confirmation.\nIdle describes agent activity; background commands may still block moving.\n\n",
                 preview.profile.label()
             ));
         }
@@ -2111,6 +2155,8 @@ pub enum Action {
     ApplyFolderMove,
     CloseFolderMove,
     CancelRelink,
+    RefreshTerminals,
+    StopTerminals,
     PreviewRelink,
     ApplyRelink,
     RecoverRelink,
@@ -2168,6 +2214,7 @@ enum FolderMoveResult {
     Applied(crate::folder_move::Outcome),
 }
 enum RelinkResult {
+    Terminals(Result<Vec<crate::providers::codex_terminals::Terminal>, crate::relocation::Failure>),
     Preview(Result<crate::relocation::Preview, crate::relocation::Failure>),
     Applied(crate::relocation::Outcome),
 }
@@ -2211,6 +2258,23 @@ fn resume_hint(browser: &Browser, session: &crate::domain::SessionSummary) -> St
 pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Action {
     if key.kind == KeyEventKind::Release {
         return Action::Continue;
+    }
+    if let Some(dialog) = view.terminal_recovery.as_mut() {
+        use crate::terminal_recovery::Event;
+        return match dialog.key(key) {
+            Event::None => Action::Continue,
+            Event::Cancel => {
+                view.terminal_recovery = None;
+                view.relink = None;
+                Action::Continue
+            }
+            Event::Refresh => Action::RefreshTerminals,
+            Event::Stop => Action::StopTerminals,
+            Event::Retry => {
+                view.terminal_recovery = None;
+                Action::ApplyRelink
+            }
+        };
     }
     if let Some(dialog) = view.error_dialog.as_mut() {
         match dialog.key(key) {
@@ -2912,6 +2976,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 }
             }
             while let Ok(message)=relink_rx.try_recv() {
+                if let Some(dialog)=view.terminal_recovery.as_mut(){dialog.progress=message.clone();}
                 if let Some(modal)=view.relink.as_mut(){modal.error=Some(message);}
             }
             while let Ok(message)=folder_rx.try_recv() {
@@ -2949,12 +3014,19 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 let task=relink_task.take().expect("finished relocation");
                 while event::poll(Duration::ZERO)?{let _=event::read()?;}
                 match task.await {
+                    Ok(RelinkResult::Terminals(result)) => {
+                        let failure = match result {
+                            Ok(commands) => crate::providers::codex_terminals::Blocker::Commands(commands).failure(),
+                            Err(error) => error,
+                        };
+                        show_relink_failure(&mut view,failure,false);
+                    }
                     Ok(RelinkResult::Preview(result))=>match result {
                         Ok(p)=>if let Some(modal)=view.relink.as_mut(){modal.busy=false;modal.input=p.target.display().to_string();modal.preview=Some(p);view.relink_back=false;view.relink_scroll=0;},
                         Err(e)=>show_relink_failure(&mut view,e,false),
                     },
                     Ok(RelinkResult::Applied(crate::relocation::Outcome::Verified(p)))=>{
-                        view.relink=None;view.focus=1;if p.archived {browser.include_archived=true;}browser.open_folder(p.target.clone());
+                        view.terminal_recovery=None;view.relink=None;view.focus=1;if p.archived {browser.include_archived=true;}browser.open_folder(p.target.clone());
                         browser.selected=Some(p.key.clone());relocated=Some(p);
                         view.message=Some("Session relinked and verified.".into());browser.invalidate_git(); discovery.refresh(&mut browser);
                     },
@@ -3166,6 +3238,28 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                 }else{view.message=Some("No unfinished relocations.".into());},
                                 Err(e)=>view.message=Some(e),
                             }
+                        }
+                        Action::RefreshTerminals | Action::StopTerminals => {
+                            let Some(modal)=view.relink.as_mut() else {continue};
+                            let Some(p)=modal.preview.clone() else {continue};
+                            if modal.recovery {continue;}
+                            let Some(dialog)=view.terminal_recovery.as_mut() else {continue};
+                            let reviewed=dialog.reviewed();
+                            let Some((binary,source))=browser.specs.iter().find_map(|s|match s{crate::browser::SourceSpec::Codex{binary,source} if source.id==p.key.source_id=>Some((binary.clone(),source.clone())),_=>None}) else {continue};
+                            let Some(state)=relocation_state.clone() else {continue};
+                            if action==Action::StopTerminals && reviewed.is_none() {continue;}
+                            dialog.busy=true;modal.busy=true;modal.executing=true;
+                            let tx=relink_tx.clone();
+                            relink_task=Some(tokio::spawn(async move {
+                                if action==Action::RefreshTerminals {
+                                    RelinkResult::Terminals(crate::providers::codex_terminals::inspect(&binary,&source,&p).await)
+                                } else {
+                                    match crate::providers::codex_terminals::stop_reviewed(&binary,&source,&p,&reviewed.unwrap()).await {
+                                        Ok(()) => RelinkResult::Applied(crate::relocation::execute_with_progress(&binary,&source,&state,p,false,Some(tx)).await),
+                                        Err(error) => RelinkResult::Terminals(Err(error)),
+                                    }
+                                }
+                            }));
                         }
                         Action::PreviewRelink | Action::ApplyRelink => {
                             let Some(modal)=view.relink.as_mut() else{continue};

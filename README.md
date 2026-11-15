@@ -236,7 +236,16 @@ Terminals narrower than 100 columns show the focused pane full-width.
 - `w` (shown and enabled only when the selection supports creation) in Folders or expanded Git history: create a new worktree from checkout HEAD
   or the selected commit, respectively.
 - `R` in Sessions: relink the selected session. Choose an existing destination,
-  press Enter to preview, then Enter again to confirm. Escape cancels before execution.
+  press Enter to preview, then Enter again to confirm. Escape cancels before execution. If background
+  commands block the move, Tracr lists them and offers **Stop listed commands and
+  retry move**, Refresh, or Cancel. Cancel is selected by default. Stopping commands
+  can interrupt builds or servers; only explicitly reviewed commands are stopped.
+  The move is retried only after fresh relocation checks pass. An unknown command
+  state offers Refresh without a stop action. “Idle” describes agent activity,
+  not whether background commands remain. If Codex still reports the session
+  loaded after release, a Retry/Cancel dialog keeps the approved destination.
+  Retry repeats all relocation checks; it does not force-detach clients or retry
+  automatically. You can retry even if you already closed the client.
 - `u`: inspect/recover an unfinished relocation or folder move. Only shown and enabled
   when unfinished work exists. Recovery never recreates the old folder.
 - `/`: open the search modal. Type to filter results; each result shows its title

@@ -580,7 +580,8 @@ async fn execute_inner(
                     &p,
                     recovery,
                 )
-                .await?;
+                .await
+                .map_err(|error| error.to_string())?;
                 if p.archived && r::listed(&mut rpc, &p.key.native_id).await?.1 {
                     j.plan.entries[i].archive_touched = true;
                     save(state, &j)?;

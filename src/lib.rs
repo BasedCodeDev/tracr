@@ -48,3 +48,5 @@ pub mod modal;
 
 #[doc(hidden)]
 pub mod dev_reload;
+
+pub mod terminal_recovery;

@@ -105,7 +105,8 @@ async fn unsafe_release_is_blocked_before_resume() {
             state[k] = v.clone();
         }
         std::fs::write(file, state.to_string()).unwrap();
-        assert!(release(&binary, &source, &p, false).await.is_err());
+        let result = release(&binary, &source, &p, false).await;
+        assert!(result.is_err() || matches!(result, Ok(ReleaseOutcome::Terminals(_))));
         assert!(
             !std::fs::read_to_string(root.path().join("live_requests.jsonl"))
                 .unwrap()
@@ -332,4 +333,128 @@ async fn stale_metadata_blocks_release_before_runtime_replacement() {
             .unwrap()
             .contains("thread/resume")
     );
+}
+
+fn terminal(id: &str, cwd: &std::path::Path) -> serde_json::Value {
+    json!({"processId":id,"itemId":format!("item-{id}"),"command":format!("sleep 300 # {id}"),"cwd":cwd})
+}
+fn set_terminals(root: &std::path::Path, extra: serde_json::Value) {
+    let file = root.join("native.json");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    for (key, value) in extra.as_object().unwrap() {
+        state[key] = value.clone();
+    }
+    std::fs::write(file, state.to_string()).unwrap();
+}
+#[tokio::test]
+async fn reviewed_terminals_are_stopped_then_normal_relocation_checks_run() {
+    use tracr::providers::codex_terminals::{inspect, stop_reviewed};
+    let (root, binary, source, p) = fixture(json!({})).await;
+    set_terminals(
+        root.path(),
+        json!({"terminals":[terminal("a",&p.old),terminal("b",&p.old)],"terminal_page_size":1}),
+    );
+    let reviewed = inspect(&binary, &source, &p).await.unwrap();
+    assert_eq!(reviewed.len(), 2);
+    assert!(
+        !std::fs::read_to_string(root.path().join("live_requests.jsonl"))
+            .unwrap()
+            .contains("/terminate")
+    );
+    stop_reviewed(&binary, &source, &p, &reviewed)
+        .await
+        .unwrap();
+    assert!(inspect(&binary, &source, &p).await.unwrap().is_empty());
+    let state = root.path().join("state");
+    assert!(matches!(
+        relocation::execute(&binary, &source, &state, p, false).await,
+        relocation::Outcome::Verified(_)
+    ));
+}
+#[tokio::test]
+async fn changed_or_unknown_terminals_never_get_blanket_termination() {
+    use tracr::providers::codex_terminals::{inspect, stop_reviewed};
+    for scenario in [
+        "new",
+        "changed",
+        "malformed",
+        "cursor",
+        "busy",
+        "destination",
+        "permissions",
+    ] {
+        let (root, binary, source, p) = fixture(json!({"terminals":true})).await;
+        let reviewed = inspect(&binary, &source, &p).await.unwrap();
+        match scenario {
+            "new" => set_terminals(root.path(), json!({"terminals":[terminal("new",&p.old)]})),
+            "changed" => set_terminals(root.path(), json!({"terminals":[terminal("p1",&p.old)]})),
+            "malformed" => set_terminals(root.path(), json!({"malformed_terminals":true})),
+            "cursor" => set_terminals(root.path(), json!({"repeated_cursor":true})),
+            "busy" => set_terminals(
+                root.path(),
+                json!({"status":{"type":"active","activeFlags":[]}}),
+            ),
+            "destination" => std::fs::remove_dir(&p.target).unwrap(),
+            _ => set_terminals(root.path(), json!({"cwd":"/changed"})),
+        }
+        assert!(
+            stop_reviewed(&binary, &source, &p, &reviewed)
+                .await
+                .is_err(),
+            "{scenario}"
+        );
+        assert!(
+            !std::fs::read_to_string(root.path().join("live_requests.jsonl"))
+                .unwrap()
+                .contains("/terminate"),
+            "{scenario}"
+        );
+    }
+}
+#[tokio::test]
+async fn termination_is_verified_and_partial_changes_block_retry() {
+    use tracr::providers::codex_terminals::{inspect, stop_reviewed};
+    for (extra, success) in [
+        (json!({"terminate_mode":"remains"}), false),
+        (json!({"terminate_mode":"false_removed"}), true),
+        (json!({"terminate_mode":"malformed"}), false),
+        (json!({"active_after_stop":true}), false),
+    ] {
+        let (root, binary, source, p) = fixture(json!({"terminals":true})).await;
+        let reviewed = inspect(&binary, &source, &p).await.unwrap();
+        set_terminals(root.path(), extra);
+        assert_eq!(
+            stop_reviewed(&binary, &source, &p, &reviewed).await.is_ok(),
+            success
+        );
+        let calls = std::fs::read_to_string(root.path().join("live_requests.jsonl")).unwrap();
+        assert!(!calls.contains("thread/resume"));
+    }
+}
+#[tokio::test]
+async fn disappearing_terminals_need_no_stop_and_new_arrivals_require_review() {
+    use tracr::providers::codex_terminals::{inspect, stop_reviewed};
+    let (root, binary, source, p) = fixture(json!({"terminals":true})).await;
+    let reviewed = inspect(&binary, &source, &p).await.unwrap();
+    set_terminals(root.path(), json!({"terminals":[]}));
+    stop_reviewed(&binary, &source, &p, &reviewed)
+        .await
+        .unwrap();
+    assert!(
+        !std::fs::read_to_string(root.path().join("live_requests.jsonl"))
+            .unwrap()
+            .contains("/terminate")
+    );
+    set_terminals(
+        root.path(),
+        json!({"terminals":true,"new_terminal":terminal("new",&p.old)}),
+    );
+    assert!(
+        stop_reviewed(&binary, &source, &p, &reviewed)
+            .await
+            .is_err()
+    );
+    let calls = std::fs::read_to_string(root.path().join("live_requests.jsonl")).unwrap();
+    assert_eq!(calls.matches("/terminate").count(), 1);
 }

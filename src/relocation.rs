@@ -41,13 +41,18 @@ pub struct PermissionValidation {
     pub version: u32,
     pub profile: Profile,
 }
+pub const STILL_LOADED_DETAIL: &str = "Codex still reports this session as loaded. It may still be releasing, or another client may be attached. Close any client using this session, then retry. If already closed, you can retry now.\n\nThe session's folder has not changed.";
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FailureKind {
     PermissionProfile,
+    StillLoaded,
     Other,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Failure {
+    #[serde(skip)]
+    pub terminals: Option<crate::providers::codex_terminals::Blocker>,
     pub kind: FailureKind,
     pub detail: String,
 }
@@ -55,6 +60,7 @@ impl From<String> for Failure {
     fn from(detail: String) -> Self {
         Self {
             kind: FailureKind::Other,
+            terminals: None,
             detail,
         }
     }
@@ -333,6 +339,7 @@ pub(crate) fn simple_permissions(
     let active =
         Profile::from_native(&response["activePermissionProfile"]).map_err(|detail| Failure {
             kind: FailureKind::PermissionProfile,
+            terminals: None,
             detail,
         })?;
     if expected == Profile::Unknown || active != expected {

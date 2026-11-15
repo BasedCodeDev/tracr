@@ -48,7 +48,7 @@ def main():
     stage('clippy', cargo + ['clippy', '--all-targets', *locked, '--', '-D', 'warnings'])
     tested = stage('rust-tests', cargo + ['test', *locked])
     stage('python-tests', ['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-v'])
-    for helper in ['terminal_check', 'dev_reload_check', 'git_lifecycle_check', 'git_watch_check', 'idle_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check', 'create_check', 'menu_check', 'status_check', 'relink_check', 'folder_move_check', 'release_check', 'info_check', 'move_readiness_check', 'worktree_check', 'worktree_create_check']:
+    for helper in ['terminal_check', 'dev_reload_check', 'git_lifecycle_check', 'git_watch_check', 'idle_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check', 'create_check', 'menu_check', 'status_check', 'relink_check', 'folder_move_check', 'release_check', 'terminal_recovery_check', 'info_check', 'move_readiness_check', 'worktree_check', 'worktree_create_check']:
         command = ['python3', f'tests/fixtures/app-server/{helper}.py', str(root / 'target/debug/tracr')]
         if helper == 'terminal_check':
             command.append(str(root / 'tests/fixtures/sessions/catalog.json'))

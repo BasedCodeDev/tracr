@@ -51,3 +51,5 @@ pub trait SessionProvider: Send + Sync {
         key: &SessionKey,
     ) -> impl Future<Output = Result<Option<SessionSummary>, ProviderError>> + Send;
 }
+
+pub mod codex_terminals;

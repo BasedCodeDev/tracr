@@ -64,6 +64,7 @@ pub enum ReleaseOutcome {
     AlreadyUnloaded,
     StillLoaded,
     Busy,
+    Terminals(super::codex_terminals::Blocker),
     /// No connection was established; exclusive native writer acquisition is still required.
     Unavailable,
 }
@@ -73,11 +74,21 @@ pub(crate) async fn prepare(
     source: &SourceConfig,
     preview: &r::Preview,
     recovery: bool,
-) -> Result<(), String> {
+) -> Result<(), r::Failure> {
     match release(binary, source, preview, recovery).await? {
-        ReleaseOutcome::Released | ReleaseOutcome::AlreadyUnloaded | ReleaseOutcome::Unavailable => Ok(()),
-        ReleaseOutcome::StillLoaded => Err("Codex kept this session loaded. Another client may still be attached. Close it and retry.".into()),
-        ReleaseOutcome::Busy => Err("This session is active or its state cannot be verified. Close it before moving.".into()),
+        ReleaseOutcome::Released
+        | ReleaseOutcome::AlreadyUnloaded
+        | ReleaseOutcome::Unavailable => Ok(()),
+        ReleaseOutcome::StillLoaded => Err(r::Failure {
+            kind: r::FailureKind::StillLoaded,
+            detail: r::STILL_LOADED_DETAIL.into(),
+            terminals: None,
+        }),
+        ReleaseOutcome::Terminals(blocker) => Err(blocker.failure()),
+        ReleaseOutcome::Busy => Err(
+            "This session is active or its state cannot be verified. Close it before moving."
+                .into(),
+        ),
     }
 }
 
@@ -194,21 +205,18 @@ async fn release_inner(
     {
         return Err("Permission profile changed before release".into());
     }
-    let terminals = client
-        .call(
-            "thread/backgroundTerminals/list",
-            json!({"threadId":id,"limit":1}),
-        )
-        .await
-        .map_err(|e| {
-            format!("Cannot verify background terminals; automatic release was not attempted: {e}")
-        })?;
-    if !terminals["data"]
-        .as_array()
-        .is_some_and(|items| items.is_empty())
-        || !terminals["nextCursor"].is_null()
-    {
-        return Err("This session has background terminals, or their state is unknown. Stop them in Codex before moving.".into());
+    match super::codex_terminals::list(&mut client, id).await {
+        Ok(terminals) if terminals.is_empty() => {}
+        Ok(terminals) => {
+            return Ok(ReleaseOutcome::Terminals(
+                super::codex_terminals::Blocker::Commands(terminals),
+            ));
+        }
+        Err(error) => {
+            return Ok(ReleaseOutcome::Terminals(
+                super::codex_terminals::Blocker::Unavailable(error),
+            ));
+        }
     }
     // Codex replaces only a detached idle runtime. An attached or newly active runtime
     // ignores these overrides. Disconnecting this client never disconnects other clients.
