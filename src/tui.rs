@@ -635,21 +635,73 @@ pub(crate) fn render_picker(
         let offset = unicode_width::UnicodeWidthStr::width(&input[start..caret]) as u16;
         frame.set_cursor_position((parts[1].x + 1 + offset, parts[1].y + 1));
     }
-    let items: Vec<_> = picker
-        .rows
-        .iter()
-        .map(|row| {
-            let mut label = crate::path_picker::tree_label(&row.path, row.depth, row.expanded);
-            if let Some(error) = &row.error {
-                label.push_str(&format!(" [{error}]"));
-            }
-            ListItem::new(safe_text(&label))
-        })
-        .collect();
-    let selected = picker
-        .rows
-        .iter()
-        .position(|r| Some(&r.path) == picker.selected.as_ref());
+    let worktrees = picker.worktrees.as_ref().filter(|w| w.active);
+    let (items, selected): (Vec<ListItem>, Option<usize>) = if let Some(w) = worktrees {
+        let items = w
+            .entries
+            .iter()
+            .map(|row| {
+                let name = row
+                    .path
+                    .file_name()
+                    .unwrap_or(row.path.as_os_str())
+                    .to_string_lossy();
+                let label = format!(
+                    "{}{} · {}",
+                    name,
+                    if row.main { " (main)" } else { "" },
+                    row.branch.as_deref().unwrap_or("Detached HEAD")
+                );
+                let width = usize::from(parts[2].width.saturating_sub(4));
+                let mut lines: Vec<_> = crate::info_content::wrap(&label, width)
+                    .into_iter()
+                    .map(Line::from)
+                    .collect();
+                lines.extend(
+                    crate::info_content::wrap(&row.path.display().to_string(), width)
+                        .into_iter()
+                        .map(Line::from),
+                );
+                if let Some(error) = &row.unavailable {
+                    lines.extend(
+                        crate::info_content::wrap(error, width)
+                            .into_iter()
+                            .map(Line::from),
+                    );
+                }
+                ListItem::new(lines).style(if row.unavailable.is_some() {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default()
+                })
+            })
+            .collect();
+        (
+            items,
+            w.entries
+                .iter()
+                .position(|r| Some(&r.path) == w.selected.as_ref()),
+        )
+    } else {
+        let items = picker
+            .rows
+            .iter()
+            .map(|row| {
+                let mut label = crate::path_picker::tree_label(&row.path, row.depth, row.expanded);
+                if let Some(error) = &row.error {
+                    label.push_str(&format!(" [{error}]"));
+                }
+                ListItem::new(safe_text(&label))
+            })
+            .collect();
+        (
+            items,
+            picker
+                .rows
+                .iter()
+                .position(|r| Some(&r.path) == picker.selected.as_ref()),
+        )
+    };
     let tree_area = if let Some((lines, scroll, limit)) = text.sidebar {
         let regions = if parts[2].width >= 90 {
             Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
@@ -682,13 +734,25 @@ pub(crate) fn render_picker(
     } else {
         parts[2]
     };
+    let title = if picker.worktrees.is_some() {
+        if worktrees.is_some() {
+            "Folders   [Worktrees]"
+        } else {
+            "[Folders]   Worktrees"
+        }
+    } else {
+        "Folders"
+    };
+    let state = worktrees.map_or(&picker.list_state, |w| &w.list_state);
+    let mut state = state.borrow_mut();
+    state.select(selected);
     frame.render_stateful_widget(
         List::new(items)
-            .block(block("Folders", picker.focus == 1))
+            .block(block(title, picker.focus == 1))
             .highlight_symbol("> ")
             .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
         tree_area,
-        &mut ListState::default().with_selected(selected),
+        &mut state,
     );
     let ready = picker.valid && !picker.loading && !text.busy;
     frame.render_widget(
@@ -704,7 +768,11 @@ pub(crate) fn render_picker(
         }),
         parts[3],
     );
-    let hint = if picker.focus == 1 {
+    let hint = if picker.focus == 1 && worktrees.is_some() {
+        "←/→ views · ↑/↓ select · Enter fills path"
+    } else if picker.focus == 1 && picker.worktrees.is_some() {
+        "←/→ views · ↑/↓ select · Enter expand"
+    } else if picker.focus == 1 {
         "↑/↓ select · Enter expand/collapse"
     } else {
         "↑/↓ select · Enter uses folder"
@@ -714,7 +782,11 @@ pub(crate) fn render_picker(
     } else if let Some(error) = text.error.or(picker.error.as_deref()) {
         safe_text(error)
     } else if picker.loading {
-        "Loading folders…".into()
+        if worktrees.is_some() {
+            "Loading worktrees…".into()
+        } else {
+            "Loading folders…".into()
+        }
     } else {
         if picker.is_folder_move() {
             "End with / to keep the current folder name.".into()
@@ -2210,7 +2282,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                         }
                         Action::OpenRelink => {
                             if let Some(reason)=relink_unavailable(&browser){view.message=Some(reason);continue;}
-                            if let Some(session)=selected_session(&browser){let input=session.cwd.as_ref().map(|p|p.display().to_string()).unwrap_or_default();view.relink=Some(RelinkModal{session,input,picker:Some(crate::path_picker::Picker::new(launch_dir.clone())),preview:None,recovery:false,busy:false,executing:false,error:None});}
+                            if let Some(session)=selected_session(&browser){let input=session.cwd.as_ref().map(|p|p.display().to_string()).unwrap_or_default();let picker=crate::path_picker::Picker::for_relink(launch_dir.clone(),session.cwd.clone());view.relink=Some(RelinkModal{session,input,picker:Some(picker),preview:None,recovery:false,busy:false,executing:false,error:None});}
                         }
                         Action::RecoverRelink => {
                             let Some(state)=&relocation_state else{view.message=Some("No persistent state directory.".into());continue};
@@ -2237,8 +2309,10 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             let Some((binary,source))=browser.specs.iter().find_map(|s|match s{crate::browser::SourceSpec::Codex{binary,source} if source.id==modal.session.key.source_id=>Some((binary.clone(),source.clone())),_=>None}) else {modal.error=Some("Session source is no longer configured.".into());continue};
                             if action==Action::PreviewRelink {
                                 let input=modal.input.clone();let launch=launch_dir.clone();
+                                let worktree=modal.picker.as_ref().and_then(|p|p.worktree_validation(&input));
                                 let session=modal.session.clone();modal.busy=true;modal.error=None;
                                 relink_task=Some(tokio::spawn(async move {
+                                    if let Some((origin,target))=worktree { if let Err(error)=crate::worktrees::validate(&origin,&target).await { return RelinkResult::Preview(Err(error.into())); } }
                                     let destination=tokio::task::spawn_blocking(move||crate::relocation::destination(&input,&launch)).await;
                                     let result=match destination {
                                         Ok(Ok(target))=>crate::relocation::preview(&binary,&source,&session,target).await,

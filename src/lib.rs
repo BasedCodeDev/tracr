@@ -25,3 +25,5 @@ mod folder_move_ui;
 pub mod error_dialog;
 
 pub mod info_content;
+
+pub mod worktrees;

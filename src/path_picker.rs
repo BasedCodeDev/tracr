@@ -32,8 +32,68 @@ struct Snapshot {
     error: Option<String>,
     initial: Option<String>,
 }
+pub struct WorktreeView {
+    pub active: bool,
+    pub entries: Vec<crate::worktrees::Worktree>,
+    pub selected: Option<PathBuf>,
+    pub loading: bool,
+    pub error: Option<String>,
+    pub list_state: std::cell::RefCell<ratatui::widgets::ListState>,
+    origin: PathBuf,
+    folder_draft: String,
+    folder_caret: usize,
+    folder_valid: bool,
+    folder_loading: bool,
+    folder_error: Option<String>,
+    draft: Option<String>,
+    caret: usize,
+    derived: Option<PathBuf>,
+    task: Option<tokio::task::JoinHandle<()>>,
+    rx: Option<mpsc::Receiver<Result<Vec<crate::worktrees::Worktree>, String>>>,
+}
+impl Drop for WorktreeView {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+impl WorktreeView {
+    fn refresh(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+        let (tx, rx) = mpsc::channel();
+        self.rx = Some(rx);
+        let origin = self.origin.clone();
+        self.loading = true;
+        self.error = None;
+        self.task = Some(tokio::spawn(async move {
+            let _ = tx.send(crate::worktrees::discover(&origin).await);
+        }));
+    }
+    fn fill(&mut self, input: &mut String) -> bool {
+        let Some(row) = self
+            .entries
+            .iter()
+            .find(|r| Some(&r.path) == self.selected.as_ref())
+        else {
+            return false;
+        };
+        if let Some(error) = &row.unavailable {
+            self.error = Some(error.clone());
+            return false;
+        }
+        *input = row.path.to_str().expect("validated path").into();
+        self.derived = Some(row.path.clone());
+        self.error = None;
+        true
+    }
+}
 pub struct Picker {
     pub focus: usize, // path, tree, button
+    pub worktrees: Option<WorktreeView>,
+    pub list_state: std::cell::RefCell<ratatui::widgets::ListState>,
     pub caret: usize, // UTF-8 byte boundary
     pub rows: Vec<Row>,
     pub selected: Option<PathBuf>,
@@ -56,6 +116,8 @@ impl Picker {
         let (tx, rx) = mpsc::channel();
         Self {
             focus: 1,
+            worktrees: None,
+            list_state: Default::default(),
             caret: 0,
             rows: vec![],
             selected: None,
@@ -74,6 +136,40 @@ impl Picker {
             rx,
         }
     }
+    pub fn for_relink(launch: PathBuf, origin: Option<PathBuf>) -> Self {
+        let mut picker = Self::new(launch);
+        picker.worktrees = Some(WorktreeView {
+            active: false,
+            entries: vec![],
+            selected: None,
+            loading: false,
+            error: None,
+            list_state: Default::default(),
+            origin: origin.unwrap_or_default(),
+            folder_draft: String::new(),
+            folder_caret: 0,
+            folder_valid: false,
+            folder_loading: false,
+            folder_error: None,
+            draft: None,
+            caret: 0,
+            derived: None,
+            task: None,
+            rx: None,
+        });
+        picker
+    }
+    pub fn worktrees_active(&self) -> bool {
+        self.worktrees.as_ref().is_some_and(|w| w.active)
+    }
+    pub fn worktree_validation(&self, input: &str) -> Option<(PathBuf, PathBuf)> {
+        self.worktrees.as_ref().filter(|w| w.active).and_then(|w| {
+            w.derived
+                .as_ref()
+                .filter(|p| p.to_str() == Some(input))
+                .map(|p| (w.origin.clone(), p.clone()))
+        })
+    }
     pub fn for_move(launch: PathBuf, source: PathBuf, input: &str) -> Self {
         let mut picker = Self::new(launch);
         picker.move_source = Some(source);
@@ -84,6 +180,9 @@ impl Picker {
         self.move_source.is_some()
     }
     fn changed(&mut self) {
+        if let Some(w) = self.worktrees.as_mut().filter(|w| w.active) {
+            w.derived = None;
+        }
         self.generation += 1;
         self.valid = false;
         self.loading = true;
@@ -100,6 +199,77 @@ impl Picker {
     }
     /// Returns true only when the user explicitly requests destination preview.
     pub fn key(&mut self, input: &mut String, key: KeyEvent) -> bool {
+        if let Some(w) = self
+            .worktrees
+            .as_mut()
+            .filter(|_| self.focus == 1 && matches!(key.code, KeyCode::Left | KeyCode::Right))
+        {
+            if w.active {
+                w.draft = Some(input.clone());
+                w.caret = self.caret;
+                w.active = false;
+                if let Some(task) = w.task.take() {
+                    task.abort();
+                }
+                w.rx = None;
+                *input = w.folder_draft.clone();
+                self.caret = w.folder_caret;
+            } else {
+                w.folder_draft = input.clone();
+                w.folder_caret = self.caret;
+                w.folder_valid = self.valid;
+                w.folder_loading = self.loading;
+                w.folder_error = self.error.clone();
+                w.active = true;
+                if let Some(draft) = &w.draft {
+                    *input = draft.clone();
+                    self.caret = w.caret;
+                }
+                w.refresh();
+            }
+            self.generation += 1;
+            if w.active {
+                self.requested = None;
+                self.error = None;
+                self.loading = true;
+            } else {
+                self.requested = if w.folder_loading {
+                    None
+                } else {
+                    Some(self.generation)
+                };
+                self.error = w.folder_error.clone();
+                self.loading = w.folder_loading;
+                self.valid = w.folder_valid;
+            }
+            return false;
+        }
+        if self.worktrees_active() && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            let w = self.worktrees.as_mut().unwrap();
+            if !w.loading && !w.entries.is_empty() {
+                let current = w
+                    .entries
+                    .iter()
+                    .position(|r| Some(&r.path) == w.selected.as_ref());
+                let index = match (current, key.code) {
+                    (Some(i), KeyCode::Up) => i.saturating_sub(1),
+                    (Some(i), _) => (i + 1).min(w.entries.len() - 1),
+                    _ => 0,
+                };
+                w.selected = Some(w.entries[index].path.clone());
+                if w.fill(input) {
+                    self.caret = input.len();
+                }
+            }
+            return false;
+        }
+        if self.worktrees_active() && self.focus == 1 && key.code == KeyCode::Enter {
+            let w = self.worktrees.as_mut().unwrap();
+            if !w.loading && w.fill(input) {
+                self.caret = input.len();
+            }
+            return false;
+        }
         match key.code {
             KeyCode::Tab => self.focus = (self.focus + 1) % 3,
             KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
@@ -179,6 +349,40 @@ impl Picker {
         false
     }
     pub fn tick(&mut self, input: &mut String) {
+        if let Some(w) = self.worktrees.as_mut().filter(|w| w.active) {
+            if let Some(result) = w.rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+                w.loading = false;
+                w.task = None;
+                w.rx = None;
+                match result {
+                    Ok(entries) => {
+                        w.entries = entries;
+                        if w.selected.as_ref().is_some_and(|p| {
+                            !w.entries
+                                .iter()
+                                .any(|r| &r.path == p && r.unavailable.is_none())
+                        }) {
+                            w.selected = None;
+                            w.error = Some("Selected worktree is no longer available.".into());
+                            if w.derived.take().is_some() {
+                                input.clear();
+                                self.caret = 0;
+                                w.draft = None;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        w.entries.clear();
+                        w.error = Some(error);
+                    }
+                }
+            }
+            self.loading = w.loading;
+            self.valid =
+                !input.is_empty() && resolve(input, &self.launch, self.home.as_deref()).is_dir();
+            self.error = w.error.clone();
+            return;
+        }
         while let Ok((generation, snapshot)) = self.rx.try_recv() {
             self.active = self.active.saturating_sub(1);
             if generation != self.generation {

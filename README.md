@@ -369,6 +369,19 @@ See [the native mechanism](docs/codex-native-relinking-solution.md),
 The [built-in profile validation](docs/builtin-profile-relinking-validation.md) covers
 the production implementation and its real-Codex acceptance cases.
 
+The session relink picker has **Folders** and **Worktrees** views. With the list
+focused, Left/Right switches views; within the path field those keys move the
+caret. Worktrees lists all Git-registered checkouts for the session’s original
+repository, including external locations. Up/Down or Enter fills the destination
+with the selected worktree root; **Use this folder** still opens the preview,
+and confirmation is required before relinking.
+
+Each view remembers its own path. Returning to Folders restores the path and
+tree position from before visiting Worktrees. Git discovery requires the original
+session folder to exist in a repository; otherwise use Folders manually.
+Missing worktrees are unavailable, and worktree selections are rechecked before
+preview. This feature does not create, delete, or move Git worktrees.
+
 ## One-command verification
 
 Run `./scripts/check.sh --offline` for cached-dependency checks, or

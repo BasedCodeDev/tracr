@@ -164,7 +164,7 @@ impl Information {
 }
 
 /// Word-wrap normal text, but split long paths/IDs without losing any characters.
-fn wrap(text: &str, width: usize) -> Vec<String> {
+pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![];
     }

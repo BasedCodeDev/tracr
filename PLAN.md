@@ -480,3 +480,12 @@ Creation currently supports Codex. Provider-owned preparation returns a shared p
   retaining Enter-to-resume and Enter-to-create for empty folders.
 - Discover creation choices through source capabilities; launch one directly or
   show a harness-neutral configuration picker for multiple sources.
+
+### Worktree destinations for relinking
+
+- Add Folders/Worktrees views with independent path drafts and preserved list
+  state, switching with Left/Right while the list is focused.
+- Discover registered Git worktrees asynchronously from the original session
+  folder, with a five-second deadline and no fallback to another repository.
+- Selection fills a worktree root; Use this folder revalidates it and opens the
+  existing relink preview. Folder moves retain the original picker.
