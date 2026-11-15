@@ -110,11 +110,16 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 return
             if action in ('progressive', 'expansion-quit'):
                 terminal.expect('History 299')
+                mark = len(terminal.output)
                 terminal.send(b'\t\x1b[F')
                 if action == 'expansion-quit':
                     terminal.wait(lambda: bool(list(home.glob('pending-*'))))
                 else:
                     terminal.expect('History 172')
+                    # End first renders the old prefix boundary; expansion is
+                    # scheduled on the next tick. Observe it starting before
+                    # treating an absent loading label as completion.
+                    terminal.wait(lambda: b'loading more' in terminal.output[mark:])
                     terminal.wait(lambda: 'loading more' not in terminal.text())
                     terminal.send(b'\x1b[B')
                     terminal.expect('History 171')
