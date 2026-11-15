@@ -70,3 +70,12 @@ No historical development run certifies current packaged assets or another platf
 Native ARM64, runtime-license packaging prerequisites and broader real-provider/font
 review require their own release checks. See [releasing](releasing.md) and the
 [actionable backlog](../PLAN.md).
+
+
+## History scroll indicators (2026-11-16)
+
+The history borders now show bold cyan arrows at the right edge: `↑` for off-screen commits above, `↓` for off-screen commits below or a prefix whose end is not yet confirmed. The computation reads cached selectable indices and the final visible range; it performs no traversal, Git reads or background scheduling. The title reserves space for the upper marker without reducing graph row capacity.
+
+Validation passed: all 15 history-controller/rendering tests, all-target Clippy with warnings denied, formatting and whitespace checks, and the native Git lifecycle, watcher and four-scenario idle PTY helpers. Added assertions cover boundary transitions, empty/initial loading, unknown exhaustion, retained errors, connector-only tails, middle/older-HEAD views, long Unicode titles, focused/unfocused styling, widths 140/100/40, resizing and clearing markers. Cached snapshot construction and selected commit remain unchanged by rendering indicators. Idle views issued no commands or redraw output.
+
+Logs: `/tmp/tracr-arrows-tests.log`, `/tmp/tracr-arrows-clippy.log`, `/tmp/tracr-arrows-lifecycle.log`, `/tmp/tracr-arrows-watch.log`, `/tmp/tracr-arrows-idle.log`.

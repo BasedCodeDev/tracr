@@ -582,6 +582,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             let range = view
                 .history
                 .visible_range(usize::from(git_area.height.saturating_sub(3)));
+            let (more_above, more_below) = view.history.scroll_availability(&range);
             let selected = view.history.selected.saturating_sub(range.start);
             let width = usize::from(git_area.width.saturating_sub(4));
             view.history.clamp_horizontal(width);
@@ -595,15 +596,38 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                     ))
                 })
                 .collect();
-            let title = view.history.title();
+            let title = graph_viewport(
+                vec![Span::raw(view.history.title())],
+                0,
+                usize::from(
+                    git_area
+                        .width
+                        .saturating_sub(if more_above { 5 } else { 2 }),
+                ),
+            );
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(pane_block(&title, view.git_focus))
+                    .block(pane_block("", view.git_focus).title(title))
                     .highlight_symbol("> ")
                     .highlight_style(selection_style(view.context() == 2)),
                 git_area,
                 &mut ListState::default().with_selected(Some(selected)),
             );
+            for (visible, y, marker) in [
+                (more_above, git_area.y, " ↑ "),
+                (more_below, git_area.bottom() - 1, " ↓ "),
+            ] {
+                if visible {
+                    frame.render_widget(
+                        Paragraph::new(marker).style(
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Rect::new(git_area.right() - 4, y, 3, 1),
+                    );
+                }
+            }
         } else {
             let label = if view.git_hidden {
                 "Git history · collapsed"

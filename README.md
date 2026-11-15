@@ -228,6 +228,8 @@ Terminals narrower than 100 columns show the focused pane full-width.
   strip with an Expand action; Escape returns focus to the upper pane from which
   Git was entered. Leaving Git keeps its expanded/collapsed state, remembered
   across folders for this run.
+  The top-right `↑` border marker indicates commits above the preview; the
+  bottom-right `↓` indicates commits below it or more history available to load.
 - Enter in Sessions: resume a session, relink one whose folder is missing, or
   create a session when the selected folder has none and creation is available.
 - `n` in Sessions: create a new session in the selected folder.

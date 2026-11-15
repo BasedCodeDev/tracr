@@ -451,6 +451,20 @@ impl History {
         self.top.set(top);
         top..(top + height).min(self.rows.len())
     }
+    /// Scroll affordances derived only from the cached, clamped viewport.
+    pub fn scroll_availability(&self, visible: &std::ops::Range<usize>) -> (bool, bool) {
+        if !self.loaded || self.selectable.is_empty() || visible.is_empty() {
+            return (false, false);
+        }
+        let above = self.selectable[0] < visible.start;
+        let below = self
+            .selectable
+            .last()
+            .is_some_and(|index| *index >= visible.end)
+            || !self.exhausted;
+        (above, below)
+    }
+
     pub fn navigate(&mut self, movement: Movement) {
         if self.following {
             self.cancel_seek = self.head_task.is_some() || self.seeking();
@@ -1646,5 +1660,113 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+    #[test]
+    fn scroll_indicators_distinguish_commits_boundaries_and_loadable_history() {
+        let mut h = History::default();
+        assert_eq!(h.scroll_availability(&(0..10)), (false, false));
+        h.replace(rows(20), 128);
+        assert_eq!(h.scroll_availability(&(0..5)), (false, true));
+        assert_eq!(h.scroll_availability(&(5..10)), (true, true));
+        assert_eq!(h.scroll_availability(&(15..20)), (true, false));
+        assert_eq!(h.scroll_availability(&(0..20)), (false, false));
+        h.exhausted = false;
+        assert_eq!(h.scroll_availability(&(0..20)), (false, true));
+        h.error = Some("offline".into());
+        assert_eq!(h.scroll_availability(&(15..20)), (true, true));
+        h.exhausted = true;
+        // Unresolved ancestry and connectors are not selectable commits.
+        h.rows.push(GraphRow {
+            graph: "┊".into(),
+            graph_spans: vec![],
+            oid: None,
+            parents: vec![],
+            subject: String::new(),
+        });
+        assert_eq!(h.scroll_availability(&(0..20)), (false, false));
+        h.selected = 15;
+        let range = h.visible_range(5);
+        assert_eq!(h.scroll_availability(&range), (true, true));
+        assert_eq!(h.selected, 15);
+        assert_eq!(h.builds_started, 0);
+        h.replace(vec![], 128);
+        assert_eq!(h.scroll_availability(&(0..5)), (false, false));
+    }
+
+    #[tokio::test]
+    async fn border_arrows_survive_long_titles_resize_and_clear_at_boundaries() {
+        use crate::tui::{View, draw};
+        use ratatui::{
+            Terminal,
+            backend::TestBackend,
+            layout::Rect,
+            style::{Color, Modifier},
+        };
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut view = View {
+            history: History::with_backend(Arc::new(Controlled(tx))),
+            ..View::default()
+        };
+        let browser = crate::browser::Browser::new(vec![]);
+        tick(&mut view.history).await;
+        rx.recv().await.unwrap().1.send(Ok(rows(80))).unwrap();
+        finish(&mut view.history).await;
+        view.history.head = Some(crate::git::Head {
+            oid: view.history.rows[40].oid.clone(),
+            branch: Some("界long-branch".repeat(40)),
+        });
+        view.history.following = true;
+        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+        for (width, height, focused) in [(140, 40, false), (100, 18, true), (40, 18, false)] {
+            terminal.backend_mut().resize(width, height);
+            terminal.resize(Rect::new(0, 0, width, height)).unwrap();
+            view.git_focus = focused;
+            for (selected, expected) in
+                [(40, (true, true)), (0, (false, true)), (79, (true, false))]
+            {
+                view.history.selected = selected;
+                view.history.top.set(selected.saturating_sub(2));
+                terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+                let buffer = terminal.backend().buffer();
+                let arrows: Vec<_> = buffer
+                    .content
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, cell)| {
+                        matches!(cell.symbol(), "↑" | "↓")
+                            && cell.fg == Color::Cyan
+                            && cell.modifier.contains(Modifier::BOLD)
+                    })
+                    .collect();
+                assert_eq!(arrows.iter().any(|(_, c)| c.symbol() == "↑"), expected.0);
+                assert_eq!(arrows.iter().any(|(_, c)| c.symbol() == "↓"), expected.1);
+                for (index, cell) in arrows {
+                    assert_eq!(index % usize::from(width), usize::from(width - 3));
+                    assert_eq!(cell.fg, Color::Cyan);
+                    assert!(cell.modifier.contains(Modifier::BOLD));
+                    let row = index / usize::from(width);
+                    assert_ne!(
+                        buffer.content[row * usize::from(width) + usize::from(width - 1)].symbol(),
+                        " "
+                    );
+                }
+                assert_eq!(view.history.selected, selected);
+                assert!(view.history.following);
+            }
+        }
+        view.history.replace(rows(1), 128);
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        assert!(
+            !terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .any(|c| matches!(c.symbol(), "↑" | "↓")
+                    && c.fg == Color::Cyan
+                    && c.modifier.contains(Modifier::BOLD))
+        );
+        assert_eq!(view.history.builds_started, 1);
+        assert!(rx.try_recv().is_err());
     }
 }
