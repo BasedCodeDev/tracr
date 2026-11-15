@@ -485,8 +485,7 @@ impl History {
             self.selected = target;
         }
         // Only a navigation event arms expansion; completion cannot arm another.
-        self.extend = !self.loading()
-            && self.error.is_none()
+        self.extend = self.error.is_none()
             && !self.exhausted
             && commits.len() - commits.partition_point(|i| *i <= self.selected) < self.page.get();
     }
@@ -593,7 +592,9 @@ impl History {
     ) {
         if self.restart || self.cancel_seek {
             let cancel = self.cancel_seek;
+            let extend = self.extend;
             self.shutdown().await;
+            self.extend = extend;
             self.restart = false;
             self.cancel_seek = false;
             if cancel {
@@ -602,7 +603,9 @@ impl History {
             }
         }
         if path != self.path || generation != self.generation {
+            let extend = self.extend && path == self.path;
             self.shutdown().await;
+            self.extend = extend;
             if path != self.path {
                 self.following = self.checkout.is_some();
                 self.rows.clear();
@@ -762,6 +765,14 @@ impl History {
             }
         }
         let seek = self.error.is_none() && self.seeking() && !self.exhausted;
+        // Navigation during a refresh retains its demand, but a completed
+        // expansion may already have moved the boundary beyond the selection.
+        if self.extend && self.task.is_none() && self.build.is_none() {
+            self.extend = self.error.is_none()
+                && !self.exhausted
+                && self.selectable.len() - self.selectable.partition_point(|i| *i <= self.selected)
+                    < self.page.get();
+        }
         if self.task.is_none() && self.build.is_none() && (self.refresh || self.extend || seek) {
             if let Some(path) = self.path.clone() {
                 let limit = if self.refresh {
@@ -793,8 +804,10 @@ impl History {
                 ));
                 self.error = None;
             }
+            if !self.refresh {
+                self.extend = false;
+            }
             self.refresh = false;
-            self.extend = false;
         }
     }
 }
@@ -901,6 +914,64 @@ mod tests {
         h.navigate(Movement::End);
         tick(&mut h).await;
         assert!(!h.loading());
+    }
+    #[tokio::test]
+    async fn navigation_during_refresh_retains_expansion_without_chaining() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut h = History::with_backend(Arc::new(Controlled(tx)));
+        tick(&mut h).await;
+        rx.recv().await.unwrap().1.send(Ok(rows(128))).unwrap();
+        finish(&mut h).await;
+        h.visible_range(10);
+        h.request_refresh();
+        tick(&mut h).await;
+        let (limit, reply) = rx.recv().await.unwrap();
+        assert_eq!(limit, 128);
+        h.navigate(Movement::End);
+        reply.send(Ok(rows(128))).unwrap();
+        let (limit, reply) = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                tick(&mut h).await;
+                if let Ok(request) = rx.try_recv() {
+                    break request;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(limit, 256);
+        // Repeated navigation at the old boundary while expansion is pending
+        // must not cause another expansion after this request completes.
+        h.navigate(Movement::End);
+        reply.send(Ok(rows(256))).unwrap();
+        finish(&mut h).await;
+        assert_eq!(h.selected, 127);
+        assert!(rx.try_recv().is_err());
+    }
+    #[tokio::test]
+    async fn cancelled_head_lookup_preserves_navigation_demand() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut h = History::with_backend(Arc::new(Controlled(tx)));
+        tick(&mut h).await;
+        rx.recv().await.unwrap().1.send(Ok(rows(128))).unwrap();
+        finish(&mut h).await;
+        h.visible_range(10);
+        h.following = true;
+        h.resolve_head = true;
+        h.head_task = Some(tokio::spawn(std::future::pending()));
+        h.navigate(Movement::End);
+        tick(&mut h).await;
+        let (limit, reply) = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(limit, 256);
+        assert!(h.head_task.is_none());
+        reply.send(Ok(rows(256))).unwrap();
+        finish(&mut h).await;
+        assert_eq!(h.selected, 127);
+        assert!(rx.try_recv().is_err());
     }
     #[tokio::test]
     async fn failure_requires_retry_and_hide_generation_and_shutdown_cancel() {
