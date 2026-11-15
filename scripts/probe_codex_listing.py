@@ -4,12 +4,12 @@
 Uses the original probe's no-turn RPC allowlist and synthetic history fixtures.
 Success proves these cases only, not production-safe relocation/exclusion.
 """
+from diagnostics import run_cli, scratch_dir
 import argparse
 import hashlib
 import json
 from pathlib import Path
 import subprocess
-import tempfile
 
 import probe_codex_relocation as probe
 
@@ -128,17 +128,18 @@ def run(binary, root, mode, strategy, scenario):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--keep-temp', action='store_true', help='Retain full diagnostic scratch instead of cleaning it')
     parser.add_argument('--codex', required=True)
     parser.add_argument('--repeat', type=int, default=2)
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error('--repeat must be positive')
     binary = str(Path(args.codex).resolve(strict=True))
-    root = Path(tempfile.mkdtemp(prefix='tracr-listing-relink-'))
+    root = Path(scratch_dir(prefix='tracr-listing-relink-'))
     report = {'version': subprocess.check_output([binary, '--version'], text=True).strip(),
               'sha256': hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
               'evidence_directory': str(root), 'cases': [], 'production_approved': False}
-    print('Evidence:', root, flush=True)
+    print('Scratch:', root, flush=True)
     for repeat in range(args.repeat):
         for mode in ('legacy', 'paginated'):
             for strategy in ('resume', 'settings'):
@@ -152,4 +153,4 @@ def main():
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    raise SystemExit(run_cli(main))

@@ -4,6 +4,7 @@
 No user configuration or session is read. Raw RPC captures stay in the printed
 scratch directory; the JSON report contains selected metadata and normalized paths.
 """
+from diagnostics import run_cli, scratch_dir
 import argparse
 import copy
 import hashlib
@@ -11,7 +12,6 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
-import tempfile
 import time
 import probe_codex_relocation as base
 
@@ -232,28 +232,29 @@ def run_case(binary, root, mode, case, apply_profile=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--keep-temp', action='store_true', help='Retain full diagnostic scratch instead of cleaning it')
     parser.add_argument('--codex', required=True)
     parser.add_argument('--apply-profile', action='store_true', help='Explicitly resolve the same profile at the destination in the native update')
     parser.add_argument('--case', choices=CASES, action='append')
     parser.add_argument('--mode', choices=('legacy', 'paginated'), action='append')
     args = parser.parse_args()
     binary = str(Path(args.codex).resolve(strict=True))
-    root = Path(tempfile.mkdtemp(prefix='tracr-profile-probe-'))
+    root = Path(scratch_dir(prefix='tracr-profile-probe-'))
     version_root = root/'version'; version_root.mkdir()
     version_env = base.environment(version_root)
     report = {'version': subprocess.check_output([binary, '--version'], env=version_env, text=True).strip(),
               'executable_sha256': hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
               'probe_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), 'cases': []}
-    print('Evidence:', root, flush=True)
+    print('Scratch:', root, flush=True)
     for mode in args.mode or ('legacy', 'paginated'):
         for case in args.case or CASES:
             result = run_case(binary, root/(mode+'-'+case), mode, case, args.apply_profile)
             report['cases'].append(result)
             (root/'report.json').write_text(json.dumps(report, indent=2)+'\n')
             print(mode, case, result['status'], result.get('phase',''), result.get('error','')[:160], flush=True)
-    print('Report:', root/'report.json', flush=True)
+    print('Scratch report:', root/'report.json', flush=True)
     return int(any(c['status'] == 'inconclusive' for c in report['cases']))
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    raise SystemExit(run_cli(main))

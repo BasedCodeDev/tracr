@@ -1,4 +1,0 @@
- │  6268f60 merge commit 3 · Caf
- ●  32be21b merge commit 2 · Caf
-─╯
-    39c7197 merge commit 1 · Caf

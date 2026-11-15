@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Offline, disposable Codex relocation probe. Never uses the user's Codex home."""
+from diagnostics import on_cleanup, run_cli, scratch_dir
 import argparse
 import hashlib
 import json
@@ -9,7 +10,6 @@ import queue
 import shutil
 import sqlite3
 import subprocess
-import tempfile
 import threading
 import time
 
@@ -96,6 +96,7 @@ class Server:
         self.seq = 0
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
+        on_cleanup(self.close)
         try:
             self.call('initialize', {'clientInfo': {'name': 'tracr_probe', 'version': '0.1'},
                                     'capabilities': {'experimentalApi': True}})
@@ -412,6 +413,7 @@ def run_case(binary, root, mode, scenario, strategy="resume", prepare_only=False
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--keep-temp', action='store_true', help='Retain full diagnostic scratch instead of cleaning it')
     p.add_argument('--codex', default='codex')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--repeat', type=int, default=2)
@@ -428,7 +430,7 @@ def main():
     if Path(binary).read_bytes()[:4] != b'\x7fELF':
         p.error('--codex must point to the installed Linux binary, not a package-manager wrapper')
     args.output.mkdir(parents=True, exist_ok=True)
-    root = Path(tempfile.mkdtemp(prefix='tracr-probe-', dir=args.output.resolve()))
+    root = Path(scratch_dir(prefix='tracr-probe-', dir=args.output.resolve()))
     env = environment(root)
     version = subprocess.check_output([binary, '--version'], env=env, cwd=root, text=True).strip()
     schema = root / 'schema'
@@ -475,13 +477,13 @@ def main():
         and basic_verdict(report['cases'], strategy, args.repeat) != 'pass']
     report['coverage_note'] = 'Basic gates are not production approval. Extended coverage remains explicitly untested.'
     (root / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
-    print(f'Evidence: {root}')
+    print(f'Scratch: {root}')
     return exit_code(report['cases'])
 
 
 if __name__ == '__main__':
     try:
-        raise SystemExit(main())
+        raise SystemExit(run_cli(main))
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         print(f'Setup failed: {error}', file=__import__('sys').stderr)
         raise SystemExit(2)

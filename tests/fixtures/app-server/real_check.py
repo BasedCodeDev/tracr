@@ -8,12 +8,13 @@ import re
 import signal
 import subprocess
 import sys
-import tempfile
 import termios
 import time
 from pty_support import Terminal
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / 'scripts'))
+from diagnostics import run_cli, scratch_dir
 spec = importlib.util.spec_from_file_location('probe', ROOT/'scripts/probe_codex_relocation.py')
 probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
@@ -312,7 +313,7 @@ def run_new_case(binary, codex, home):
 
 def main():
     binary, codex = map(lambda p: str(Path(p).resolve()), sys.argv[1:])
-    evidence = Path(tempfile.mkdtemp(prefix='tracr-real-check-'))
+    evidence = Path(scratch_dir(prefix='tracr-real-check-'))
     results = []
     for mode in ['legacy', 'paginated']:
         results.append(run_case(binary, codex, evidence/mode, mode))
@@ -320,8 +321,8 @@ def main():
     results.append(run_new_case(binary, codex, evidence/'new-session'))
     (evidence/'results.json').write_text(json.dumps(results, indent=2)+'\n')
     print(json.dumps(results, indent=2))
-    print('Real Codex evidence:', evidence)
+    print('Real Codex scratch:', evidence)
     return exit_code(results)
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    raise SystemExit(run_cli(main))

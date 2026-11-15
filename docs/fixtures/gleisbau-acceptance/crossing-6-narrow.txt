@@ -1,8 +1,0 @@
-╭>○  92c2672 crossing commit 6 ·
-○ │  463bba3 crossing commit 5 ·
-├>○  c8278ab crossing commit 4 ·
-├<┤
-● │  2ef414c crossing commit 3 ·
-│ ●  13e56a4 crossing commit 2 ·
-├─╯
-●    9f80fe4 crossing commit 1 ·

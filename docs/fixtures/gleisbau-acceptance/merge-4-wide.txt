@@ -1,5 +1,0 @@
-╭>○  b417d94 merge commit 4 · Café é 界 👩‍💻
-● │  6268f60 merge commit 3 · Café é 界 👩‍💻
-│ ●  32be21b merge commit 2 · Café é 界 👩‍💻
-├─╯
-●    39c7197 merge commit 1 · Café é 界 👩‍💻

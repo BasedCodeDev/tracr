@@ -117,7 +117,7 @@ part of this slice.
 The public repository and HTTPS Git authentication are configured. The v0.1.0
 prerelease is published with both Linux musl assets. Both native build jobs,
 downloaded-asset verification, and x86_64 real-Codex acceptance passed. See
-[release evidence](release-0.1.0-evidence.json). ARM64 real-Codex acceptance is not
+the historical v0.1.0 evidence in Git history. ARM64 real-Codex acceptance is not
 claimed.
 
 The first draft job exposed a missing prerequisite: its folder tests also run
@@ -151,5 +151,5 @@ borders. Both native Linux build/test jobs and the draft installation checks
 passed in [the release workflow](https://github.com/BasedCodeDev/tracr/actions/runs/43438437027).
 The downloaded x86_64 release binary passed isolated real-Codex 0.167.2 checks
 for legacy resume, paginated resume, and new-session creation, including terminal
-return and daemon cleanup. See [release evidence](release-0.2.0-evidence.json).
+return and daemon cleanup. See the historical v0.2.0 evidence in Git history.
 ARM64 real-Codex acceptance remains unverified. The v0.1.0 release is unchanged.

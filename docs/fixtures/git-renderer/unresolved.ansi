@@ -1,8 +1,0 @@
-Unicode renderer · unresolved
-
-  [36m●              [39m0000000 [HEAD → main] Update project[0m
-[48;5;236m› [36m│[39m   [35m●          [39m0000001 [feature/navigation] Update project[0m
-  [36m│[39m   [35m│[39m   [33m●      [39m0000002 [release] Update project[0m
-  [36m│[39m   [35m│[39m   [33m│[39m   [32m●  [39m0000003 [fix/session] Update project[0m
-  [36m●[39m   [35m│[39m   [33m│[39m   [32m│  [39m0000004 Update project[0m
-  [36m┊[39m   [35m┊[39m   [33m┊[39m   [32m┊  [39molder history not loaded[0m

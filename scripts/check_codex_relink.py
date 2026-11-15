@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Opt-in acceptance of the Rust relinking implementation in disposable Codex homes."""
+from diagnostics import run_cli, scratch_dir
 import argparse
 import json
 import os
 from pathlib import Path
 import subprocess
-import tempfile
 import sys
 import http.server
 import threading
@@ -29,6 +29,7 @@ SCENARIOS = ('existing-child','existing-parent','existing-other','normal','archi
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--keep-temp', action='store_true', help='Retain full diagnostic scratch instead of cleaning it')
     parser.add_argument('--codex',required=True)
     parser.add_argument('--test-binary',required=True,help='Compiled tests/relocation.rs executable')
     parser.add_argument('--mode',choices=('legacy','paginated'),action='append')
@@ -36,9 +37,9 @@ def main():
     args=parser.parse_args()
     binary=str(Path(args.codex).resolve(strict=True))
     test_binary=str(Path(args.test_binary).resolve(strict=True))
-    root=Path(tempfile.mkdtemp(prefix='tracr-rl-'))
+    root=Path(scratch_dir(prefix='tracr-rl-'))
     results=[]
-    print('Evidence:',root,flush=True)
+    print('Scratch:',root,flush=True)
     for mode in args.mode or ('legacy','paginated'):
         for scenario in args.scenario or SCENARIOS:
             home=root/(mode+'-'+scenario)
@@ -200,4 +201,4 @@ def main():
     return int(any(r['status']!='passed' for r in results))
 
 
-if __name__=='__main__':raise SystemExit(main())
+if __name__=='__main__':raise SystemExit(run_cli(main))

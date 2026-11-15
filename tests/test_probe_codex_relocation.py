@@ -4,10 +4,13 @@ import json
 import os
 from pathlib import Path
 import queue
+import sys
 import tempfile
 import types
 import unittest
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 
 spec = importlib.util.spec_from_file_location('probe', Path(__file__).parents[1] / 'scripts/probe_codex_relocation.py')
 probe = importlib.util.module_from_spec(spec)

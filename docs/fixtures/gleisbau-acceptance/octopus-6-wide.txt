@@ -1,7 +1,0 @@
-╭─┴─┴>○  bd4c5b4 octopus commit 6 · Café é 界 👩‍💻
-│ │ ● │  d6e3049 octopus commit 5 · Café é 界 👩‍💻
-│ ● │ │  1a8a231 octopus commit 4 · Café é 界 👩‍💻
-● │ │ │  af4749f octopus commit 3 · Café é 界 👩‍💻
-╰─┴─┤ ●  47225b2 octopus commit 2 · Café é 界 👩‍💻
-    ├─╯
-    ●    cd404c9 octopus commit 1 · Café é 界 👩‍💻

@@ -13,12 +13,13 @@ import socket
 from types import SimpleNamespace
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from pty_support import Terminal
 
 ROOT=Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / 'scripts'))
+from diagnostics import run_cli, scratch_dir
 spec=importlib.util.spec_from_file_location('probe', ROOT/'scripts/probe_codex_relocation.py')
 probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
 
@@ -78,7 +79,7 @@ class Owner:
 
 def main():
     binary,codex=(str(Path(p).resolve()) for p in sys.argv[1:])
-    home=Path(tempfile.mkdtemp(prefix='tracr-real-status-'))
+    home=Path(scratch_dir(prefix='tracr-real-status-'))
     env=probe.environment(home);env['PATH']='/usr/bin:/bin'
     release=threading.Event()
     received=threading.Event()
@@ -140,6 +141,6 @@ def main():
         try:daemon.wait(timeout=10)
         except subprocess.TimeoutExpired:daemon.kill();daemon.wait()
         server.shutdown();server.server_close();daemon_log.close()
-        print('Real status evidence:',home)
+        print('Real status scratch:',home)
 
-if __name__=='__main__':main()
+if __name__=='__main__':run_cli(main)

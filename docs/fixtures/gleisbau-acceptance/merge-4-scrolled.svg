@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="480" height="166">
-<rect width="100%" height="100%" fill="#171b22"/>
-<style>text{font-family:"DejaVu Sans Mono",monospace;font-size:20px}</style>
-<text x="12" y="24" fill="#cbd5e1" style="font-size:13px">Gleisbau 0.7.5 — merge, 4 commits — experimental</text>
-<text x="12" y="54" xml:space="preserve"><tspan fill="#cbd5e1"> </tspan><tspan fill="#56c8d8">│</tspan><tspan fill="#cbd5e1">  6268f60 merge commit 3 · Caf</tspan></text>
-<text x="12" y="78" xml:space="preserve"><tspan fill="#cbd5e1"> </tspan><tspan fill="#56c8d8">●</tspan><tspan fill="#cbd5e1">  32be21b merge commit 2 · Caf</tspan></text>
-<text x="12" y="102" xml:space="preserve"><tspan fill="#56c8d8">─</tspan><tspan fill="#56c8d8">╯</tspan></text>
-<text x="12" y="126" xml:space="preserve"><tspan fill="#cbd5e1">  </tspan><tspan fill="#cbd5e1">  39c7197 merge commit 1 · Caf</tspan></text>
-</svg>

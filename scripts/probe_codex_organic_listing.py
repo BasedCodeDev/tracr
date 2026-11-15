@@ -3,17 +3,19 @@
 Creates fresh disposable homes; never reads credentials or edits stored history.
 Compares default/DB listing with and without a relocation-time turn.
 """
-import argparse, json, time, tempfile, threading, http.server
+from diagnostics import run_cli, scratch_dir
+import argparse, json, time, threading, http.server
 from pathlib import Path
 import probe_codex_relocation as p
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--keep-temp', action='store_true', help='Retain full diagnostic scratch instead of cleaning it')
     parser.add_argument('--codex',required=True)
     args=parser.parse_args()
     binary=str(Path(args.codex).resolve(strict=True))
     p.ALLOWED_METHODS = p.ALLOWED_METHODS | {'turn/start'}
-    root=Path(tempfile.mkdtemp(prefix='tracr-turn-relink-'))
+    root=Path(scratch_dir(prefix='tracr-turn-relink-'))
     class Handler(http.server.BaseHTTPRequestHandler):
      def log_message(self,*args): pass
      def do_POST(self):
@@ -58,7 +60,7 @@ def main():
        finally:
         if s:s.close()
     finally:
-     server.shutdown();server.server_close();(root/'results.json').write_text(json.dumps(results,indent=2));print('Evidence:',root,flush=True)
+     server.shutdown();server.server_close();(root/'results.json').write_text(json.dumps(results,indent=2));print('Scratch:',root,flush=True)
 
 if __name__ == '__main__':
-    main()
+    run_cli(main)

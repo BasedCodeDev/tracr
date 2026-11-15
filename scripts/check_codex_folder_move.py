@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """Folder move acceptance in disposable Codex homes; never uses real sessions."""
-import argparse,json,subprocess,tempfile,sqlite3
+from diagnostics import run_cli, scratch_dir
+import argparse,json,subprocess,sqlite3
 from pathlib import Path
 import probe_codex_relocation as probe
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--keep-temp', action='store_true', help='Retain full diagnostic scratch instead of cleaning it')
     parser.add_argument('--codex',required=True)
     parser.add_argument('--test-binary',required=True)
     parser.add_argument('--scenario',choices=('normal','locked','interrupted'),default='normal')
     args=parser.parse_args()
     binary=str(Path(args.codex).resolve(strict=True))
     test=str(Path(args.test_binary).resolve(strict=True))
-    root=Path(tempfile.mkdtemp(prefix='tracr-folder-native-'))
-    print('Evidence:',root,flush=True)
+    root=Path(scratch_dir(prefix='tracr-folder-native-'))
+    print('Scratch:',root,flush=True)
     results=[]
     for mode in ('legacy','paginated'):
         home=root/mode
@@ -80,4 +82,4 @@ def main():
         results.append(case);print(json.dumps(case),flush=True)
     (root/'results.json').write_text(json.dumps(results,indent=2))
     return int(any(r['status']!='passed' for r in results))
-if __name__=='__main__':raise SystemExit(main())
+if __name__=='__main__':raise SystemExit(run_cli(main))

@@ -3,6 +3,7 @@
 The byte proxy wrapper routes only this fixture to that server; other invocations use
 real Codex. Never touches the user's daemon, credentials, or configuration.
 """
+from diagnostics import run_cli, scratch_dir
 import argparse
 import hashlib
 import json
@@ -11,7 +12,6 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import probe_codex_relocation as probe
 import probe_codex_profiles as profiles
@@ -35,6 +35,7 @@ def connect(binary, env, port):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--keep-temp', action='store_true', help='Retain full diagnostic scratch instead of cleaning it')
     parser.add_argument('--codex', required=True)
     parser.add_argument('--test-binary', required=True)
     parser.add_argument('--mode', action='append', choices=['legacy','paginated'])
@@ -42,8 +43,8 @@ def main():
     args=parser.parse_args()
     binary=str(Path(args.codex).resolve(strict=True))
     test=str(Path(args.test_binary).resolve(strict=True))
-    root=Path(tempfile.mkdtemp(prefix='tracr-release-'))
-    print('Evidence:',root,flush=True)
+    root=Path(scratch_dir(prefix='tracr-release-'))
+    print('Scratch:',root,flush=True)
     version=subprocess.check_output([binary,"--version"],text=True).strip()
     with open(binary,"rb") as stream: digest=hashlib.file_digest(stream,"sha256").hexdigest()
     results=[]
@@ -115,4 +116,4 @@ def main():
             (root/'results.json').write_text(json.dumps(results,indent=2))
     return 0 if all(r['status']=='passed' for r in results) else 1
 
-if __name__=='__main__':raise SystemExit(main())
+if __name__=='__main__':raise SystemExit(run_cli(main))

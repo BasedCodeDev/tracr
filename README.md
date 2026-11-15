@@ -381,10 +381,8 @@ Private recovery journals live in `$XDG_STATE_HOME/tracr/relocations` (default
 and attempt guarded completion. Conflicting later changes are left untouched.
 Escape cannot abandon a running mutation; forced termination leaves a journal.
 
-See [the native mechanism](docs/codex-native-relinking-solution.md),
-[implementation validation](docs/relinking-validation.md), and the
-[permission-profile investigation](docs/codex-profile-relinking.md).
-The [built-in profile validation](docs/builtin-profile-relinking-validation.md) covers
+See [relocation compatibility](docs/codex-relocation-compatibility.md) for the native
+mechanism, supported permission profiles, and validation. Built-in profile checks cover
 the production implementation and its real-Codex acceptance cases.
 
 The session relink picker has **Folders** and **Worktrees** views. With the list
