@@ -353,8 +353,11 @@ fn renamed(plan: &Plan) -> Result<bool> {
 fn rename_noreplace(old: &Path, target: &Path) -> Result<()> {
     let a = std::ffi::CString::new(old.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
     let b = std::ffi::CString::new(target.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    // musl does not export a renameat2 wrapper. Use the Linux syscall on
+    // both supported architectures, retaining atomic no-overwrite semantics.
     let result = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             libc::AT_FDCWD,
             a.as_ptr(),
             libc::AT_FDCWD,
@@ -743,5 +746,32 @@ async fn execute_inner(
             save(state, &j)?;
             Err(error)
         }
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+
+    #[test]
+    fn atomic_rename_preserves_an_existing_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("old");
+        let target = root.path().join("target");
+        fs::create_dir(&old).unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(old.join("source"), "source").unwrap();
+        fs::write(target.join("existing"), "existing").unwrap();
+        assert!(rename_noreplace(&old, &target).is_err());
+        assert_eq!(fs::read_to_string(old.join("source")).unwrap(), "source");
+        assert_eq!(
+            fs::read_to_string(target.join("existing")).unwrap(),
+            "existing"
+        );
+        fs::remove_file(target.join("existing")).unwrap();
+        fs::remove_dir(&target).unwrap();
+        rename_noreplace(&old, &target).unwrap();
+        assert!(!old.exists());
+        assert_eq!(fs::read_to_string(target.join("source")).unwrap(), "source");
     }
 }
