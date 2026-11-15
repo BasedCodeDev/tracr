@@ -59,11 +59,14 @@ def run_case(operation=None, action='walkthrough'):
         wrapper_dir.mkdir()
         wrapper = wrapper_dir / 'git'
         wrapper.write_text('''#!/usr/bin/env python3
-import json, os, signal, sys
+import json, os, signal, sys, time
 from pathlib import Path
 home = Path(os.environ['GIT_TEST_HOME'])
 args = sys.argv[1:]
 operation = 'history' if 'log' in args else 'inventory' if 'worktree' in args else 'directory'
+if os.environ.get('GIT_TEST_GATE_EXPANSION') == '1' and '--max-count=256' in args:
+    (home / 'expansion-started').touch()
+    while not (home / 'allow-expansion').exists(): time.sleep(.01)
 if operation == os.environ.get('GIT_TEST_BLOCK') or (os.environ.get('GIT_TEST_BLOCK') == 'expansion' and '--max-count=256' in args):
     (home / ('pending-' + str(os.getpid()))).write_text(operation)
     while True: signal.pause()
@@ -72,6 +75,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
         wrapper.chmod(0o755)
         env.update(PATH=str(wrapper_dir) + os.pathsep + env['PATH'],
                    GIT_TEST_HOME=str(home), GIT_TEST_REAL=real_git,
+                   GIT_TEST_GATE_EXPANSION='1' if action == 'progressive' else '0',
                    GIT_TEST_BLOCK=operation or '')
         terminal = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(executable), str(linked)], env)
         try:
@@ -110,16 +114,17 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 return
             if action in ('progressive', 'expansion-quit'):
                 terminal.expect('History 299')
-                mark = len(terminal.output)
+                terminal.expect('Git history — feature · g hide · Tab focus · following HEAD')
                 terminal.send(b'\t\x1b[F')
                 if action == 'expansion-quit':
                     terminal.wait(lambda: bool(list(home.glob('pending-*'))))
                 else:
                     terminal.expect('History 172')
-                    # End first renders the old prefix boundary; expansion is
-                    # scheduled on the next tick. Observe it starting before
-                    # treating an absent loading label as completion.
-                    terminal.wait(lambda: b'loading more' in terminal.output[mark:])
+                    # Hold the expansion until its loading frame is observed;
+                    # fast optimized builds may otherwise finish between frames.
+                    terminal.wait(lambda: (home / 'expansion-started').exists())
+                    terminal.expect('loading more')
+                    (home / 'allow-expansion').touch()
                     terminal.wait(lambda: 'loading more' not in terminal.text())
                     terminal.send(b'\x1b[B')
                     terminal.expect('History 171')
