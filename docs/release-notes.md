@@ -1,11 +1,13 @@
-# tracr 0.3.0 — session relocation and folder moves
+# tracr 0.4.0 — Git history and worktree browsing
 
-- Relink sessions whose folders went missing, or relocate a session to another existing folder with `l`. A filesystem picker makes choosing the destination easier.
-- Move an entire folder, its files and all descendant sessions with `m` in Folders. Relative paths are preserved; recovery journals support interrupted operations.
-- Automatically release detached idle Codex sessions after confirming a move. Active and attached sessions stay protected, and Codex's persistent settings stay unchanged.
-- See Running, Waiting, Idle and Unloaded states. Running and waiting activity also colors the containing folders.
-- Copy detailed failure reports from reusable, scrollable dialogs. Relocation progress and recovery instructions explain what happened.
-- Navigate the compact, centered `?` action menu with arrow keys and Enter. Session activity uses relative times, ordered newest first.
+- Browse Git repositories and their registered worktrees alongside sessions, including checkouts outside the project folder.
+- Explore cached, colored Unicode commit graphs with branch and tag labels, progressive history loading, and horizontal scrolling. Press `g` to toggle history and `f` to follow the selected checkout's HEAD.
+- Refresh active repository branches, worktrees, and history automatically through native metadata notifications, with low idle CPU use. Manual navigation preserves the selected commit.
+- Choose registered worktrees as session relink destinations. Folders and Worktrees retain separate paths, and the destination is revalidated before the existing confirmation preview.
+- Use directional arrow navigation without wrapping between the folder and session panes.
+
+Native watching does not poll Git or recursively watch project files. If notifications
+are unavailable, use `r`, re-enter the repository, or reopen history to refresh.
 
 Install or update:
 
