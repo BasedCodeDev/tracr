@@ -1,0 +1,8 @@
+Unicode renderer · unresolved
+
+  ●              0000000 [HEAD → main] Update project
+› │   ●          0000001 [feature/navigation] Update project
+  │   │   ●      0000002 [release] Update project
+  │   │   │   ●  0000003 [fix/session] Update project
+  ●   │   │   │  0000004 Update project
+  ┊   ┊   ┊   ┊  older history not loaded

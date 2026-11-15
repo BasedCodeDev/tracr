@@ -1,0 +1,113 @@
+{
+  "binary": "/tmp/tracr-git-browser/target/release/tracr",
+  "git": "git version 2.56.0",
+  "terminal": {
+    "rows": 80,
+    "columns": 240
+  },
+  "cases": [
+    {
+      "case": "linear",
+      "commits": 30000,
+      "initial_display_ms": 222.42,
+      "expansion_ms": 182.61,
+      "idle_seconds": 30.05,
+      "idle_git_commands": 0,
+      "idle_output_bytes": 0,
+      "parent_cpu_percent": 0.033,
+      "child_cpu_percent": 0.0,
+      "peak_rss_kib": 10612,
+      "history_limits": [
+        128,
+        128,
+        256,
+        256
+      ],
+      "git_commands": {
+        "rev-parse": 22,
+        "worktree": 2,
+        "symbolic-ref": 3,
+        "show-ref": 3,
+        "log": 4
+      },
+      "passed": true
+    },
+    {
+      "case": "wide",
+      "commits": 1089,
+      "initial_display_ms": 177.52,
+      "expansion_ms": 92.81,
+      "idle_seconds": 30.05,
+      "idle_git_commands": 0,
+      "idle_output_bytes": 0,
+      "parent_cpu_percent": 0.0,
+      "child_cpu_percent": 0.0,
+      "peak_rss_kib": 10792,
+      "history_limits": [
+        128,
+        128,
+        256,
+        256
+      ],
+      "git_commands": {
+        "rev-parse": 14,
+        "worktree": 2,
+        "symbolic-ref": 3,
+        "show-ref": 3,
+        "log": 4
+      },
+      "passed": true
+    },
+    {
+      "case": "old-head",
+      "commits": 30000,
+      "initial_display_ms": 1291.14,
+      "idle_seconds": 30.04,
+      "idle_git_commands": 0,
+      "idle_output_bytes": 0,
+      "parent_cpu_percent": 0.0,
+      "child_cpu_percent": 0.0,
+      "peak_rss_kib": 75700,
+      "history_limits": [
+        128,
+        256,
+        512,
+        1024,
+        2048,
+        4096,
+        8192,
+        16384,
+        32768,
+        32768
+      ],
+      "git_commands": {
+        "rev-parse": 23,
+        "symbolic-ref": 2,
+        "worktree": 2,
+        "show-ref": 2,
+        "log": 10
+      },
+      "passed": true
+    },
+    {
+      "case": "cancel-expansion",
+      "commits": 30000,
+      "initial_display_ms": 220.17,
+      "cancelled_and_reaped": true,
+      "history_limits": [
+        128,
+        128,
+        256
+      ],
+      "git_commands": {
+        "rev-parse": 21,
+        "symbolic-ref": 2,
+        "worktree": 2,
+        "show-ref": 2,
+        "log": 3
+      },
+      "passed": true
+    }
+  ],
+  "passed": true
+}

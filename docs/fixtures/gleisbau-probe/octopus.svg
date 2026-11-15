@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="238">
+<rect width="100%" height="100%" fill="#171b22"/>
+<g font-family="DejaVu Sans Mono,monospace" font-size="20">
+<text x="20" y="25" font-size="16" fill="#cbd5e1">gleisbau 0.7.5 — actual experimental output, not enabled in Tracer</text>
+<text x="20" y="55" fill="#98c379">╭</text>
+<text x="32" y="55" fill="#98c379">─</text>
+<text x="44" y="55" fill="#98c379">┴</text>
+<text x="56" y="55" fill="#98c379">─</text>
+<text x="68" y="55" fill="#98c379">┴</text>
+<text x="80" y="55" fill="#c792ea">&gt;</text>
+<text x="92" y="55" fill="#56c8d8">○</text>
+<text x="128" y="55" font-size="16" fill="#dce4ef">bd4c5b4 octopus commit 6 [main]</text>
+<text x="20" y="79" fill="#98c379">│</text>
+<text x="44" y="79" fill="#e5c07b">│</text>
+<text x="68" y="79" fill="#c792ea">●</text>
+<text x="92" y="79" fill="#56c8d8">│</text>
+<text x="128" y="79" font-size="16" fill="#dce4ef">d6e3049 octopus commit 5</text>
+<text x="20" y="103" fill="#98c379">│</text>
+<text x="44" y="103" fill="#e5c07b">●</text>
+<text x="68" y="103" fill="#c792ea">│</text>
+<text x="92" y="103" fill="#56c8d8">│</text>
+<text x="128" y="103" font-size="16" fill="#dce4ef">1a8a231 octopus commit 4</text>
+<text x="20" y="127" fill="#98c379">●</text>
+<text x="44" y="127" fill="#e5c07b">│</text>
+<text x="68" y="127" fill="#c792ea">│</text>
+<text x="92" y="127" fill="#56c8d8">│</text>
+<text x="128" y="127" font-size="16" fill="#dce4ef">af4749f octopus commit 3</text>
+<text x="20" y="151" fill="#98c379">╰</text>
+<text x="32" y="151" fill="#98c379">─</text>
+<text x="44" y="151" fill="#e5c07b">┴</text>
+<text x="56" y="151" fill="#e5c07b">─</text>
+<text x="68" y="151" fill="#c792ea">┤</text>
+<text x="92" y="151" fill="#56c8d8">●</text>
+<text x="128" y="151" font-size="16" fill="#dce4ef">47225b2 octopus commit 2</text>
+<text x="68" y="175" fill="#c792ea">├</text>
+<text x="80" y="175" fill="#56c8d8">─</text>
+<text x="92" y="175" fill="#56c8d8">╯</text>
+<text x="68" y="199" fill="#c792ea">●</text>
+<text x="128" y="199" font-size="16" fill="#dce4ef">cd404c9 octopus commit 1</text>
+</g></svg>

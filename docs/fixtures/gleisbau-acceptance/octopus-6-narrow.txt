@@ -1,0 +1,7 @@
+╭─┴─┴>○  bd4c5b4 octopus commit 
+│ │ ● │  d6e3049 octopus commit 
+│ ● │ │  1a8a231 octopus commit 
+● │ │ │  af4749f octopus commit 
+╰─┴─┤ ●  47225b2 octopus commit 
+    ├─╯
+    ●    cd404c9 octopus commit 

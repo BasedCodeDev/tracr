@@ -1,0 +1,15 @@
+Unicode renderer · parallel-four
+
+  ●              0000009 [HEAD → main] Update project
+› │   ●          0000007 [feature/navigation] Update project
+  │   │   ●      0000005 [release] Update project
+  │   │   │   ●  0000003 [fix/session] Update project
+  ●   │   │   │  0000008 Update project
+  │   ●   │   │  0000006 Update project
+  ├──←╯   │   │  
+  │       ●   │  0000004 Update project
+  ├──────←╯   │  
+  │           ●  0000002 Update project
+  ├──────────←╯  
+  ●              0000001 Initial commit
+                 

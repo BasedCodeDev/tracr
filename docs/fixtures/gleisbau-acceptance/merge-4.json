@@ -1,0 +1,528 @@
+{
+  "input": {
+    "commits": [
+      {
+        "oid": "b417d94e15754a1e844c85e9d9bfc93c5d9ced62",
+        "parents": [
+          "32be21b25c489fada443b18fcf6493348e859085",
+          "6268f6031ad32f685b3a94e4000872a1e7ab68d9"
+        ],
+        "subject": "merge commit 4 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      },
+      {
+        "oid": "6268f6031ad32f685b3a94e4000872a1e7ab68d9",
+        "parents": [
+          "39c719755bf4c2e0840ad4a698929ee3a9a68833"
+        ],
+        "subject": "merge commit 3 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      },
+      {
+        "oid": "32be21b25c489fada443b18fcf6493348e859085",
+        "parents": [
+          "39c719755bf4c2e0840ad4a698929ee3a9a68833"
+        ],
+        "subject": "merge commit 2 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      },
+      {
+        "oid": "39c719755bf4c2e0840ad4a698929ee3a9a68833",
+        "parents": [],
+        "subject": "merge commit 1 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      }
+    ],
+    "refs": {
+      "b417d94e15754a1e844c85e9d9bfc93c5d9ced62": "main",
+      "6268f6031ad32f685b3a94e4000872a1e7ab68d9": "side"
+    },
+    "viewports": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 96,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 32,
+        "height": 12
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "width": 32,
+        "height": 8
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 32,
+        "height": 12
+      }
+    ]
+  },
+  "output": {
+    "lines": [
+      "\u001b[38;5;5m\u256d\u001b[0m\u001b[38;5;5m>\u001b[0m\u001b[38;5;6m\u25cb\u001b[0m",
+      "\u001b[38;5;5m\u25cf\u001b[0m \u001b[38;5;6m\u2502\u001b[0m",
+      "\u001b[38;5;5m\u2502\u001b[0m \u001b[38;5;6m\u25cf\u001b[0m",
+      "\u001b[38;5;5m\u251c\u001b[0m\u001b[38;5;6m\u2500\u001b[0m\u001b[38;5;6m\u256f\u001b[0m",
+      "\u001b[38;5;5m\u25cf\u001b[0m  "
+    ],
+    "peak_working_bytes": 416556,
+    "positions": [
+      {
+        "color": 6,
+        "column": 2,
+        "oid": "b417d94e15754a1e844c85e9d9bfc93c5d9ced62",
+        "row": 0
+      },
+      {
+        "color": 5,
+        "column": 0,
+        "oid": "6268f6031ad32f685b3a94e4000872a1e7ab68d9",
+        "row": 1
+      },
+      {
+        "color": 6,
+        "column": 2,
+        "oid": "32be21b25c489fada443b18fcf6493348e859085",
+        "row": 2
+      },
+      {
+        "color": 5,
+        "column": 0,
+        "oid": "39c719755bf4c2e0840ad4a698929ee3a9a68833",
+        "row": 4
+      }
+    ],
+    "render_passes": 1,
+    "retained_working_bytes": 126331,
+    "status": "rendered",
+    "timing_us": {
+      "ingest": 3764,
+      "layout": 5,
+      "render": 9
+    },
+    "viewports": [
+      {
+        "positions": [
+          {
+            "node_visible": true,
+            "oid": "b417d94e15754a1e844c85e9d9bfc93c5d9ced62",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "6268f6031ad32f685b3a94e4000872a1e7ab68d9",
+            "row": 1
+          },
+          {
+            "node_visible": true,
+            "oid": "32be21b25c489fada443b18fcf6493348e859085",
+            "row": 2
+          },
+          {
+            "node_visible": true,
+            "oid": "39c719755bf4c2e0840ad4a698929ee3a9a68833",
+            "row": 4
+          }
+        ],
+        "request": {
+          "height": 40,
+          "width": 96,
+          "x": 0,
+          "y": 0
+        },
+        "rows": [
+          [
+            {
+              "color": 5,
+              "text": "\u256d"
+            },
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  b417d94 merge commit 4 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  6268f60 merge commit 3 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  32be21b merge commit 2 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 6,
+              "text": "\u2500"
+            },
+            {
+              "color": 6,
+              "text": "\u256f"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  "
+            },
+            {
+              "color": null,
+              "text": "  39c7197 merge commit 1 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ]
+        ]
+      },
+      {
+        "positions": [
+          {
+            "node_visible": true,
+            "oid": "b417d94e15754a1e844c85e9d9bfc93c5d9ced62",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "6268f6031ad32f685b3a94e4000872a1e7ab68d9",
+            "row": 1
+          },
+          {
+            "node_visible": true,
+            "oid": "32be21b25c489fada443b18fcf6493348e859085",
+            "row": 2
+          },
+          {
+            "node_visible": true,
+            "oid": "39c719755bf4c2e0840ad4a698929ee3a9a68833",
+            "row": 4
+          }
+        ],
+        "request": {
+          "height": 12,
+          "width": 32,
+          "x": 0,
+          "y": 0
+        },
+        "rows": [
+          [
+            {
+              "color": 5,
+              "text": "\u256d"
+            },
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  b417d94 merge commit 4 \u00b7 Ca"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  6268f60 merge commit 3 \u00b7 Ca"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  32be21b merge commit 2 \u00b7 Ca"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 6,
+              "text": "\u2500"
+            },
+            {
+              "color": 6,
+              "text": "\u256f"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  "
+            },
+            {
+              "color": null,
+              "text": "  39c7197 merge commit 1 \u00b7 Ca"
+            }
+          ]
+        ]
+      },
+      {
+        "positions": [
+          {
+            "node_visible": false,
+            "oid": "6268f6031ad32f685b3a94e4000872a1e7ab68d9",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "32be21b25c489fada443b18fcf6493348e859085",
+            "row": 1
+          },
+          {
+            "node_visible": false,
+            "oid": "39c719755bf4c2e0840ad4a698929ee3a9a68833",
+            "row": 3
+          }
+        ],
+        "request": {
+          "height": 8,
+          "width": 32,
+          "x": 1,
+          "y": 1
+        },
+        "rows": [
+          [
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  6268f60 merge commit 3 \u00b7 Caf"
+            }
+          ],
+          [
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  32be21b merge commit 2 \u00b7 Caf"
+            }
+          ],
+          [
+            {
+              "color": 6,
+              "text": "\u2500"
+            },
+            {
+              "color": 6,
+              "text": "\u256f"
+            }
+          ],
+          [
+            {
+              "color": null,
+              "text": "  "
+            },
+            {
+              "color": null,
+              "text": "  39c7197 merge commit 1 \u00b7 Caf"
+            }
+          ]
+        ]
+      },
+      {
+        "positions": [
+          {
+            "node_visible": true,
+            "oid": "b417d94e15754a1e844c85e9d9bfc93c5d9ced62",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "6268f6031ad32f685b3a94e4000872a1e7ab68d9",
+            "row": 1
+          },
+          {
+            "node_visible": true,
+            "oid": "32be21b25c489fada443b18fcf6493348e859085",
+            "row": 2
+          },
+          {
+            "node_visible": true,
+            "oid": "39c719755bf4c2e0840ad4a698929ee3a9a68833",
+            "row": 4
+          }
+        ],
+        "request": {
+          "height": 12,
+          "width": 32,
+          "x": 0,
+          "y": 0
+        },
+        "rows": [
+          [
+            {
+              "color": 5,
+              "text": "\u256d"
+            },
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  b417d94 merge commit 4 \u00b7 Ca"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  6268f60 merge commit 3 \u00b7 Ca"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  32be21b merge commit 2 \u00b7 Ca"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 6,
+              "text": "\u2500"
+            },
+            {
+              "color": 6,
+              "text": "\u256f"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  "
+            },
+            {
+              "color": null,
+              "text": "  39c7197 merge commit 1 \u00b7 Ca"
+            }
+          ]
+        ]
+      }
+    ],
+    "stderr": "",
+    "wall_seconds": 0.005965054006082937
+  }
+}

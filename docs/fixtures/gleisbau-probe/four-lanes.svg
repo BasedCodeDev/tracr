@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="382">
+<rect width="100%" height="100%" fill="#171b22"/>
+<g font-family="DejaVu Sans Mono,monospace" font-size="20">
+<text x="20" y="25" font-size="16" fill="#cbd5e1">gleisbau 0.7.5 — actual experimental output, not enabled in Tracer</text>
+<text x="68" y="55" fill="#56c8d8">●</text>
+<text x="104" y="55" font-size="16" fill="#dce4ef">531ab96 four-lanes commit 11 [fix]</text>
+<text x="44" y="79" fill="#c792ea">●</text>
+<text x="68" y="79" fill="#56c8d8">│</text>
+<text x="104" y="79" font-size="16" fill="#dce4ef">f2b3ddf four-lanes commit 10 [navigation]</text>
+<text x="44" y="103" fill="#c792ea">●</text>
+<text x="68" y="103" fill="#56c8d8">│</text>
+<text x="104" y="103" font-size="16" fill="#dce4ef">77306c8 four-lanes commit 9</text>
+<text x="20" y="127" fill="#e5c07b">○</text>
+<text x="32" y="127" fill="#56c8d8">&lt;</text>
+<text x="44" y="127" fill="#c792ea">┼</text>
+<text x="56" y="127" fill="#56c8d8">─</text>
+<text x="68" y="127" fill="#56c8d8">┤</text>
+<text x="104" y="127" font-size="16" fill="#dce4ef">ae4b29d four-lanes commit 8 [main]</text>
+<text x="20" y="151" fill="#e5c07b">│</text>
+<text x="44" y="151" fill="#c792ea">│</text>
+<text x="68" y="151" fill="#56c8d8">●</text>
+<text x="104" y="151" font-size="16" fill="#dce4ef">8982fba four-lanes commit 7 [release]</text>
+<text x="20" y="175" fill="#e5c07b">│</text>
+<text x="44" y="175" fill="#c792ea">│</text>
+<text x="68" y="175" fill="#56c8d8">●</text>
+<text x="104" y="175" font-size="16" fill="#dce4ef">ab6e824 four-lanes commit 5</text>
+<text x="20" y="199" fill="#e5c07b">│</text>
+<text x="44" y="199" fill="#c792ea">│</text>
+<text x="68" y="199" fill="#56c8d8">●</text>
+<text x="104" y="199" font-size="16" fill="#dce4ef">dbfa153 four-lanes commit 3</text>
+<text x="20" y="223" fill="#e5c07b">●</text>
+<text x="44" y="223" fill="#c792ea">│</text>
+<text x="68" y="223" fill="#56c8d8">│</text>
+<text x="104" y="223" font-size="16" fill="#dce4ef">91d4f00 four-lanes commit 6</text>
+<text x="20" y="247" fill="#e5c07b">╰</text>
+<text x="32" y="247" fill="#e5c07b">─</text>
+<text x="44" y="247" fill="#c792ea">┤</text>
+<text x="68" y="247" fill="#56c8d8">│</text>
+<text x="44" y="271" fill="#c792ea">●</text>
+<text x="68" y="271" fill="#56c8d8">│</text>
+<text x="104" y="271" font-size="16" fill="#dce4ef">331f3e2 four-lanes commit 4</text>
+<text x="44" y="295" fill="#c792ea">●</text>
+<text x="68" y="295" fill="#56c8d8">│</text>
+<text x="104" y="295" font-size="16" fill="#dce4ef">bec9cd5 four-lanes commit 2</text>
+<text x="44" y="319" fill="#c792ea">╰</text>
+<text x="56" y="319" fill="#c792ea">─</text>
+<text x="68" y="319" fill="#56c8d8">┤</text>
+<text x="68" y="343" fill="#56c8d8">●</text>
+<text x="104" y="343" font-size="16" fill="#dce4ef">1b0435e four-lanes commit 1</text>
+</g></svg>

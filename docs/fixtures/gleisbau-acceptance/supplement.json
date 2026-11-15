@@ -1,0 +1,334 @@
+{
+  "binary_sha256": "1e658a486008bef2f8b9d86b9b18ea600237b895537dbea15af1766844855cb6",
+  "git": "git version 2.56.0",
+  "platform": "Linux-7.2.15-1-omarchy-x86_64-with-glibc2.44",
+  "previews": [
+    {
+      "fixture": "merge",
+      "limit": 4,
+      "status": "rendered",
+      "topology_errors": [],
+      "cached_viewports_passed": true,
+      "rows_per_commit": 1.25,
+      "graph_columns": 3
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 9,
+      "status": "rendered",
+      "topology_errors": [],
+      "cached_viewports_passed": true,
+      "rows_per_commit": 1.1111111111111112,
+      "graph_columns": 7
+    },
+    {
+      "fixture": "crossing",
+      "limit": 6,
+      "status": "rendered",
+      "topology_errors": [],
+      "cached_viewports_passed": true,
+      "rows_per_commit": 1.3333333333333333,
+      "graph_columns": 3
+    },
+    {
+      "fixture": "octopus",
+      "limit": 6,
+      "status": "rendered",
+      "topology_errors": [
+        "bd4c5b4: expected ['1a8a231', '47225b2', 'af4749f', 'd6e3049'], drawn ['47225b2', 'af4749f']"
+      ],
+      "cached_viewports_passed": true,
+      "rows_per_commit": 1.1666666666666667,
+      "graph_columns": 7
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 2,
+      "status": "rendered",
+      "topology_errors": [
+        "531ab96: expected [], drawn ['f2b3ddf']",
+        "531ab96: no open continuation for unloaded parent"
+      ],
+      "cached_viewports_passed": true,
+      "rows_per_commit": 1.5,
+      "graph_columns": 1
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 11,
+      "status": "rendered",
+      "topology_errors": [],
+      "cached_viewports_passed": true,
+      "rows_per_commit": 1.1818181818181819,
+      "graph_columns": 5
+    }
+  ],
+  "benchmarks": [
+    {
+      "fixture": "linear-30000",
+      "commits": 128,
+      "statuses": [
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered"
+      ],
+      "topology_error_count": 0,
+      "topology_errors": [],
+      "repeat_equal": true,
+      "timing_us": {
+        "ingest": 3808,
+        "layout": 6,
+        "render": 48
+      },
+      "retained_working_bytes": 161584,
+      "peak_working_bytes": 416556
+    },
+    {
+      "fixture": "linear-30000",
+      "commits": 512,
+      "statuses": [
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered"
+      ],
+      "topology_error_count": 0,
+      "topology_errors": [],
+      "repeat_equal": true,
+      "timing_us": {
+        "ingest": 4161,
+        "layout": 12,
+        "render": 175
+      },
+      "retained_working_bytes": 312112,
+      "peak_working_bytes": 416556
+    },
+    {
+      "fixture": "linear-30000",
+      "commits": 2048,
+      "statuses": [
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered"
+      ],
+      "topology_error_count": 0,
+      "topology_errors": [],
+      "repeat_equal": true,
+      "timing_us": {
+        "ingest": 5366,
+        "layout": 31,
+        "render": 669
+      },
+      "retained_working_bytes": 914224,
+      "peak_working_bytes": 1235795
+    },
+    {
+      "fixture": "linear-30000",
+      "commits": 10000,
+      "statuses": [
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered"
+      ],
+      "topology_error_count": 0,
+      "topology_errors": [],
+      "repeat_equal": true,
+      "timing_us": {
+        "ingest": 11955,
+        "layout": 125,
+        "render": 3533
+      },
+      "retained_working_bytes": 4267760,
+      "peak_working_bytes": 5646147
+    },
+    {
+      "fixture": "linear-30000",
+      "commits": 30000,
+      "statuses": [
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered"
+      ],
+      "topology_error_count": 0,
+      "topology_errors": [],
+      "repeat_equal": true,
+      "timing_us": {
+        "ingest": 30030,
+        "layout": 357,
+        "render": 11526
+      },
+      "retained_working_bytes": 11826732,
+      "peak_working_bytes": 16174828
+    },
+    {
+      "fixture": "wide-64",
+      "commits": 128,
+      "statuses": [
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered"
+      ],
+      "topology_error_count": 14,
+      "topology_errors": [
+        "f4536d4: expected [], drawn ['a00ddd9']",
+        "f4536d4: no open continuation for unloaded parent",
+        "2af5538: expected [], drawn ['d66c9b2']",
+        "2af5538: no open continuation for unloaded parent",
+        "b15b9e4: expected [], drawn ['17e8293']",
+        "b15b9e4: no open continuation for unloaded parent",
+        "10c3855: expected [], drawn ['b23a64e']",
+        "10c3855: no open continuation for unloaded parent"
+      ],
+      "repeat_equal": true,
+      "timing_us": {
+        "ingest": 3623,
+        "layout": 10,
+        "render": 67
+      },
+      "retained_working_bytes": 151686,
+      "peak_working_bytes": 416556
+    },
+    {
+      "fixture": "wide-64",
+      "commits": 512,
+      "statuses": [
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered"
+      ],
+      "topology_error_count": 60,
+      "topology_errors": [
+        "f4536d4: expected [], drawn ['a00ddd9']",
+        "f4536d4: no open continuation for unloaded parent",
+        "2af5538: expected [], drawn ['d66c9b2']",
+        "2af5538: no open continuation for unloaded parent",
+        "b15b9e4: expected [], drawn ['17e8293']",
+        "b15b9e4: no open continuation for unloaded parent",
+        "10c3855: expected [], drawn ['b23a64e']",
+        "10c3855: no open continuation for unloaded parent"
+      ],
+      "repeat_equal": true,
+      "timing_us": {
+        "ingest": 3854,
+        "layout": 19,
+        "render": 251
+      },
+      "retained_working_bytes": 314045,
+      "peak_working_bytes": 416556
+    },
+    {
+      "fixture": "wide-64",
+      "commits": 1089,
+      "statuses": [
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered",
+        "rendered"
+      ],
+      "topology_error_count": 0,
+      "topology_errors": [],
+      "repeat_equal": true,
+      "timing_us": {
+        "ingest": 4374,
+        "layout": 40,
+        "render": 5780
+      },
+      "retained_working_bytes": 1333848,
+      "peak_working_bytes": 1905689
+    }
+  ],
+  "prefix_stability": [
+    {
+      "fixture": "linear-30000",
+      "limit": 512,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "linear-30000",
+      "limit": 2048,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "linear-30000",
+      "limit": 10000,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "linear-30000",
+      "limit": 30000,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "wide-64",
+      "limit": 512,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "wide-64",
+      "limit": 1089,
+      "stable_commit_positions": false,
+      "moved_oids": [
+        "da560fb",
+        "d61530a",
+        "f0d2679",
+        "3a85ae3",
+        "f75d8d2",
+        "90e5e5f",
+        "845490e",
+        "67dad33"
+      ],
+      "completed_rows_equal": false
+    }
+  ],
+  "accepted_for_integration": false,
+  "shallow_boundary": {
+    "status": "rendered",
+    "raw_parent_ids": [
+      "e248e2cf0a8ce3970a3d92d25d90b5ea2a210fc8"
+    ],
+    "topology_errors": []
+  },
+  "experiment_completed": true,
+  "topology_passed": false,
+  "note": "Failed layouts are not valid performance evidence for a correct renderer. No visual approval or application integration is implied."
+}

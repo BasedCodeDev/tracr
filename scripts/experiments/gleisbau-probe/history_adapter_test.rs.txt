@@ -1,0 +1,194 @@
+//! Opt-in adapter checks using output from the isolated gleisbau experiment.
+//! Run the probe first, then cargo test --test git_unicode_library_probe -- --ignored.
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use tokio::sync::{mpsc, oneshot};
+use tracr::{
+    git::{GraphRow, Head},
+    git_discovery::BackendFuture,
+    git_history::{Backend, History, Movement},
+};
+
+type Reply = oneshot::Sender<Result<Vec<GraphRow>, String>>;
+struct Adapter {
+    reads: mpsc::UnboundedSender<(usize, Reply)>,
+    old_head: String,
+    new_head: String,
+}
+impl Backend for Adapter {
+    fn head(&self, path: PathBuf) -> BackendFuture<Result<Head, String>> {
+        let oid = if path.ends_with("old") {
+            &self.old_head
+        } else {
+            &self.new_head
+        }
+        .clone();
+        Box::pin(async move {
+            Ok(Head {
+                oid: Some(oid),
+                branch: Some("probe".into()),
+            })
+        })
+    }
+    fn history(&self, _: PathBuf, limit: usize) -> BackendFuture<Result<Vec<GraphRow>, String>> {
+        let (tx, rx) = oneshot::channel();
+        self.reads.send((limit, tx)).unwrap();
+        Box::pin(async move { rx.await.map_err(|_| "cancelled".to_owned())? })
+    }
+}
+fn rows(limit: usize) -> Vec<GraphRow> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("target/gleisbau-probe/results/prefix-{limit}.json"));
+    let v: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(path).expect("run scripts/experiments/gleisbau_probe.py first"),
+    )
+    .unwrap();
+    let by_row: HashMap<usize, &str> = v["output"]["positions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["row"].as_u64().unwrap() as usize,
+                p["oid"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    let mut raw = String::new();
+    for (i, line) in v["output"]["lines"].as_array().unwrap().iter().enumerate() {
+        let mut line = line.as_str().unwrap().to_owned();
+        for color in 0..8 {
+            line = line.replace(
+                &format!("\x1b[38;5;{color}m"),
+                &format!("\x1b[{}m", 30 + color),
+            );
+        }
+        raw.push_str(&line);
+        if let Some(oid) = by_row.get(&i) {
+            let parents = v["input"]["commits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["oid"].as_str() == Some(*oid))
+                .unwrap()["parents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p.as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join(" ");
+            raw.push_str(&format!("\0{oid}\0{parents}\0probe commit\0"));
+        }
+        raw.push('\n');
+    }
+    tracr::git::parse_graph(raw.as_bytes()).unwrap()
+}
+async fn tick(h: &mut History) {
+    h.tick(Some("/probe".into()), 0, true, 20).await;
+    tokio::task::yield_now().await;
+}
+async fn request(
+    h: &mut History,
+    reads: &mut mpsc::UnboundedReceiver<(usize, Reply)>,
+) -> (usize, Reply) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            tick(h).await;
+            if let Ok(req) = reads.try_recv() {
+                return req;
+            }
+        }
+    })
+    .await
+    .unwrap()
+}
+async fn finish(h: &mut History) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            tick(h).await;
+            if !h.loading() {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires generated isolated gleisbau output; does not enable renderer"]
+async fn library_rows_preserve_navigation_follow_and_cancelled_results() {
+    let first = rows(128);
+    let second = rows(256);
+    let third = rows(512);
+    let old_head = second
+        .iter()
+        .filter_map(|r| r.oid.clone())
+        .nth(180)
+        .unwrap();
+    let new_head = first.iter().find_map(|r| r.oid.clone()).unwrap();
+    let (tx, mut reads) = mpsc::unbounded_channel();
+    let mut h = History::with_backend(Arc::new(Adapter {
+        reads: tx,
+        old_head: old_head.clone(),
+        new_head: new_head.clone(),
+    }));
+    h.checkout(Some("/old".into()), false).await;
+    let (limit, reply) = request(&mut h, &mut reads).await;
+    assert_eq!(limit, 128);
+    reply.send(Ok(first.clone())).unwrap();
+    let (limit, reply) = request(&mut h, &mut reads).await;
+    assert_eq!(limit, 256);
+    reply.send(Ok(second.clone())).unwrap();
+    finish(&mut h).await;
+    assert_eq!(h.rows[h.selected].oid.as_ref(), Some(&old_head));
+    assert!(h.following);
+    h.visible_range(8);
+    h.navigate(Movement::Up);
+    assert!(!h.following);
+    assert!(h.rows[h.selected].oid.is_some());
+    let manual = h.rows[h.selected].oid.clone();
+    h.request_refresh();
+    let (_, reply) = request(&mut h, &mut reads).await;
+    reply.send(Ok(second.clone())).unwrap();
+    finish(&mut h).await;
+    assert_eq!(h.rows[h.selected].oid, manual);
+    for move_by in [Movement::PageUp, Movement::PageDown, Movement::Down] {
+        h.navigate(move_by);
+        assert!(h.rows[h.selected].oid.is_some());
+    }
+    let selected = h.rows[h.selected].oid.clone();
+    h.scroll_horizontal(true);
+    assert_eq!(h.rows[h.selected].oid, selected);
+    assert!(
+        reads.try_recv().is_err(),
+        "cursor movement must not request rendering"
+    );
+    h.navigate(Movement::End);
+    let before = h.rows[h.selected].oid.clone();
+    let (limit, reply) = request(&mut h, &mut reads).await;
+    assert_eq!(limit, 512);
+    reply.send(Ok(third)).unwrap();
+    finish(&mut h).await;
+    assert_eq!(h.rows[h.selected].oid, before);
+    h.follow();
+    let (_, reply) = request(&mut h, &mut reads).await;
+    reply.send(Ok(second.clone())).unwrap();
+    finish(&mut h).await;
+    assert_eq!(h.rows[h.selected].oid.as_ref(), Some(&old_head));
+    h.request_refresh();
+    let (_, obsolete) = request(&mut h, &mut reads).await;
+    h.checkout(Some("/new".into()), false).await;
+    assert!(
+        obsolete.send(Ok(second)).is_err(),
+        "cancelled renderer reply must be dropped"
+    );
+    let (_, reply) = request(&mut h, &mut reads).await;
+    reply.send(Ok(first)).unwrap();
+    finish(&mut h).await;
+    assert_eq!(h.rows[h.selected].oid.as_ref(), Some(&new_head));
+    assert!(h.following);
+    h.request_refresh();
+    let (_, pending) = request(&mut h, &mut reads).await;
+    h.shutdown().await;
+    assert!(pending.send(Ok(vec![])).is_err());
+}

@@ -200,6 +200,10 @@ Terminals narrower than 100 columns show the focused pane full-width.
 - With Git history visible, Tab / Shift-Tab toggles between it and the upper browser.
   Page Up / Page Down scroll through history when it is focused.
   Without visible history, Tab / Shift-Tab switches upper panes.
+- In Git history, Home / End selects the first / last loaded commit; approaching
+  the end loads more history. Left / Right scrolls horizontally. Manual movement
+  stops HEAD following; `f` resumes it. `g` hides or reopens history, and Escape
+  returns focus to the upper browser.
 - Enter: expand or collapse the selected folder, resume a session, or relink a session whose folder is missing.
 - `n` in Sessions: create a new session in the selected folder.
 - `l` in Sessions: relink the selected session. Choose an existing destination,
@@ -451,3 +455,18 @@ directory in `folder-moves/`, alongside existing single-session journals.
 Moving between filesystems and reconnecting a folder moved outside tracr are
 future increments. Avoid changing the folder or opening affected sessions in
 other applications while a move is in progress.
+
+
+Large Git browser acceptance (separate from the normal verifier):
+
+```sh
+python3 scripts/git_acceptance.py target/release/tracr --output /tmp/tracr-git-acceptance.json
+```
+
+This generates disposable 30,000-commit and 64-branch repositories, checks
+progressive loading, graph prefix continuity, old checkout HEADs and cancellation,
+and records display/expansion latency, peak memory, command counts and settled
+CPU. Timing values are measurements rather than CI speed thresholds. The normal
+verifier includes real nested-repository, local-submodule, independent-clone and
+bare-worktree ownership checks. Release smoke tests include Git lifecycle,
+native notifications and deterministic idle checks.

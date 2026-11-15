@@ -1,0 +1,5 @@
+╭>○  b417d94 merge commit 4 · Ca
+● │  6268f60 merge commit 3 · Ca
+│ ●  32be21b merge commit 2 · Ca
+├─╯
+●    39c7197 merge commit 1 · Ca

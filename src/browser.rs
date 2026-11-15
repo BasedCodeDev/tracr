@@ -730,7 +730,7 @@ impl Browser {
                         filter,
                         depth,
                         label: format!(
-                            "↳ {}{}{}",
+                            "↪ {}{}{}",
                             worktree
                                 .branch
                                 .as_deref()

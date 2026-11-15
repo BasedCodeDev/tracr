@@ -1,6 +1,7 @@
 //! Demand-driven replacement of complete Git graph prefixes.
-use crate::git::GraphRow;
+use crate::git::{CommitRecord, GraphRow};
 use crate::git_discovery::BackendFuture;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{cell::Cell, path::PathBuf, sync::Arc};
 use tokio::task::JoinHandle;
 
@@ -17,11 +18,15 @@ pub trait Backend: Send + Sync {
         path: PathBuf,
         limit: usize,
         _head: Option<String>,
-    ) -> BackendFuture<Result<Vec<GraphRow>, String>> {
+    ) -> BackendFuture<Result<Vec<CommitRecord>, String>> {
         self.history(path, limit)
     }
 
-    fn history(&self, path: PathBuf, limit: usize) -> BackendFuture<Result<Vec<GraphRow>, String>>;
+    fn history(
+        &self,
+        path: PathBuf,
+        limit: usize,
+    ) -> BackendFuture<Result<Vec<CommitRecord>, String>>;
 }
 struct Native;
 impl Backend for Native {
@@ -34,11 +39,15 @@ impl Backend for Native {
         path: PathBuf,
         limit: usize,
         head: Option<String>,
-    ) -> BackendFuture<Result<Vec<GraphRow>, String>> {
+    ) -> BackendFuture<Result<Vec<CommitRecord>, String>> {
         Box::pin(async move { crate::git::history_at(&path, limit, head.as_deref()).await })
     }
 
-    fn history(&self, path: PathBuf, limit: usize) -> BackendFuture<Result<Vec<GraphRow>, String>> {
+    fn history(
+        &self,
+        path: PathBuf,
+        limit: usize,
+    ) -> BackendFuture<Result<Vec<CommitRecord>, String>> {
         Box::pin(async move { crate::git::history(&path, limit).await })
     }
 }
@@ -51,12 +60,95 @@ pub enum Movement {
     End,
 }
 type ReadResult = (
-    Result<Vec<GraphRow>, String>,
+    Result<Vec<CommitRecord>, String>,
     Option<Result<crate::git::References, String>>,
 );
 type ReadTask = (u64, usize, JoinHandle<ReadResult>);
 
+struct Snapshot {
+    rows: Vec<GraphRow>,
+    positions: std::collections::HashMap<String, usize>,
+    selectable: Vec<usize>,
+    width: usize,
+}
+fn construct(records: Vec<CommitRecord>, cancel: &AtomicBool) -> Result<Option<Snapshot>, String> {
+    let cancelled = || cancel.load(Ordering::Relaxed);
+    let mut builder = crate::git_layout::Builder::new();
+    for record in &records {
+        if cancelled() {
+            return Ok(None);
+        }
+        builder
+            .append_cancellable(
+                &crate::git_layout::Commit {
+                    oid: record.oid.clone(),
+                    parents: record.parents.clone(),
+                },
+                &cancelled,
+            )
+            .map_err(|error| format!("Graph layout failed: {error:?}"))?;
+    }
+    let layout = builder.into_layout();
+    let Some(graph) = crate::git_render::render_cancellable(&layout, cancelled) else {
+        return Ok(None);
+    };
+    drop(layout);
+    let width = graph.width;
+    let mut records = records.into_iter();
+    let mut rows = Vec::with_capacity(graph.rows.len() + usize::from(graph.boundary.is_some()));
+    let mut positions = std::collections::HashMap::new();
+    let mut selectable = Vec::new();
+    for rendered in graph.rows.into_iter().chain(graph.boundary) {
+        if cancelled() {
+            return Ok(None);
+        }
+        let record = if rendered.oid.is_some() {
+            records.next()
+        } else {
+            None
+        };
+        let (oid, parents, subject) = match record {
+            Some(record) => {
+                positions.insert(record.oid.clone(), rows.len());
+                selectable.push(rows.len());
+                (Some(record.oid), record.parents, record.subject)
+            }
+            None => (None, Vec::new(), String::new()),
+        };
+        rows.push(GraphRow {
+            graph: rendered.text(),
+            graph_spans: rendered.spans,
+            oid,
+            parents,
+            subject,
+        });
+    }
+    Ok(Some(Snapshot {
+        rows,
+        positions,
+        selectable,
+        width,
+    }))
+}
+struct BuildTask {
+    token: u64,
+    limit: usize,
+    cancel: Arc<AtomicBool>,
+    handle: JoinHandle<Result<Option<Snapshot>, String>>,
+}
+impl Drop for BuildTask {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
 pub struct History {
+    build: Option<BuildTask>,
+    #[cfg(test)]
+    builds_started: usize,
+    positions: std::collections::HashMap<String, usize>,
+    selectable: Vec<usize>,
+    graph_width: usize,
     backend: Arc<dyn Backend>,
     checkout: Option<PathBuf>,
     pub head: Option<crate::git::Head>,
@@ -94,6 +186,12 @@ impl Default for History {
 impl History {
     pub fn with_backend(backend: Arc<dyn Backend>) -> Self {
         Self {
+            build: None,
+            #[cfg(test)]
+            builds_started: 0,
+            positions: Default::default(),
+            selectable: Vec::new(),
+            graph_width: 0,
             backend,
             checkout: None,
             head: None,
@@ -142,6 +240,7 @@ impl History {
     }
     /// Refresh metadata without rearming follow mode or resetting the viewport.
     pub fn request_refresh(&mut self) {
+        self.restart = true;
         self.resolve_head = self.checkout.is_some();
         self.refresh = true;
         self.error = None;
@@ -161,9 +260,13 @@ impl History {
             && row.oid.as_ref() == self.head.as_ref().and_then(|head| head.oid.as_ref())
     }
     pub fn needs_poll(&self) -> bool {
-        self.head_task
+        self.build
             .as_ref()
-            .is_some_and(|task| task.is_finished())
+            .is_some_and(|task| task.handle.is_finished())
+            || self
+                .head_task
+                .as_ref()
+                .is_some_and(|task| task.is_finished())
             || self
                 .task
                 .as_ref()
@@ -194,26 +297,27 @@ impl History {
             style::{Color, Modifier, Style},
             text::Span,
         };
-        let mut spans: Vec<_> = if row.graph_spans.is_empty() {
-            vec![Span::raw(row.graph.clone())]
-        } else {
-            row.graph_spans
-                .iter()
-                .map(|span| {
-                    let color = match span.color {
-                        Some(31) => Color::Red,
-                        Some(32) => Color::Green,
-                        Some(33) => Color::Yellow,
-                        Some(34) => Color::Blue,
-                        Some(35) => Color::Magenta,
-                        Some(36) => Color::Cyan,
-                        _ => Color::Reset,
-                    };
-                    Span::styled(span.text.clone(), Style::default().fg(color))
-                })
-                .collect()
-        };
+        let mut spans: Vec<_> = row
+            .graph_spans
+            .iter()
+            .map(|span| {
+                let color = match span.color {
+                    Some(31) => Color::Red,
+                    Some(32) => Color::Green,
+                    Some(33) => Color::Yellow,
+                    Some(34) => Color::Blue,
+                    Some(35) => Color::Magenta,
+                    Some(36) => Color::Cyan,
+                    _ => Color::Reset,
+                };
+                Span::styled(span.text.clone(), Style::default().fg(color))
+            })
+            .collect();
         if let Some(oid) = &row.oid {
+            use unicode_width::UnicodeWidthStr;
+            spans.push(Span::raw(
+                " ".repeat(self.graph_width.saturating_sub(row.graph.width()) + 1),
+            ));
             spans.push(Span::raw(format!(
                 "{} ",
                 oid.chars().take(7).collect::<String>()
@@ -253,7 +357,11 @@ impl History {
                     .rows
                     .iter()
                     .map(|row| {
-                        let mut width = row.graph.width();
+                        let mut width = if row.oid.is_some() {
+                            self.graph_width + 1
+                        } else {
+                            row.graph.width()
+                        };
                         if let Some(oid) = &row.oid {
                             width +=
                                 8 + row.subject.width() + if self.is_head(row) { 7 } else { 0 };
@@ -286,7 +394,7 @@ impl History {
         self.path.is_some()
     }
     pub fn loading(&self) -> bool {
-        self.task.is_some() || self.head_task.is_some()
+        self.task.is_some() || self.build.is_some() || self.head_task.is_some()
     }
     pub fn title(&self) -> String {
         if let Some(error) = &self.error {
@@ -348,33 +456,27 @@ impl History {
             self.cancel_seek = self.head_task.is_some() || self.seeking();
             self.following = false;
         }
-        let commits: Vec<_> = self
-            .rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| row.oid.is_some())
-            .map(|(i, _)| i)
-            .collect();
+        let commits = &self.selectable;
         if commits.is_empty() {
             return;
         }
         let target = match movement {
-            Movement::Up => commits.iter().copied().rev().find(|i| *i < self.selected),
-            Movement::Down => commits.iter().copied().find(|i| *i > self.selected),
+            Movement::Up => commits
+                .partition_point(|i| *i < self.selected)
+                .checked_sub(1)
+                .map(|i| commits[i]),
+            Movement::Down => commits
+                .get(commits.partition_point(|i| *i <= self.selected))
+                .copied(),
             Movement::PageUp => Some(
-                commits
-                    .iter()
-                    .copied()
-                    .rev()
-                    .find(|i| *i <= self.selected.saturating_sub(self.page.get()))
-                    .unwrap_or(commits[0]),
+                commits[commits
+                    .partition_point(|i| *i <= self.selected.saturating_sub(self.page.get()))
+                    .saturating_sub(1)],
             ),
             Movement::PageDown => Some(
-                commits
-                    .iter()
-                    .copied()
-                    .find(|i| *i >= self.selected.saturating_add(self.page.get()))
-                    .unwrap_or(*commits.last().unwrap()),
+                commits[commits
+                    .partition_point(|i| *i < self.selected.saturating_add(self.page.get()))
+                    .min(commits.len() - 1)],
             ),
             Movement::Home => commits.first().copied(),
             Movement::End => commits.last().copied(),
@@ -386,7 +488,7 @@ impl History {
         self.extend = !self.loading()
             && self.error.is_none()
             && !self.exhausted
-            && commits.iter().filter(|i| **i > self.selected).count() < self.page.get();
+            && commits.len() - commits.partition_point(|i| *i <= self.selected) < self.page.get();
     }
     pub async fn shutdown(&mut self) {
         self.token += 1;
@@ -398,19 +500,51 @@ impl History {
             task.abort();
             let _ = task.await;
         }
+        if let Some(mut build) = self.build.take() {
+            build.cancel.store(true, Ordering::Relaxed);
+            let _ = (&mut build.handle).await;
+        }
         self.extend = false;
     }
+    #[cfg(test)]
     fn replace(&mut self, rows: Vec<GraphRow>, limit: usize) {
+        let positions = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| r.oid.clone().map(|id| (id, i)))
+            .collect();
+        let selectable = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| r.oid.as_ref().map(|_| i))
+            .collect();
+        let width = rows
+            .iter()
+            .map(|r| unicode_width::UnicodeWidthStr::width(r.graph.as_str()))
+            .max()
+            .unwrap_or(0);
+        self.install(
+            Snapshot {
+                rows,
+                positions,
+                selectable,
+                width,
+            },
+            limit,
+        );
+    }
+    fn install(&mut self, snapshot: Snapshot, limit: usize) {
+        let Snapshot {
+            rows,
+            positions,
+            selectable,
+            width,
+        } = snapshot;
         let offset = self.selected.saturating_sub(self.top.get());
         let selected = self
             .rows
             .get(self.selected)
             .and_then(|row| row.oid.as_ref());
-        let positions: std::collections::HashMap<&str, usize> = rows
-            .iter()
-            .enumerate()
-            .filter_map(|(index, row)| row.oid.as_deref().map(|id| (id, index)))
-            .collect();
         let locate = |id: &String| positions.get(id.as_str()).copied();
         let preserved = selected.and_then(locate).or_else(|| {
             self.rows
@@ -428,9 +562,16 @@ impl History {
             .or_else(|| rows.iter().position(|row| row.oid.is_some()))
             .unwrap_or(0);
         self.top.set(self.selected.saturating_sub(offset));
-        self.exhausted = rows.iter().filter(|row| row.oid.is_some()).count() < limit;
+        self.exhausted = selectable.len() < limit;
+        self.positions = positions;
+        self.selectable = selectable;
+        self.graph_width = width;
         self.rows = rows;
-        self.head_row = self.rows.iter().position(|row| self.is_head(row));
+        self.head_row = self
+            .head
+            .as_ref()
+            .and_then(|head| head.oid.as_ref())
+            .and_then(|oid| self.positions.get(oid).copied());
         self.max_width.set(None);
         self.loaded = true;
         self.limit = limit;
@@ -465,6 +606,9 @@ impl History {
             if path != self.path {
                 self.following = self.checkout.is_some();
                 self.rows.clear();
+                self.positions.clear();
+                self.selectable.clear();
+                self.graph_width = 0;
                 self.head_row = None;
                 self.max_width.set(None);
                 self.references.clear();
@@ -512,7 +656,11 @@ impl History {
                 match result {
                     Ok(head) => {
                         self.head = Some(head);
-                        self.head_row = self.rows.iter().position(|row| self.is_head(row));
+                        self.head_row = self
+                            .head
+                            .as_ref()
+                            .and_then(|head| head.oid.as_ref())
+                            .and_then(|oid| self.positions.get(oid).copied());
                         self.max_width.set(None);
                         self.refresh = true;
                     }
@@ -548,7 +696,42 @@ impl History {
                     }
                 }
                 match result {
-                    Ok(rows) => self.replace(rows, limit),
+                    Ok(records)
+                        if self.loaded
+                            && records.len() == self.selectable.len()
+                            && records.iter().zip(&self.selectable).all(|(record, index)| {
+                                let row = &self.rows[*index];
+                                row.oid.as_ref() == Some(&record.oid)
+                                    && row.parents == record.parents
+                                    && row.subject == record.subject
+                            }) =>
+                    {
+                        // Ref/HEAD-only changes reuse geometry and its row map.
+                        self.limit = limit;
+                        self.exhausted = records.len() < limit;
+                        self.error = None;
+                        if self.following {
+                            if let Some(index) = self.head_row {
+                                self.selected = index;
+                            }
+                        }
+                    }
+                    Ok(records) => {
+                        #[cfg(test)]
+                        {
+                            self.builds_started += 1;
+                        }
+                        let cancel = Arc::new(AtomicBool::new(false));
+                        let signal = cancel.clone();
+                        self.build = Some(BuildTask {
+                            token,
+                            limit,
+                            cancel,
+                            handle: tokio::task::spawn_blocking(move || {
+                                construct(records, &signal)
+                            }),
+                        });
+                    }
                     Err(error) => {
                         self.limit = limit;
                         self.error = Some(error);
@@ -556,8 +739,30 @@ impl History {
                 }
             }
         }
+        if self
+            .build
+            .as_ref()
+            .is_some_and(|build| build.handle.is_finished())
+        {
+            let mut build = self.build.take().unwrap();
+            let result = (&mut build.handle)
+                .await
+                .unwrap_or_else(|error| Err(error.to_string()));
+            if build.token == self.token {
+                match result {
+                    Ok(Some(snapshot)) => {
+                        self.install(snapshot, build.limit);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        self.error = Some(error);
+                        self.limit = build.limit;
+                    }
+                }
+            }
+        }
         let seek = self.error.is_none() && self.seeking() && !self.exhausted;
-        if self.task.is_none() && (self.refresh || self.extend || seek) {
+        if self.task.is_none() && self.build.is_none() && (self.refresh || self.extend || seek) {
             if let Some(path) = self.path.clone() {
                 let limit = if self.refresh {
                     self.limit.max(128).max(if self.loaded {
@@ -615,18 +820,33 @@ mod tests {
             &self,
             _: PathBuf,
             limit: usize,
-        ) -> BackendFuture<Result<Vec<GraphRow>, String>> {
+        ) -> BackendFuture<Result<Vec<CommitRecord>, String>> {
             let (tx, rx) = oneshot::channel();
             self.0.send((limit, tx)).unwrap();
-            Box::pin(async move { rx.await.unwrap() })
+            Box::pin(async move { rx.await.unwrap().map(input_records) })
         }
+    }
+    fn input_records(rows: Vec<GraphRow>) -> Vec<CommitRecord> {
+        rows.into_iter()
+            .filter_map(|row| {
+                row.oid.map(|oid| CommitRecord {
+                    oid,
+                    parents: row.parents,
+                    subject: row.subject,
+                })
+            })
+            .collect()
     }
     fn rows(n: usize) -> Vec<GraphRow> {
         (0..n)
             .map(|i| GraphRow {
-                graph: "* ".into(),
-                graph_spans: vec![],
+                graph: "●".into(),
+                graph_spans: vec![crate::git::GraphSpan {
+                    text: "●".into(),
+                    color: Some(36),
+                }],
                 oid: Some(format!("{i:040x}")),
+                parents: vec![format!("{:040x}", i + 1)],
                 subject: format!("commit {i}"),
             })
             .collect()
@@ -698,7 +918,7 @@ mod tests {
             .send(Err("offline".into()))
             .unwrap();
         finish(&mut h).await;
-        assert_eq!(h.rows.len(), 128);
+        assert_eq!(h.selectable.len(), 128);
         assert!(h.error.is_some());
         h.navigate(Movement::End);
         tick(&mut h).await;
@@ -737,9 +957,16 @@ mod tests {
                 graph: "| ".into(),
                 graph_spans: vec![],
                 oid: None,
+                parents: Vec::new(),
                 subject: String::new(),
             },
         );
+        h.selectable = h
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| r.oid.as_ref().map(|_| i))
+            .collect();
         h.navigate(Movement::Home);
         assert_eq!(h.selected, 1);
         h.navigate(Movement::Up);
@@ -816,13 +1043,16 @@ mod tests {
         ]);
         let short = crate::git::history(dir.path(), 128).await.unwrap();
         let full = crate::git::history(dir.path(), 256).await.unwrap();
-        assert!(full.iter().filter(|r| r.oid.is_some()).count() > 128);
-        assert_eq!(short.iter().filter(|r| r.oid.is_some()).count(), 128);
-        // Connector-only trailing rows can close a truncated graph; compare
-        // through the final requested commit, not the artificial boundary.
-        let last = short.iter().rposition(|r| r.oid.is_some()).unwrap();
-        assert_eq!(&short[..=last], &full[..=last]);
-        assert!(full.iter().any(|row| row.oid.is_none()));
+        assert!(full.len() > 128);
+        assert_eq!(short.len(), 128);
+        assert_eq!(short, full[..128]);
+        let short = construct(short, &AtomicBool::new(false)).unwrap().unwrap();
+        let full = construct(full, &AtomicBool::new(false)).unwrap().unwrap();
+        assert_eq!(
+            short.rows[..short.rows.len() - 1],
+            full.rows[..short.rows.len() - 1]
+        );
+        assert!(full.rows.iter().any(|row| row.oid.is_none()));
     }
     #[tokio::test]
     async fn rendered_states_viewport_resize_and_graph_shortcuts() {
@@ -905,7 +1135,7 @@ mod tests {
         let screen = text(&terminal);
         assert!(screen.contains("detached HEAD"));
         assert!(screen.contains("[HEAD] commit 3"));
-        assert!(screen.contains("> * 0000000 commit 2"));
+        assert!(screen.contains("> ● 0000000 commit 2"));
         assert_eq!(screen.matches("[HEAD]").count(), 1);
     }
     type HeadReply = oneshot::Sender<Result<crate::git::Head, String>>;
@@ -923,7 +1153,7 @@ mod tests {
             &self,
             path: PathBuf,
             limit: usize,
-        ) -> BackendFuture<Result<Vec<GraphRow>, String>> {
+        ) -> BackendFuture<Result<Vec<CommitRecord>, String>> {
             self.history_at(path, limit, None)
         }
         fn history_at(
@@ -931,15 +1161,23 @@ mod tests {
             _: PathBuf,
             limit: usize,
             head: Option<String>,
-        ) -> BackendFuture<Result<Vec<GraphRow>, String>> {
+        ) -> BackendFuture<Result<Vec<CommitRecord>, String>> {
             let (tx, rx) = oneshot::channel();
             self.reads.send((limit, head, tx)).unwrap();
-            Box::pin(async move { rx.await.unwrap() })
+            Box::pin(async move { rx.await.unwrap().map(input_records) })
         }
     }
     async fn pump(h: &mut History) {
         tokio::task::yield_now().await;
         tick(h).await;
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while h.build.is_some() {
+                tokio::task::yield_now().await;
+                tick(h).await;
+            }
+        })
+        .await
+        .unwrap();
     }
     #[tokio::test]
     async fn follows_old_head_manual_refresh_and_resume() {
@@ -1001,6 +1239,10 @@ mod tests {
         reads.recv().await.unwrap().2.send(Ok(rows(220))).unwrap();
         tokio::task::yield_now().await;
         h.tick(Some("/repo".into()), 1, true, 20).await;
+        while h.build.is_some() {
+            tokio::task::yield_now().await;
+            h.tick(Some("/repo".into()), 1, true, 20).await;
+        }
         assert_eq!(h.selected, 180);
         assert!(h.following);
         h.navigate(Movement::Home);
@@ -1038,7 +1280,7 @@ mod tests {
         tick(&mut h).await;
         assert!(reply.is_closed());
         assert!(!h.following);
-        assert_eq!(h.rows.len(), 128);
+        assert_eq!(h.selectable.len(), 128);
         tick(&mut h).await;
         assert!(reads.try_recv().is_err());
         h.follow();
@@ -1051,7 +1293,7 @@ mod tests {
             .unwrap();
         pump(&mut h).await;
         assert!(h.error.is_some());
-        assert_eq!(h.rows.len(), 128);
+        assert_eq!(h.selectable.len(), 128);
         assert!(!h.loading());
         tick(&mut h).await;
         assert!(heads.try_recv().is_err());
@@ -1138,7 +1380,7 @@ mod tests {
                 .await
                 .unwrap()
                 .iter()
-                .any(|r| r.oid == head.oid)
+                .any(|r| Some(&r.oid) == head.oid.as_ref())
         );
         let bare = dir.path().join("bare.git");
         run(&["init", "--bare", "-q", bare.to_str().unwrap()]);
@@ -1158,10 +1400,10 @@ mod tests {
             &self,
             _: PathBuf,
             limit: usize,
-        ) -> BackendFuture<Result<Vec<GraphRow>, String>> {
+        ) -> BackendFuture<Result<Vec<CommitRecord>, String>> {
             let (tx, rx) = oneshot::channel();
             self.reads.send((limit, tx)).unwrap();
-            Box::pin(async move { rx.await.unwrap() })
+            Box::pin(async move { rx.await.unwrap().map(input_records) })
         }
     }
     #[tokio::test]
@@ -1201,7 +1443,7 @@ mod tests {
         h.tick(Some("/repo".into()), 1, true, 20).await;
         assert_eq!(h.references, labels);
         assert!(h.title().contains("references unavailable/stale"));
-        assert_eq!(h.rows.len(), 200);
+        assert_eq!(h.selectable.len(), 200);
         h.tick(Some("/repo".into()), 2, true, 20).await;
         refs.recv()
             .await
@@ -1267,5 +1509,71 @@ mod tests {
         h.scroll_horizontal(true);
         h.follow();
         assert_eq!(h.horizontal.get(), 0);
+    }
+    #[tokio::test]
+    async fn cached_graph_is_reused_for_navigation_resize_and_idle() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut h = History::with_backend(Arc::new(Controlled(tx)));
+        tick(&mut h).await;
+        rx.recv().await.unwrap().1.send(Ok(rows(100))).unwrap();
+        finish(&mut h).await;
+        let builds = h.builds_started;
+        let pointer = h.rows.as_ptr();
+        for width in [20, 80, 200].into_iter().cycle().take(30) {
+            h.navigate(Movement::Down);
+            h.navigate(Movement::Up);
+            h.scroll_horizontal(true);
+            h.clamp_horizontal(width);
+            for i in h.visible_range(12) {
+                let _ = h.row_spans(&h.rows[i]);
+            }
+            tick(&mut h).await;
+        }
+        h.request_refresh();
+        tick(&mut h).await;
+        rx.recv().await.unwrap().1.send(Ok(rows(100))).unwrap();
+        finish(&mut h).await;
+        assert_eq!(h.builds_started, builds);
+        assert_eq!(h.rows.as_ptr(), pointer);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn shutdown_joins_construction_and_never_publishes_obsolete_snapshot() {
+        let mut h = History::default();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let signal = cancel.clone();
+        let exited = Arc::new(AtomicBool::new(false));
+        let finished = exited.clone();
+        let (started_tx, started_rx) = oneshot::channel();
+        let handle = tokio::task::spawn_blocking(move || {
+            let _ = started_tx.send(());
+            while !signal.load(Ordering::Relaxed) {
+                std::thread::yield_now();
+            }
+            // Even a completed result from obsolete work must be discarded.
+            finished.store(true, Ordering::Relaxed);
+            construct(input_records(rows(3)), &AtomicBool::new(false))
+        });
+        h.build = Some(BuildTask {
+            token: h.token,
+            limit: 128,
+            cancel,
+            handle,
+        });
+        started_rx.await.unwrap();
+        h.shutdown().await;
+        assert!(exited.load(Ordering::Relaxed));
+        assert!(h.rows.is_empty());
+        assert!(!h.loading());
+    }
+
+    #[test]
+    fn cancelled_snapshot_is_not_published() {
+        assert!(
+            construct(input_records(rows(100)), &AtomicBool::new(true))
+                .unwrap()
+                .is_none()
+        );
     }
 }

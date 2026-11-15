@@ -1,0 +1,786 @@
+{
+  "input": {
+    "commits": [
+      {
+        "oid": "92c2672f7178fad4b9c5117de1dbc21aed65a6a6",
+        "parents": [
+          "c8278abeb2dfa50736ff00f4fd3f8020176e923a",
+          "463bba3445a1e889141f2d4aa89af5eb335048f5"
+        ],
+        "subject": "crossing commit 6 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      },
+      {
+        "oid": "463bba3445a1e889141f2d4aa89af5eb335048f5",
+        "parents": [
+          "2ef414c6559113db6cc641fd6dabd264137979ef",
+          "13e56a4915e29ef06e307c5643ea4938d4596baa"
+        ],
+        "subject": "crossing commit 5 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      },
+      {
+        "oid": "c8278abeb2dfa50736ff00f4fd3f8020176e923a",
+        "parents": [
+          "13e56a4915e29ef06e307c5643ea4938d4596baa",
+          "2ef414c6559113db6cc641fd6dabd264137979ef"
+        ],
+        "subject": "crossing commit 4 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      },
+      {
+        "oid": "2ef414c6559113db6cc641fd6dabd264137979ef",
+        "parents": [
+          "9f80fe495197039416be96e4e3cbd7cfd80c21a7"
+        ],
+        "subject": "crossing commit 3 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      },
+      {
+        "oid": "13e56a4915e29ef06e307c5643ea4938d4596baa",
+        "parents": [
+          "9f80fe495197039416be96e4e3cbd7cfd80c21a7"
+        ],
+        "subject": "crossing commit 2 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      },
+      {
+        "oid": "9f80fe495197039416be96e4e3cbd7cfd80c21a7",
+        "parents": [],
+        "subject": "crossing commit 1 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      }
+    ],
+    "refs": {
+      "92c2672f7178fad4b9c5117de1dbc21aed65a6a6": "main"
+    },
+    "viewports": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 96,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 32,
+        "height": 12
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "width": 32,
+        "height": 8
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 32,
+        "height": 12
+      }
+    ]
+  },
+  "output": {
+    "lines": [
+      "\u001b[38;5;5m\u256d\u001b[0m\u001b[38;5;5m>\u001b[0m\u001b[38;5;6m\u25cb\u001b[0m",
+      "\u001b[38;5;5m\u25cb\u001b[0m \u001b[38;5;6m\u2502\u001b[0m",
+      "\u001b[38;5;5m\u251c\u001b[0m\u001b[38;5;5m>\u001b[0m\u001b[38;5;6m\u25cb\u001b[0m",
+      "\u001b[38;5;5m\u251c\u001b[0m\u001b[38;5;6m<\u001b[0m\u001b[38;5;6m\u2524\u001b[0m",
+      "\u001b[38;5;5m\u25cf\u001b[0m \u001b[38;5;6m\u2502\u001b[0m",
+      "\u001b[38;5;5m\u2502\u001b[0m \u001b[38;5;6m\u25cf\u001b[0m",
+      "\u001b[38;5;5m\u251c\u001b[0m\u001b[38;5;6m\u2500\u001b[0m\u001b[38;5;6m\u256f\u001b[0m",
+      "\u001b[38;5;5m\u25cf\u001b[0m  "
+    ],
+    "peak_working_bytes": 416556,
+    "positions": [
+      {
+        "color": 6,
+        "column": 2,
+        "oid": "92c2672f7178fad4b9c5117de1dbc21aed65a6a6",
+        "row": 0
+      },
+      {
+        "color": 5,
+        "column": 0,
+        "oid": "463bba3445a1e889141f2d4aa89af5eb335048f5",
+        "row": 1
+      },
+      {
+        "color": 6,
+        "column": 2,
+        "oid": "c8278abeb2dfa50736ff00f4fd3f8020176e923a",
+        "row": 2
+      },
+      {
+        "color": 5,
+        "column": 0,
+        "oid": "2ef414c6559113db6cc641fd6dabd264137979ef",
+        "row": 4
+      },
+      {
+        "color": 6,
+        "column": 2,
+        "oid": "13e56a4915e29ef06e307c5643ea4938d4596baa",
+        "row": 5
+      },
+      {
+        "color": 5,
+        "column": 0,
+        "oid": "9f80fe495197039416be96e4e3cbd7cfd80c21a7",
+        "row": 7
+      }
+    ],
+    "render_passes": 1,
+    "retained_working_bytes": 127078,
+    "status": "rendered",
+    "timing_us": {
+      "ingest": 3581,
+      "layout": 5,
+      "render": 9
+    },
+    "viewports": [
+      {
+        "positions": [
+          {
+            "node_visible": true,
+            "oid": "92c2672f7178fad4b9c5117de1dbc21aed65a6a6",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "463bba3445a1e889141f2d4aa89af5eb335048f5",
+            "row": 1
+          },
+          {
+            "node_visible": true,
+            "oid": "c8278abeb2dfa50736ff00f4fd3f8020176e923a",
+            "row": 2
+          },
+          {
+            "node_visible": true,
+            "oid": "2ef414c6559113db6cc641fd6dabd264137979ef",
+            "row": 4
+          },
+          {
+            "node_visible": true,
+            "oid": "13e56a4915e29ef06e307c5643ea4938d4596baa",
+            "row": 5
+          },
+          {
+            "node_visible": true,
+            "oid": "9f80fe495197039416be96e4e3cbd7cfd80c21a7",
+            "row": 7
+          }
+        ],
+        "request": {
+          "height": 40,
+          "width": 96,
+          "x": 0,
+          "y": 0
+        },
+        "rows": [
+          [
+            {
+              "color": 5,
+              "text": "\u256d"
+            },
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  92c2672 crossing commit 6 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  463bba3 crossing commit 5 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  c8278ab crossing commit 4 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 6,
+              "text": "<"
+            },
+            {
+              "color": 6,
+              "text": "\u2524"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  2ef414c crossing commit 3 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  13e56a4 crossing commit 2 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 6,
+              "text": "\u2500"
+            },
+            {
+              "color": 6,
+              "text": "\u256f"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  "
+            },
+            {
+              "color": null,
+              "text": "  9f80fe4 crossing commit 1 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ]
+        ]
+      },
+      {
+        "positions": [
+          {
+            "node_visible": true,
+            "oid": "92c2672f7178fad4b9c5117de1dbc21aed65a6a6",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "463bba3445a1e889141f2d4aa89af5eb335048f5",
+            "row": 1
+          },
+          {
+            "node_visible": true,
+            "oid": "c8278abeb2dfa50736ff00f4fd3f8020176e923a",
+            "row": 2
+          },
+          {
+            "node_visible": true,
+            "oid": "2ef414c6559113db6cc641fd6dabd264137979ef",
+            "row": 4
+          },
+          {
+            "node_visible": true,
+            "oid": "13e56a4915e29ef06e307c5643ea4938d4596baa",
+            "row": 5
+          },
+          {
+            "node_visible": true,
+            "oid": "9f80fe495197039416be96e4e3cbd7cfd80c21a7",
+            "row": 7
+          }
+        ],
+        "request": {
+          "height": 12,
+          "width": 32,
+          "x": 0,
+          "y": 0
+        },
+        "rows": [
+          [
+            {
+              "color": 5,
+              "text": "\u256d"
+            },
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  92c2672 crossing commit 6 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  463bba3 crossing commit 5 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  c8278ab crossing commit 4 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 6,
+              "text": "<"
+            },
+            {
+              "color": 6,
+              "text": "\u2524"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  2ef414c crossing commit 3 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  13e56a4 crossing commit 2 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 6,
+              "text": "\u2500"
+            },
+            {
+              "color": 6,
+              "text": "\u256f"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  "
+            },
+            {
+              "color": null,
+              "text": "  9f80fe4 crossing commit 1 \u00b7"
+            }
+          ]
+        ]
+      },
+      {
+        "positions": [
+          {
+            "node_visible": false,
+            "oid": "463bba3445a1e889141f2d4aa89af5eb335048f5",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "c8278abeb2dfa50736ff00f4fd3f8020176e923a",
+            "row": 1
+          },
+          {
+            "node_visible": false,
+            "oid": "2ef414c6559113db6cc641fd6dabd264137979ef",
+            "row": 3
+          },
+          {
+            "node_visible": true,
+            "oid": "13e56a4915e29ef06e307c5643ea4938d4596baa",
+            "row": 4
+          },
+          {
+            "node_visible": false,
+            "oid": "9f80fe495197039416be96e4e3cbd7cfd80c21a7",
+            "row": 6
+          }
+        ],
+        "request": {
+          "height": 8,
+          "width": 32,
+          "x": 1,
+          "y": 1
+        },
+        "rows": [
+          [
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  463bba3 crossing commit 5 \u00b7 "
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  c8278ab crossing commit 4 \u00b7 "
+            }
+          ],
+          [
+            {
+              "color": 6,
+              "text": "<"
+            },
+            {
+              "color": 6,
+              "text": "\u2524"
+            }
+          ],
+          [
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  2ef414c crossing commit 3 \u00b7 "
+            }
+          ],
+          [
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  13e56a4 crossing commit 2 \u00b7 "
+            }
+          ],
+          [
+            {
+              "color": 6,
+              "text": "\u2500"
+            },
+            {
+              "color": 6,
+              "text": "\u256f"
+            }
+          ],
+          [
+            {
+              "color": null,
+              "text": "  "
+            },
+            {
+              "color": null,
+              "text": "  9f80fe4 crossing commit 1 \u00b7 "
+            }
+          ]
+        ]
+      },
+      {
+        "positions": [
+          {
+            "node_visible": true,
+            "oid": "92c2672f7178fad4b9c5117de1dbc21aed65a6a6",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "463bba3445a1e889141f2d4aa89af5eb335048f5",
+            "row": 1
+          },
+          {
+            "node_visible": true,
+            "oid": "c8278abeb2dfa50736ff00f4fd3f8020176e923a",
+            "row": 2
+          },
+          {
+            "node_visible": true,
+            "oid": "2ef414c6559113db6cc641fd6dabd264137979ef",
+            "row": 4
+          },
+          {
+            "node_visible": true,
+            "oid": "13e56a4915e29ef06e307c5643ea4938d4596baa",
+            "row": 5
+          },
+          {
+            "node_visible": true,
+            "oid": "9f80fe495197039416be96e4e3cbd7cfd80c21a7",
+            "row": 7
+          }
+        ],
+        "request": {
+          "height": 12,
+          "width": 32,
+          "x": 0,
+          "y": 0
+        },
+        "rows": [
+          [
+            {
+              "color": 5,
+              "text": "\u256d"
+            },
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  92c2672 crossing commit 6 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  463bba3 crossing commit 5 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 5,
+              "text": ">"
+            },
+            {
+              "color": 6,
+              "text": "\u25cb"
+            },
+            {
+              "color": null,
+              "text": "  c8278ab crossing commit 4 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 6,
+              "text": "<"
+            },
+            {
+              "color": 6,
+              "text": "\u2524"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": "  2ef414c crossing commit 3 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u2502"
+            },
+            {
+              "color": null,
+              "text": " "
+            },
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  13e56a4 crossing commit 2 \u00b7"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u251c"
+            },
+            {
+              "color": 6,
+              "text": "\u2500"
+            },
+            {
+              "color": 6,
+              "text": "\u256f"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  "
+            },
+            {
+              "color": null,
+              "text": "  9f80fe4 crossing commit 1 \u00b7"
+            }
+          ]
+        ]
+      }
+    ],
+    "stderr": "",
+    "wall_seconds": 0.005447663999802899
+  }
+}

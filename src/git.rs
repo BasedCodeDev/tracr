@@ -20,10 +20,19 @@ pub struct Repository {
     pub worktrees: Vec<Worktree>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitRecord {
+    pub oid: String,
+    pub parents: Vec<String>,
+    pub subject: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphRow {
     pub graph: String,
     pub graph_spans: Vec<GraphSpan>,
     pub oid: Option<String>,
+    /// Ordered Git parents, including IDs outside the loaded prefix.
+    pub parents: Vec<String>,
     pub subject: String,
 }
 
@@ -88,62 +97,6 @@ pub async fn references(path: &Path) -> Result<References, String> {
         Err(error) => Err(error),
     }
 }
-fn graph_segments(bytes: &[u8]) -> Vec<GraphSpan> {
-    let mut spans: Vec<GraphSpan> = Vec::new();
-    let mut color = None;
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == 27 {
-            i += 1;
-            if bytes.get(i) == Some(&b'[') {
-                i += 1;
-                let start = i;
-                while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
-                    i += 1;
-                }
-                if bytes.get(i) == Some(&b'm') {
-                    color = None;
-                    for code in String::from_utf8_lossy(&bytes[start..i]).split(';') {
-                        if let Ok(code @ 31..=36) = code.parse::<u8>() {
-                            color = Some(code);
-                        } else if code == "0" || code == "39" {
-                            color = None;
-                        }
-                    }
-                }
-                i = (i + 1).min(bytes.len());
-            } else if bytes.get(i) == Some(&b']') {
-                i += 1;
-                while i < bytes.len()
-                    && bytes[i] != 7
-                    && !(bytes[i] == 27 && bytes.get(i + 1) == Some(&b'\\'))
-                {
-                    i += 1;
-                }
-                i = (i + if bytes.get(i) == Some(&27) { 2 } else { 1 }).min(bytes.len());
-            } else {
-                i = (i + 1).min(bytes.len());
-            }
-            continue;
-        }
-        let byte = bytes[i];
-        i += 1;
-        // Native graph output is ASCII. Never retain terminal control bytes.
-        if !b" *|/\\_-.".contains(&byte) {
-            continue;
-        }
-        if let Some(span) = spans.last_mut().filter(|span| span.color == color) {
-            span.text.push(byte as char);
-        } else {
-            spans.push(GraphSpan {
-                text: (byte as char).to_string(),
-                color,
-            });
-        }
-    }
-    spans
-}
-
 static READ_WORKERS: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>> =
     std::sync::Mutex::new(Vec::new());
 
@@ -156,6 +109,10 @@ pub async fn drain_reads() {
 }
 
 async fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+    read_input(path, args, None).await
+}
+
+async fn read_input(path: &Path, args: &[&str], input: Option<Vec<u8>>) -> Result<Vec<u8>, String> {
     let mut command = Command::new("git");
     command
         .arg("--no-pager")
@@ -171,12 +128,17 @@ async fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
         .env("LC_ALL", "C")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_NO_LAZY_FETCH", "1")
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .kill_on_drop(true);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command
         .spawn()
         .map_err(|e| format!("Could not run Git: {e}"))?;
+    let stdin = child.stdin.take();
     let mut stdout = child.stdout.take().expect("piped stdout");
     let mut stderr = child.stderr.take().expect("piped stderr");
     let (mut sender, receiver) = tokio::sync::oneshot::channel();
@@ -188,7 +150,16 @@ async fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
         let mut err = Vec::new();
         let result = {
             let output = async {
-                let (status, _, _) = tokio::try_join!(
+                let write = async move {
+                    use tokio::io::AsyncWriteExt;
+                    if let (Some(mut stdin), Some(input)) = (stdin, input) {
+                        stdin.write_all(&input).await?;
+                        stdin.shutdown().await?;
+                    }
+                    Ok::<_, std::io::Error>(())
+                };
+                let (_, status, _, _) = tokio::try_join!(
+                    write,
                     child.wait(),
                     stdout.read_to_end(&mut out),
                     stderr.read_to_end(&mut err)
@@ -320,34 +291,39 @@ pub async fn discover(path: &Path) -> Result<Repository, String> {
     inventory(&directory.common_dir).await
 }
 
-pub fn parse_graph(bytes: &[u8]) -> Result<Vec<GraphRow>, String> {
+pub fn parse_commits(bytes: &[u8]) -> Result<Vec<CommitRecord>, String> {
     bytes
         .split(|b| *b == b'\n')
         .filter(|line| !line.is_empty())
         .map(|line| {
             let fields: Vec<_> = line.split(|b| *b == 0).collect();
-            let graph_spans = graph_segments(fields[0]);
-            let graph = graph_spans.iter().map(|span| span.text.as_str()).collect();
-            if fields.len() == 1 {
-                return Ok(GraphRow {
-                    graph,
-                    graph_spans,
-                    oid: None,
-                    subject: String::new(),
-                });
-            }
-            if fields.len() != 4
-                || !fields[3].is_empty()
+            if fields.len() != 5
+                || !fields[0].is_empty()
+                || !fields[4].is_empty()
                 || ![40, 64].contains(&fields[1].len())
                 || !fields[1].iter().all(u8::is_ascii_hexdigit)
             {
-                return Err("Malformed Git graph record".into());
+                return Err("Malformed Git commit record".into());
             }
-            Ok(GraphRow {
-                graph,
-                graph_spans,
-                oid: Some(String::from_utf8_lossy(fields[1]).into_owned()),
-                subject: crate::browser::safe_text(&String::from_utf8_lossy(fields[2])),
+            let parents = if fields[2].is_empty() {
+                Vec::new()
+            } else {
+                fields[2]
+                    .split(|b| *b == b' ')
+                    .map(|parent| {
+                        if parent.len() != fields[1].len()
+                            || !parent.iter().all(u8::is_ascii_hexdigit)
+                        {
+                            return Err("Malformed Git parent ID".into());
+                        }
+                        Ok(String::from_utf8_lossy(parent).into_owned())
+                    })
+                    .collect::<Result<Vec<_>, String>>()?
+            };
+            Ok(CommitRecord {
+                oid: String::from_utf8_lossy(fields[1]).into_owned(),
+                parents,
+                subject: crate::browser::safe_text(&String::from_utf8_lossy(fields[3])),
             })
         })
         .collect()
@@ -398,26 +374,23 @@ pub async fn head(path: &Path) -> Result<Head, String> {
         }
     }
 }
-pub async fn history(path: &Path, limit: usize) -> Result<Vec<GraphRow>, String> {
+pub async fn history(path: &Path, limit: usize) -> Result<Vec<CommitRecord>, String> {
     history_at(path, limit, None).await
 }
 pub async fn history_at(
     path: &Path,
     limit: usize,
     head: Option<&str>,
-) -> Result<Vec<GraphRow>, String> {
+) -> Result<Vec<CommitRecord>, String> {
     let limit = format!("--max-count={}", limit.max(1));
     let mut args = vec![
-        "-c",
-        "log.graphColors=cyan,magenta,yellow,green,blue,red",
         "log",
         "--all",
-        "--graph",
         "--topo-order",
-        "--color=always",
+        "--color=never",
         "--no-show-signature",
         "--no-notes",
-        "--format=%x00%H%x00%s%x00",
+        "--format=%x00%H%x00%P%x00%s%x00",
         &limit,
     ];
     if let Some(oid) = head {
@@ -427,7 +400,57 @@ pub async fn history_at(
         args.push(oid);
     }
     args.push("--");
-    parse_graph(&read(path, &args).await?)
+    let mut records = parse_commits(&read(path, &args).await?)?;
+    if records.iter().any(|record| record.parents.is_empty())
+        && read(path, &["rev-parse", "--is-shallow-repository"]).await? == b"true\n"
+    {
+        let input = records
+            .iter()
+            .filter(|record| record.parents.is_empty())
+            .map(|record| format!("{}\n", record.oid))
+            .collect::<String>()
+            .into_bytes();
+        let bytes = read_input(path, &["cat-file", "--batch"], Some(input)).await?;
+        let mut remaining = bytes.as_slice();
+        for record in records
+            .iter_mut()
+            .filter(|record| record.parents.is_empty())
+        {
+            let end = remaining
+                .iter()
+                .position(|b| *b == b'\n')
+                .ok_or("Malformed commit batch header")?;
+            let header = String::from_utf8_lossy(&remaining[..end]);
+            let fields: Vec<_> = header.split_whitespace().collect();
+            if fields.len() != 3 || fields[0] != record.oid || fields[1] != "commit" {
+                return Err("Malformed commit batch object".into());
+            }
+            let size = fields[2]
+                .parse::<usize>()
+                .map_err(|_| "Malformed commit batch size")?;
+            remaining = &remaining[end + 1..];
+            let object = remaining.get(..size).ok_or("Truncated commit batch")?;
+            for line in object
+                .split(|b| *b == b'\n')
+                .take_while(|line| !line.is_empty())
+            {
+                if let Some(parent) = line.strip_prefix(b"parent ") {
+                    if parent.len() != record.oid.len() || !parent.iter().all(u8::is_ascii_hexdigit)
+                    {
+                        return Err("Malformed raw commit parent".into());
+                    }
+                    record
+                        .parents
+                        .push(String::from_utf8_lossy(parent).into_owned());
+                }
+            }
+            if remaining.get(size) != Some(&b'\n') {
+                return Err("Malformed commit batch separator".into());
+            }
+            remaining = &remaining[size + 1..];
+        }
+    }
+    Ok(records)
 }
 
 /// Bare repositories have no checkout root.
@@ -452,15 +475,6 @@ mod tests {
         assert!(rows[1].bare);
     }
     #[test]
-    fn graph_preserves_connectors_and_rejects_bad_framing() {
-        let input = format!("* \0{}\0hello\0\n|\\\n", "a".repeat(40));
-        let rows = parse_graph(input.as_bytes()).unwrap();
-        assert_eq!(rows.len(), 2);
-        assert!(rows[0].oid.is_some());
-        assert!(rows[1].oid.is_none());
-        assert!(parse_graph(b"* \0bad\0subject\0\n").is_err());
-    }
-    #[test]
     fn references_are_typed_sorted_and_peeled() {
         let commit = "a".repeat(40);
         let tag = "b".repeat(40);
@@ -480,18 +494,5 @@ mod tests {
         assert_eq!(refs[&commit][3].kind, RefKind::Tag);
         assert!(parse_references(b"").unwrap().is_empty());
         assert!(parse_references(b"oops refs/heads/main").is_err());
-    }
-    #[test]
-    fn graph_colors_are_parsed_without_terminal_controls() {
-        let data = format!(
-            "\x1b[36m|\x1b[m \x1b[35m*\x1b[m \0{}\0unicode 界 é\0\n\x1b]0;bad title\x07\x1b[2J|/\n",
-            "a".repeat(40)
-        );
-        let rows = parse_graph(data.as_bytes()).unwrap();
-        assert_eq!(rows[0].graph, "| * ");
-        assert_eq!(rows[0].graph_spans[0].color, Some(36));
-        assert_eq!(rows[0].subject, "unicode 界 é");
-        assert_eq!(rows[1].graph, "|/");
-        assert!(!rows.iter().any(|row| row.graph.contains('\x1b')));
     }
 }

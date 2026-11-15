@@ -1,0 +1,856 @@
+{
+  "version": "gleisbau 0.7.5",
+  "git": "git version 2.56.0",
+  "python": "3.14.8",
+  "platform": "Linux-7.2.15-1-omarchy-x86_64-with-glibc2.44",
+  "binary_sha256": "23097b5e08575b08d59b798e9b7486f172a9d6657d0bffd8f54a005a448f8d62",
+  "cases": [
+    {
+      "fixture": "linear",
+      "limit": 1,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "linear",
+      "limit": 2,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "linear",
+      "limit": 3,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "linear",
+      "limit": 4,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "shallow",
+      "limit": 10,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "merge",
+      "limit": 1,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "merge",
+      "limit": 2,
+      "status": "rendered",
+      "errors": [
+        "b417d94: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "merge",
+      "limit": 3,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "merge",
+      "limit": 4,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 1,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 2,
+      "status": "rendered",
+      "errors": [
+        "531ab96: expected [], drawn ['f2b3ddf']",
+        "531ab96: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 3,
+      "status": "rendered",
+      "errors": [
+        "531ab96: expected [], drawn ['f2b3ddf']",
+        "531ab96: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 4,
+      "status": "rendered",
+      "errors": [
+        "531ab96: expected [], drawn ['f2b3ddf']",
+        "531ab96: no open continuation for unloaded parent",
+        "77306c8: expected [], drawn ['ae4b29d']",
+        "77306c8: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 5,
+      "status": "rendered",
+      "errors": [
+        "77306c8: expected [], drawn ['ae4b29d']",
+        "77306c8: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 6,
+      "status": "rendered",
+      "errors": [
+        "77306c8: expected [], drawn ['ae4b29d']",
+        "77306c8: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 7,
+      "status": "rendered",
+      "errors": [
+        "77306c8: expected [], drawn ['ae4b29d']",
+        "77306c8: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 8,
+      "status": "rendered",
+      "errors": [
+        "77306c8: expected [], drawn ['ae4b29d']",
+        "77306c8: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 9,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 10,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 11,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 1,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 2,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 3,
+      "status": "rendered",
+      "errors": [
+        "38653ec: expected [], drawn ['aac2418']",
+        "38653ec: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 4,
+      "status": "rendered",
+      "errors": [
+        "38653ec: expected [], drawn ['aac2418']",
+        "38653ec: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 5,
+      "status": "rendered",
+      "errors": [
+        "38653ec: expected [], drawn ['aac2418']",
+        "38653ec: no open continuation for unloaded parent",
+        "71aff17: expected [], drawn ['395894b']",
+        "71aff17: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 6,
+      "status": "rendered",
+      "errors": [
+        "38653ec: expected [], drawn ['aac2418']",
+        "38653ec: no open continuation for unloaded parent",
+        "71aff17: expected [], drawn ['395894b']",
+        "71aff17: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 7,
+      "status": "rendered",
+      "errors": [
+        "38653ec: expected [], drawn ['aac2418']",
+        "38653ec: no open continuation for unloaded parent",
+        "71aff17: expected [], drawn ['395894b']",
+        "71aff17: no open continuation for unloaded parent",
+        "3fc9821: expected [], drawn ['94584d8']",
+        "3fc9821: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 8,
+      "status": "rendered",
+      "errors": [
+        "38653ec: expected [], drawn ['aac2418']",
+        "38653ec: no open continuation for unloaded parent",
+        "71aff17: expected [], drawn ['395894b']",
+        "71aff17: no open continuation for unloaded parent",
+        "3fc9821: expected [], drawn ['94584d8']",
+        "3fc9821: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 9,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "octopus",
+      "limit": 1,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "octopus",
+      "limit": 2,
+      "status": "rendered",
+      "errors": [
+        "bd4c5b4: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "octopus",
+      "limit": 3,
+      "status": "rendered",
+      "errors": [
+        "bd4c5b4: expected ['1a8a231', 'd6e3049'], drawn ['d6e3049']",
+        "bd4c5b4: no open continuation for unloaded parent",
+        "d6e3049: expected [], drawn ['1a8a231']",
+        "d6e3049: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "octopus",
+      "limit": 4,
+      "status": "rendered",
+      "errors": [
+        "bd4c5b4: expected ['1a8a231', 'af4749f', 'd6e3049'], drawn ['d6e3049']",
+        "bd4c5b4: no open continuation for unloaded parent",
+        "d6e3049: expected [], drawn ['1a8a231']",
+        "d6e3049: no open continuation for unloaded parent",
+        "1a8a231: expected [], drawn ['af4749f']",
+        "1a8a231: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "octopus",
+      "limit": 5,
+      "status": "rendered",
+      "errors": [
+        "bd4c5b4: expected ['1a8a231', '47225b2', 'af4749f', 'd6e3049'], drawn ['47225b2', 'd6e3049']",
+        "d6e3049: expected [], drawn ['1a8a231']",
+        "d6e3049: no open continuation for unloaded parent",
+        "1a8a231: expected [], drawn ['af4749f']",
+        "1a8a231: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "octopus",
+      "limit": 6,
+      "status": "rendered",
+      "errors": [
+        "bd4c5b4: expected ['1a8a231', '47225b2', 'af4749f', 'd6e3049'], drawn ['47225b2', 'af4749f']"
+      ]
+    },
+    {
+      "fixture": "crossing",
+      "limit": 1,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "crossing",
+      "limit": 2,
+      "status": "rendered",
+      "errors": [
+        "92c2672: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "crossing",
+      "limit": 3,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "crossing",
+      "limit": 4,
+      "status": "rendered",
+      "errors": [
+        "463bba3: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "crossing",
+      "limit": 5,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "crossing",
+      "limit": 6,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "disconnected",
+      "limit": 1,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "disconnected",
+      "limit": 2,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "disconnected",
+      "limit": 3,
+      "status": "rendered",
+      "errors": [
+        "010134b: expected [], drawn ['d343df0']"
+      ]
+    },
+    {
+      "fixture": "disconnected",
+      "limit": 4,
+      "status": "rendered",
+      "errors": [
+        "010134b: expected [], drawn ['d343df0']"
+      ]
+    },
+    {
+      "fixture": "detached",
+      "limit": 1,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "detached",
+      "limit": 2,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "detached",
+      "limit": 3,
+      "status": "rendered",
+      "errors": [
+        "a2392df: expected [], drawn ['49c3feb']",
+        "a2392df: no open continuation for unloaded parent"
+      ]
+    },
+    {
+      "fixture": "detached",
+      "limit": 4,
+      "status": "rendered",
+      "errors": []
+    },
+    {
+      "fixture": "empty",
+      "limit": 0,
+      "status": "rendered",
+      "errors": []
+    }
+  ],
+  "prefixes": [
+    {
+      "limit": 128,
+      "status": "rendered",
+      "errors": [
+        "e4fa401: no open continuation for unloaded parent"
+      ],
+      "repeat_equal": true
+    },
+    {
+      "limit": 256,
+      "status": "rendered",
+      "errors": [],
+      "repeat_equal": true,
+      "stable_commit_positions": false,
+      "moved_oids": [
+        "4e0c314",
+        "de5372a",
+        "7e25cb4",
+        "6076ee0",
+        "d27e730",
+        "ee2dbcd",
+        "84b7513",
+        "495dee8"
+      ],
+      "completed_rows_equal": false
+    },
+    {
+      "limit": 512,
+      "status": "rendered",
+      "errors": [
+        "bce8a48: no open continuation for unloaded parent"
+      ],
+      "repeat_equal": true,
+      "stable_commit_positions": false,
+      "moved_oids": [
+        "4e0c314",
+        "de5372a",
+        "7e25cb4",
+        "6076ee0",
+        "d27e730",
+        "ee2dbcd",
+        "84b7513",
+        "495dee8"
+      ],
+      "completed_rows_equal": false
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 3,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 4,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 5,
+      "stable_commit_positions": false,
+      "moved_oids": [
+        "531ab96"
+      ],
+      "completed_rows_equal": false
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 6,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 7,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 8,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 9,
+      "stable_commit_positions": false,
+      "moved_oids": [
+        "f2b3ddf",
+        "77306c8"
+      ],
+      "completed_rows_equal": false
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 10,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "four-lanes",
+      "limit": 11,
+      "stable_commit_positions": false,
+      "moved_oids": [
+        "531ab96",
+        "f2b3ddf",
+        "77306c8",
+        "8982fba",
+        "ab6e824",
+        "dbfa153",
+        "331f3e2"
+      ],
+      "completed_rows_equal": false
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 3,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 4,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 5,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 6,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 7,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 8,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "parallel-four",
+      "limit": 9,
+      "stable_commit_positions": false,
+      "moved_oids": [
+        "2c30f0a",
+        "38653ec",
+        "aac2418",
+        "71aff17",
+        "395894b",
+        "3fc9821"
+      ],
+      "completed_rows_equal": false
+    },
+    {
+      "fixture": "crossing",
+      "limit": 3,
+      "stable_commit_positions": false,
+      "moved_oids": [
+        "92c2672"
+      ],
+      "completed_rows_equal": false
+    },
+    {
+      "fixture": "crossing",
+      "limit": 4,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "crossing",
+      "limit": 5,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    },
+    {
+      "fixture": "crossing",
+      "limit": 6,
+      "stable_commit_positions": true,
+      "moved_oids": [],
+      "completed_rows_equal": true
+    }
+  ],
+  "benchmarks": [
+    {
+      "shape": "benchmark",
+      "commits": 128,
+      "status": "rendered",
+      "timing_us": {
+        "ingest": 3601,
+        "layout": 6,
+        "render": 48
+      },
+      "retained_working_bytes": 149904,
+      "peak_working_bytes": 416556,
+      "max_columns": 1
+    },
+    {
+      "shape": "benchmark",
+      "commits": 512,
+      "status": "rendered",
+      "timing_us": {
+        "ingest": 3851,
+        "layout": 11,
+        "render": 171
+      },
+      "retained_working_bytes": 300432,
+      "peak_working_bytes": 416556,
+      "max_columns": 1
+    },
+    {
+      "shape": "benchmark",
+      "commits": 2048,
+      "status": "rendered",
+      "timing_us": {
+        "ingest": 4996,
+        "layout": 30,
+        "render": 681
+      },
+      "retained_working_bytes": 902544,
+      "peak_working_bytes": 1224115,
+      "max_columns": 1
+    },
+    {
+      "shape": "benchmark",
+      "commits": 10000,
+      "status": "rendered",
+      "timing_us": {
+        "ingest": 10959,
+        "layout": 123,
+        "render": 3366
+      },
+      "retained_working_bytes": 4256012,
+      "peak_working_bytes": 5634412,
+      "max_columns": 1
+    },
+    {
+      "shape": "wide",
+      "commits": 128,
+      "status": "rendered",
+      "topology_errors": [
+        "23205ce: expected ['8f8fe0f', 'a307950'], drawn ['a307950']",
+        "23205ce: no open continuation for unloaded parent",
+        "f12ee71: expected [], drawn ['8f8fe0f']",
+        "f12ee71: no open continuation for unloaded parent"
+      ],
+      "native_graph_columns": 16,
+      "timing_us": {
+        "ingest": 3593,
+        "layout": 7,
+        "render": 47
+      },
+      "retained_working_bytes": 141192,
+      "peak_working_bytes": 416556,
+      "max_columns": 1
+    },
+    {
+      "shape": "wide",
+      "commits": 512,
+      "status": "rendered",
+      "topology_errors": [
+        "23205ce: expected ['1ef28c4', '475c19d', '5a2384c', '5f2610e', '8f8fe0f', 'a187cb8', 'a307950', 'd26afbc'], drawn ['5f2610e', 'a307950']",
+        "f12ee71: expected [], drawn ['8f8fe0f']",
+        "f12ee71: no open continuation for unloaded parent",
+        "e524557: expected [], drawn ['5a2384c']",
+        "e524557: no open continuation for unloaded parent",
+        "d85efc0: expected [], drawn ['475c19d']",
+        "d85efc0: no open continuation for unloaded parent",
+        "767eb67: expected [], drawn ['1ef28c4']"
+      ],
+      "native_graph_columns": 16,
+      "timing_us": {
+        "ingest": 3766,
+        "layout": 13,
+        "render": 240
+      },
+      "retained_working_bytes": 301578,
+      "peak_working_bytes": 416556,
+      "max_columns": 3
+    }
+  ],
+  "ordering_policies": [
+    {
+      "order": "shortest-reverse",
+      "fixtures": [
+        {
+          "fixture": "four-lanes",
+          "rejected_prefixes": 7,
+          "unstable_expansions": 3
+        },
+        {
+          "fixture": "parallel-four",
+          "rejected_prefixes": 6,
+          "unstable_expansions": 1
+        },
+        {
+          "fixture": "octopus",
+          "rejected_prefixes": 5,
+          "unstable_expansions": 2
+        },
+        {
+          "fixture": "crossing",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 1
+        },
+        {
+          "fixture": "disconnected",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 0
+        },
+        {
+          "fixture": "prefix",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 2
+        }
+      ]
+    },
+    {
+      "order": "shortest-forward",
+      "fixtures": [
+        {
+          "fixture": "four-lanes",
+          "rejected_prefixes": 7,
+          "unstable_expansions": 3
+        },
+        {
+          "fixture": "parallel-four",
+          "rejected_prefixes": 6,
+          "unstable_expansions": 1
+        },
+        {
+          "fixture": "octopus",
+          "rejected_prefixes": 5,
+          "unstable_expansions": 2
+        },
+        {
+          "fixture": "crossing",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 4
+        },
+        {
+          "fixture": "disconnected",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 0
+        },
+        {
+          "fixture": "prefix",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 2
+        }
+      ]
+    },
+    {
+      "order": "longest-reverse",
+      "fixtures": [
+        {
+          "fixture": "four-lanes",
+          "rejected_prefixes": 7,
+          "unstable_expansions": 3
+        },
+        {
+          "fixture": "parallel-four",
+          "rejected_prefixes": 6,
+          "unstable_expansions": 1
+        },
+        {
+          "fixture": "octopus",
+          "rejected_prefixes": 4,
+          "unstable_expansions": 2
+        },
+        {
+          "fixture": "crossing",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 4
+        },
+        {
+          "fixture": "disconnected",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 0
+        },
+        {
+          "fixture": "prefix",
+          "rejected_prefixes": 0,
+          "unstable_expansions": 2
+        }
+      ]
+    },
+    {
+      "order": "longest-forward",
+      "fixtures": [
+        {
+          "fixture": "four-lanes",
+          "rejected_prefixes": 7,
+          "unstable_expansions": 3
+        },
+        {
+          "fixture": "parallel-four",
+          "rejected_prefixes": 6,
+          "unstable_expansions": 1
+        },
+        {
+          "fixture": "octopus",
+          "rejected_prefixes": 4,
+          "unstable_expansions": 2
+        },
+        {
+          "fixture": "crossing",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 1
+        },
+        {
+          "fixture": "disconnected",
+          "rejected_prefixes": 2,
+          "unstable_expansions": 0
+        },
+        {
+          "fixture": "prefix",
+          "rejected_prefixes": 0,
+          "unstable_expansions": 0
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "cases": 50,
+    "passed": 26,
+    "statuses": {
+      "rendered": 50
+    },
+    "unstable_prefixes": 7
+  },
+  "accepted_for_integration": false
+}

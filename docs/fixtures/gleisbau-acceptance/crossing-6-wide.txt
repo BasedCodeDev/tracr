@@ -1,0 +1,8 @@
+╭>○  92c2672 crossing commit 6 · Café é 界 👩‍💻
+○ │  463bba3 crossing commit 5 · Café é 界 👩‍💻
+├>○  c8278ab crossing commit 4 · Café é 界 👩‍💻
+├<┤
+● │  2ef414c crossing commit 3 · Café é 界 👩‍💻
+│ ●  13e56a4 crossing commit 2 · Café é 界 👩‍💻
+├─╯
+●    9f80fe4 crossing commit 1 · Café é 界 👩‍💻

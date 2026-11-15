@@ -1,0 +1,254 @@
+{
+  "input": {
+    "commits": [
+      {
+        "oid": "531ab96dbeb33389e8a60529f2c81cba4d30110d",
+        "parents": [
+          "8982fba820891b58665cb34992c989bf0696b8f5"
+        ],
+        "subject": "four-lanes commit 11 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      },
+      {
+        "oid": "f2b3ddf395759b36b635653cb043a2fee3d75bc9",
+        "parents": [
+          "77306c8868efe1c64c7f6ac305c4c91c4924ae2d"
+        ],
+        "subject": "four-lanes commit 10 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+      }
+    ],
+    "refs": {
+      "531ab96dbeb33389e8a60529f2c81cba4d30110d": "fix",
+      "ae4b29defc00920f71ec4d53867b0a97f9ad80dc": "main",
+      "f2b3ddf395759b36b635653cb043a2fee3d75bc9": "navigation",
+      "8982fba820891b58665cb34992c989bf0696b8f5": "release"
+    },
+    "viewports": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 96,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 32,
+        "height": 12
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "width": 32,
+        "height": 8
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 32,
+        "height": 12
+      }
+    ]
+  },
+  "output": {
+    "lines": [
+      "\u001b[38;5;6m\u25cf\u001b[0m",
+      "\u001b[38;5;5m\u25cf\u001b[0m",
+      "\u001b[38;5;6m\u2502\u001b[0m"
+    ],
+    "peak_working_bytes": 416556,
+    "positions": [
+      {
+        "color": 6,
+        "column": 0,
+        "oid": "531ab96dbeb33389e8a60529f2c81cba4d30110d",
+        "row": 0
+      },
+      {
+        "color": 5,
+        "column": 0,
+        "oid": "f2b3ddf395759b36b635653cb043a2fee3d75bc9",
+        "row": 1
+      }
+    ],
+    "render_passes": 1,
+    "retained_working_bytes": 125614,
+    "status": "rendered",
+    "timing_us": {
+      "ingest": 3797,
+      "layout": 5,
+      "render": 5
+    },
+    "viewports": [
+      {
+        "positions": [
+          {
+            "node_visible": true,
+            "oid": "531ab96dbeb33389e8a60529f2c81cba4d30110d",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "f2b3ddf395759b36b635653cb043a2fee3d75bc9",
+            "row": 1
+          }
+        ],
+        "request": {
+          "height": 40,
+          "width": 96,
+          "x": 0,
+          "y": 0
+        },
+        "rows": [
+          [
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  531ab96 four-lanes commit 11 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  f2b3ddf four-lanes commit 10 \u00b7 Caf\u00e9 e\u0301 \u754c \ud83d\udc69\u200d\ud83d\udcbb"
+            }
+          ],
+          [
+            {
+              "color": 6,
+              "text": "\u2502"
+            }
+          ]
+        ]
+      },
+      {
+        "positions": [
+          {
+            "node_visible": true,
+            "oid": "531ab96dbeb33389e8a60529f2c81cba4d30110d",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "f2b3ddf395759b36b635653cb043a2fee3d75bc9",
+            "row": 1
+          }
+        ],
+        "request": {
+          "height": 12,
+          "width": 32,
+          "x": 0,
+          "y": 0
+        },
+        "rows": [
+          [
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  531ab96 four-lanes commit 11 "
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  f2b3ddf four-lanes commit 10 "
+            }
+          ],
+          [
+            {
+              "color": 6,
+              "text": "\u2502"
+            }
+          ]
+        ]
+      },
+      {
+        "positions": [
+          {
+            "node_visible": false,
+            "oid": "f2b3ddf395759b36b635653cb043a2fee3d75bc9",
+            "row": 0
+          }
+        ],
+        "request": {
+          "height": 8,
+          "width": 32,
+          "x": 1,
+          "y": 1
+        },
+        "rows": [
+          [
+            {
+              "color": null,
+              "text": "  f2b3ddf four-lanes commit 10 \u00b7"
+            }
+          ],
+          []
+        ]
+      },
+      {
+        "positions": [
+          {
+            "node_visible": true,
+            "oid": "531ab96dbeb33389e8a60529f2c81cba4d30110d",
+            "row": 0
+          },
+          {
+            "node_visible": true,
+            "oid": "f2b3ddf395759b36b635653cb043a2fee3d75bc9",
+            "row": 1
+          }
+        ],
+        "request": {
+          "height": 12,
+          "width": 32,
+          "x": 0,
+          "y": 0
+        },
+        "rows": [
+          [
+            {
+              "color": 6,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  531ab96 four-lanes commit 11 "
+            }
+          ],
+          [
+            {
+              "color": 5,
+              "text": "\u25cf"
+            },
+            {
+              "color": null,
+              "text": "  f2b3ddf four-lanes commit 10 "
+            }
+          ],
+          [
+            {
+              "color": 6,
+              "text": "\u2502"
+            }
+          ]
+        ]
+      }
+    ],
+    "stderr": "",
+    "wall_seconds": 0.0054156249971129
+  }
+}

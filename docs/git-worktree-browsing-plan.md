@@ -1,14 +1,18 @@
 # Git history and logical worktree browsing
 
+## Current acceptance status
+
+Navigator now uses the Tracr-owned parent-aware Unicode renderer as its sole production graph path. Git supplies commit records, while cancellable background construction publishes cached geometry and commit positions. The native ASCII parser and colour extraction are removed; there is no renderer setting or fallback. Functional and performance evidence is recorded in the [integration checkpoint](git-worktree-browsing-validation.md#navigator-unicode-integration-2026-11-16). User review in their actual terminal and the previously recorded release-packaging requirements remain distinct acceptance items. Historical checkpoints below do not supersede this summary.
+
 ## Agreed scope
 
-Linux-first, read-only Git integration. Keep two upper panes (50% Folders, 50% Sessions at normal terminal widths) and add a full-width bottom graph occupying approximately one-third of content height. Worktrees appear directly beneath the expanded repository in the navigator, regardless of physical location, with a `↳` prefix and one level of indentation. Labels show the branch name only, such as `↳ feature/login`; detached worktrees show `↳ detached HEAD` with a seven-character commit ID when available. Actual filesystem paths remain the navigation and launch identity. There is no synthetic Worktrees grouping row or separate group expansion state. Worktrees precede ordinary project subfolders; each worktree can expand to show its own session-containing folders. Counts describe sessions, and stale/availability indicators belong on the individual worktree rows. Only suppress physical entries after ownership is successfully established. Bare repositories own linked checkouts without a main checkout; independent clones remain independent.
+Linux-first, read-only Git integration. Keep two upper panes (50% Folders, 50% Sessions at normal terminal widths) and add a full-width bottom graph occupying approximately one-third of content height. Worktrees appear directly beneath the expanded repository in the navigator, regardless of physical location, with a `↪` prefix and one level of indentation. Labels show the branch name only, such as `↪ feature/login`; detached worktrees show `↪ detached HEAD` with a seven-character commit ID when available. Actual filesystem paths remain the navigation and launch identity. There is no synthetic Worktrees grouping row or separate group expansion state. Worktrees precede ordinary project subfolders; each worktree can expand to show its own session-containing folders. Counts describe sessions, and stale/availability indicators belong on the individual worktree rows. Only suppress physical entries after ownership is successfully established. Bare repositories own linked checkouts without a main checkout; independent clones remain independent.
 
 Selecting a checkout root shows all its sessions, excluding nested repositories and other worktrees. Selecting a subfolder shows exact-folder sessions. Expand worktrees to expose session-containing folders. Remember selection per context. Resume and create always use actual paths. Direct launch, restored paths, and search results reveal logical entries without losing the intended session.
 
 ## History
 
-Use native Git ASCII graph output with coloured lanes, branch/tag labels, selected checkout HEAD, abbreviated object ID and subject. No details or diffs in this slice. Preserve connector-only rows but select commits only. Follow HEAD until manual navigation; selecting a checkout or pressing f resumes following.
+The first slice must provide the approved connected Unicode graph: rounded corners, clear commit nodes and coloured lanes, with branch/tag labels, selected checkout HEAD, abbreviated object ID and subject. The Tracer-owned renderer driven by ordered parent IDs replaces native Git ASCII output. The reuse comparison is complete; the [compiled library decision](gleisbau-git-graph-validation.md) records why neither gleisbau 0.7.5 nor the ASCII-conversion prototype is selected. Unicode is enabled after automated integration checks; actual terminal visual approval remains separately recorded. No details or diffs in this slice. Preserve connector-only rows but select commits only. Follow HEAD until manual navigation; selecting a checkout or pressing f resumes following.
 
 Read on demand using expanding prefixes, never concatenate independent --skip pages. Start with a viewport buffer, double as the user approaches the boundary, preserve selection by full object ID, and extend to find old checkout HEADs. Run reads in background tasks with cancellation and generation checks. Render only visible rows.
 
@@ -24,27 +28,35 @@ Use one notify watcher with subscriptions for relevant active-repository shared 
 
 Keep session browsing usable. Preserve stale graphs with an explanation after failures. Missing worktrees remain labelled; unresolved ownership retains physical access. Empty repositories show an empty state. No repairs or network fetching. Disable filesystem moves of synthetic nodes and worktree/repository roots requiring Git-aware repair.
 
-## Implementation order
+## Completed foundations and remaining increments
 
-1. Read-only Git command layer, discovery, inventory and parser fixtures.
-2. Typed logical navigator and session scopes, ownership projection and deduplication.
-3. Graph rendering, controls, prefix loading and HEAD following.
-4. Metadata watching, fallback configuration, failure presentation.
-5. Automated, terminal and release validation; README updates.
+**Completed baseline:** read-only Git discovery and inventory; logical worktree navigation and session scopes; native-ASCII history, labels and controls; expanding-prefix loading and checkout HEAD following; metadata watching and failure presentation. Functional, lifecycle, large-repository and idle acceptance cover that baseline. Release/platform evidence and packaging gates remain tracked separately.
+
+**Unicode implementation sequence (Navigator integration complete):**
+
+1. **Parent-aware history records — complete.** `GraphRow.parents` preserves ordered parent IDs, including parents outside the loaded prefix, from the existing Git log request. Parser and real-repository checks pass. Git still owns topological ordering and traversal; HEAD pinning, expanding-prefix loading, cancellation and stale-result rejection are retained. See the [validation checkpoint](git-worktree-browsing-validation.md#parent-aware-history-records-2026-11-16).
+2. **Deterministic graph layout — complete.** The pure `git_layout` model records nodes, ordered parent connections, active lanes, unresolved boundary targets and OID positions. Lanes stay straight; vacant columns are reused without compaction. First-parent continuation preserves lane identity and colour; new identities cycle the existing six-colour palette. Append and full-prefix rebuild agree, and completed rows remain unchanged as history expands. Invalid appends are atomic. This establishes logical topology; the following renderer supplies crossing geometry. See the [layout checkpoint](git-worktree-browsing-validation.md#deterministic-lane-model-2026-11-16).
+3. **Unicode rendering — complete as an isolated module.** `git_render` produces coloured rounded lines, commit nodes, connector rows and OID-to-rendered-row positions. It shares safe same-commit forks to avoid crossings, uses a small bridge (`⌢`) only across unrelated occupied lanes, and separates unresolved boundary decoration from stable completed blocks. The topology oracle, prefix tests and generated-history checks pass. Actual ANSI/SVG previews are available for review; this is not live-browser acceptance. See the [renderer checkpoint](git-worktree-browsing-validation.md#unicode-renderer-2026-11-16).
+4. **Navigator integration — complete.** Commit records feed cancellable background layout and drawing. One owned snapshot stores Unicode spans, ordered selectable rows, OID positions and width; metadata-only refreshes reuse geometry. Existing reference labels, HEAD markers, clipping, selection, paging, follow behavior and progressive loading are retained. Construction is cancelled and joined on invalidation, hiding, handoff and shutdown. Git ASCII generation/parsing and its production tests are replaced, not retained behind a switch.
+5. **Acceptance and enablement — Unicode enabled; user terminal review remains open.** Topology, prefix, history-controller, real PTY lifecycle/watcher and idle checks cover the integrated renderer. Actual wide/narrow terminal captures and large-repository measurements accompany the validation checkpoint. Release packaging limitations remain separate; worktree mutations and other feature slices have not been added.
+
+No new graph-library dependency, periodic rendering, monitoring process, branch-model grouping or terminal image protocol is introduced by this sequence. Worktree mutations, commit inspection and project build/run configuration remain outside this increment.
 
 ## Validation
 
 Cover nested and bare repositories, unusual paths, detached and missing worktrees, direct entry and search routing, all-session versus exact-folder scope, counts and activity, stable selection, merge connector continuity, old HEAD loading, external updates, watcher failures, cancellation, small terminals and unchanged Git metadata. Reproduce the 30,000-commit benchmark and a wide-branch fixture. Run scripts/check.sh and interactive acceptance.
 
+Unicode acceptance additionally requires correct displayed parent connections across the shared fixtures and recorded counterexamples; explicit unfinished ancestry without false connections; stable completed geometry and colours across prefix expansion and unchanged refreshes; actual multi-branch previews matching the approved appearance, including narrow panes and selected commits; and preservation of navigation, following and cancellation behavior. The [pending Unicode acceptance matrix](git-worktree-browsing-validation.md#pending-unicode-renderer-acceptance) is separate from successful native-ASCII baseline evidence.
+
 Research with Git 2.56.0 found --skip pages changed lanes at 9/11 tested boundaries; expanding prefixes preserved output at 11/11. Single-run synthetic 30,000-commit measurements ranged from 53ms for 100 requested commits to 72ms for all commits. These are feasibility observations, not performance guarantees.
 
 ## Backlog
 
-Worktree creation/removal/repair, merging, rebasing, fetch/push, project build/run configuration, process management, commit inspection and diffs, custom/image graph rendering, and full Windows/macOS application support.
+Worktree creation/removal/repair, merging, rebasing, fetch/push, project build/run configuration, process management, commit inspection and diffs, terminal image graph rendering, and full Windows/macOS application support.
 
 ## Implementation status
 
-Development is in `/tmp/tracr-git-browser` on `feature/git-worktree-browser`. Logical worktree browsing, discovery lifecycle acceptance, branch-only navigation labels, folder viewport scrolling, progressive history loading, and checkout HEAD following are implemented. Reference labels, graph colours and horizontal graph scrolling are implemented. Native metadata watching is implemented; polling fallback and broader release acceptance remain unfinished. The checkpoints below record implementation history.
+Development is in `/tmp/tracr-git-browser` on `feature/git-worktree-browser`. Logical worktree browsing, discovery lifecycle acceptance, branch-only navigation labels, folder viewport scrolling, progressive history loading, and checkout HEAD following are implemented. Reference labels, graph colours and horizontal graph scrolling are implemented. Native metadata watching and native-ASCII browser acceptance are complete. Parent-aware history records, the pure deterministic lane model and the isolated Unicode renderer are implemented and validated. Navigator integration and visual approval remain pending; the new renderer is not enabled or accepted. Polling fallback remains deferred; packaged-release gates remain tracked separately. The checkpoints below record implementation history.
 
 ### Discovery implementation checkpoint
 
@@ -91,7 +103,7 @@ Final verification: `./scripts/check.sh --offline` passed every stage (logs `/tm
 
 ### Direct worktree rows
 
-The synthetic Worktrees row and its collapse state have been removed. Project expansion now controls visibility of direct `↳` worktree children; existing checkout expansion controls their descendants. Counts, branch names and availability remain on each checkout, and inventory staleness is displayed there too. Navigation recovery goes directly to the project when a removed checkout has no surviving physical entry. Earlier references to groups above describe the superseded layout.
+The synthetic Worktrees row and its collapse state have been removed. Project expansion now controls visibility of direct `↪` worktree children; existing checkout expansion controls their descendants. Counts, branch names and availability remain on each checkout, and inventory staleness is displayed there too. Navigation recovery goes directly to the project when a removed checkout has no surviving physical entry. Earlier references to groups above describe the superseded layout.
 
 Validation for direct rows: the full offline verifier passed, including updated navigation, collapse, stale rendering, missing-folder recovery and Git lifecycle terminal checks (logs `/tmp/tracr-check-29slr3m3`).
 
@@ -183,3 +195,24 @@ Discovery invalidation is scoped to the active repository: reference events refr
 Watchers are released on repository exit, session handoff and application exit. Shutdown removes subscriptions and waits for callback lifetime completion; Git cancellation/reaping retains its existing boundary. Returning from a session attaches and reconciles again. No new config is added. Polling fallback, automatic discovery of Git initialization in ordinary folders, and Git mutations remain deferred.
 
 Acceptance adds bounded debounce/filter/failure tests, real files/reftable and bare fixtures, metadata replacement and directory creation, terminal external changes/manual selection/hidden history/project switching, handoff descriptor cleanup and the existing four-scenario idle CPU probe. See the validation document for measured results and final verification.
+
+
+## Unicode graph feasibility decision (2026-11-16)
+
+The coloured Unicode appearance is restored to first-slice acceptance; it is not deferred as custom rendering. A bounded, non-integrated prototype and library assessment are recorded in [Unicode graph validation](unicode-git-graph-validation.md). The prototype did not pass adoption: partial-boundary continuation, complex routing, colour treatment and density remain unresolved. This does not establish that every custom approach is unsuitable. That initial recommendation was superseded by the completed [compiled library validation](gleisbau-git-graph-validation.md); the remaining implementation sequence above is authoritative. Existing loading, cursor movement, worktree HEAD following and manual/follow transitions remain required.
+
+
+## Browser acceptance increment (2026-11-16)
+
+`tests/git_acceptance.rs` exercises native discovery with nested repositories, a local submodule, an independent clone and ordinary/bare linked worktrees. It checks distinct common-directory identities, checkout versus exact-folder scopes, hierarchical counts, logical placement/deduplication and retained actual path identities. Existing PTY session handoff checks certify actual external-worktree launch directories.
+
+`scripts/git_acceptance.py` is the explicit large-fixture command, separate from the normal verifier. It uses fast-import for 30,000 linear commits and 64 branches with 16 commits each plus 64 merges, checks prefix continuity and selected commits across expansion, follows a checkout 25,000 commits behind, and verifies cancellation/reaping of a blocked expansion. It records JSON timings, peak RSS, Git command counts, prefix limits and settled CPU/output. No machine-dependent latency or memory limits are imposed; idle Git commands and unchanged-screen output must be zero.
+
+The existing release smoke suite now runs the Git lifecycle, watcher and idle helpers against its supplied binary. Release toolchain, static-linkage, architecture and notices requirements remain intact. Packaging cannot be certified without its required runtime license texts. The acceptance work validates the current renderer; it does not certify or replace the separate Unicode feasibility work.
+
+
+## Unicode implementation decision after library validation (2026-11-16)
+
+The [compiled gleisbau trial](gleisbau-git-graph-validation.md) completes the reuse comparison. Gleisbau 0.7.5 rendered all default fixture inputs, but only 26/50 passed output topology/boundary checks. None of its four built-in ordering policies met the full correctness and stable-prefix requirements. Its row map integrates with Tracer's navigation/follow controller, but correctness failures and shifting lane placement rule out direct adoption. Grid-only extraction would still require owning the difficult routing work.
+
+Selected direction: a Tracer-owned, parent-aware Unicode renderer. Git supplies topologically ordered commits and ordered parent IDs; a deterministic lane/edge model renders compact coloured lines with explicit unresolved ancestry and an OID-to-row map. Preserve completed prefix geometry/colours, cached navigation, connector skipping, worktree HEAD following, manual/follow transitions and stale-result cancellation. Do not continue ASCII inference or introduce branch-model grouping. The shared topology corpus, recorded counterexamples, clipping and interaction checks gate production enablement. This validation increment does not enable a new renderer or add application dependencies.

@@ -1,0 +1,10 @@
+      ●  2c30f0a parallel-four commit 9 · Café é 界 👩‍💻
+      ●  38653ec parallel-four commit 8 · Café é 界 👩‍💻
+    ● │  aac2418 parallel-four commit 7 · Café é 界 👩‍💻
+    ● │  71aff17 parallel-four commit 6 · Café é 界 👩‍💻
+  ● │ │  395894b parallel-four commit 5 · Café é 界 👩‍💻
+  ● │ │  3fc9821 parallel-four commit 4 · Café é 界 👩‍💻
+● │ │ │  94584d8 parallel-four commit 3 · Café é 界 👩‍💻
+● ╰─┴─┤  e16b3c2 parallel-four commit 2 · Café é 界 👩‍💻
+╰─────┤
+      ●  7c7246a parallel-four commit 1 · Café é 界 👩‍💻

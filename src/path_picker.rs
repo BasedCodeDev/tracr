@@ -353,6 +353,9 @@ impl Picker {
         false
     }
     pub fn needs_tick(&self) -> bool {
+        if let Some(worktrees) = self.worktrees.as_ref().filter(|view| view.active) {
+            return worktrees.loading;
+        }
         self.active > 0
             || (self.requested != Some(self.generation)
                 && self.edited.elapsed() >= Duration::from_millis(100))
@@ -742,5 +745,20 @@ mod tests {
         picker.tick(&mut input);
         assert_eq!(input, "new unfinished path");
         assert!(picker.rows.is_empty());
+    }
+    #[test]
+    fn worktree_picker_ticks_only_while_loading() {
+        let mut picker = Picker::for_relink(PathBuf::from("/tmp"), Some(PathBuf::from("/tmp")));
+        picker.edited = Instant::now() - Duration::from_secs(1);
+        picker.requested = None;
+        picker.active = 1; // A directory read may still be pending in the other view.
+        let worktrees = picker.worktrees.as_mut().unwrap();
+        worktrees.active = true;
+        worktrees.loading = true;
+        assert!(picker.needs_tick());
+        picker.worktrees.as_mut().unwrap().loading = false;
+        assert!(!picker.needs_tick());
+        picker.worktrees.as_mut().unwrap().active = false;
+        assert!(picker.needs_tick());
     }
 }

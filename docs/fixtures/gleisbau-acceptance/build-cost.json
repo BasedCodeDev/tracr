@@ -1,0 +1,271 @@
+{
+  "library": {
+    "status": 0,
+    "cold_seconds": 3.579,
+    "target": "/tmp/tracr-git-browser/target/gleisbau-cost-library-x8rdl326",
+    "stripped_bytes": 1261840,
+    "warm_seconds": 0.025
+  },
+  "baseline": {
+    "status": 0,
+    "cold_seconds": 1.66,
+    "target": "/tmp/tracr-git-browser/target/gleisbau-cost-baseline-ts08seq9",
+    "stripped_bytes": 443656,
+    "warm_seconds": 0.015
+  },
+  "locked_packages": 103,
+  "additional_name_version_pairs": [
+    [
+      "aho-corasick",
+      "1.1.5"
+    ],
+    [
+      "android_system_properties",
+      "0.1.6"
+    ],
+    [
+      "atty",
+      "0.2.14"
+    ],
+    [
+      "autocfg",
+      "1.5.1"
+    ],
+    [
+      "bumpalo",
+      "3.20.4"
+    ],
+    [
+      "cc",
+      "1.11.2"
+    ],
+    [
+      "chrono",
+      "0.4.45"
+    ],
+    [
+      "convert_case",
+      "0.10.0"
+    ],
+    [
+      "core-foundation-sys",
+      "0.8.7"
+    ],
+    [
+      "crossterm",
+      "0.29.0"
+    ],
+    [
+      "derive_more",
+      "2.1.1"
+    ],
+    [
+      "derive_more-impl",
+      "2.1.1"
+    ],
+    [
+      "document-features",
+      "0.2.12"
+    ],
+    [
+      "find-msvc-tools",
+      "0.1.15"
+    ],
+    [
+      "futures-util",
+      "0.3.34"
+    ],
+    [
+      "getrandom",
+      "0.4.3"
+    ],
+    [
+      "git2",
+      "0.21.0"
+    ],
+    [
+      "gleisbau",
+      "0.7.5"
+    ],
+    [
+      "hermit-abi",
+      "0.1.19"
+    ],
+    [
+      "iana-time-zone",
+      "0.1.65"
+    ],
+    [
+      "iana-time-zone-haiku",
+      "0.1.2"
+    ],
+    [
+      "itertools",
+      "0.14.0"
+    ],
+    [
+      "jobserver",
+      "0.1.35"
+    ],
+    [
+      "js-sys",
+      "0.3.107"
+    ],
+    [
+      "lazy_static",
+      "1.5.1"
+    ],
+    [
+      "libgit2-sys",
+      "0.18.8+1.9.7"
+    ],
+    [
+      "libz-sys",
+      "1.1.33"
+    ],
+    [
+      "litrs",
+      "1.0.1"
+    ],
+    [
+      "mio",
+      "1.2.5"
+    ],
+    [
+      "num-traits",
+      "0.2.19"
+    ],
+    [
+      "pkg-config",
+      "0.3.34"
+    ],
+    [
+      "r-efi",
+      "6.0.0"
+    ],
+    [
+      "regex",
+      "1.13.1"
+    ],
+    [
+      "regex-automata",
+      "0.4.18"
+    ],
+    [
+      "regex-syntax",
+      "0.8.11"
+    ],
+    [
+      "rustc_version",
+      "0.4.1"
+    ],
+    [
+      "semver",
+      "1.0.28"
+    ],
+    [
+      "serde",
+      "1.0.229"
+    ],
+    [
+      "serde_core",
+      "1.0.229"
+    ],
+    [
+      "serde_derive",
+      "1.0.229"
+    ],
+    [
+      "serde_spanned",
+      "1.1.3"
+    ],
+    [
+      "shlex",
+      "2.0.1"
+    ],
+    [
+      "syn",
+      "3.0.10"
+    ],
+    [
+      "textwrap",
+      "0.16.4"
+    ],
+    [
+      "toml",
+      "0.9.12+spec-1.1.0"
+    ],
+    [
+      "toml_datetime",
+      "0.7.5+spec-1.1.0"
+    ],
+    [
+      "toml_parser",
+      "1.1.5+spec-1.1.0"
+    ],
+    [
+      "toml_writer",
+      "1.2.0+spec-1.1.0"
+    ],
+    [
+      "vcpkg",
+      "0.2.15"
+    ],
+    [
+      "wasm-bindgen",
+      "0.2.130"
+    ],
+    [
+      "wasm-bindgen-macro",
+      "0.2.130"
+    ],
+    [
+      "wasm-bindgen-macro-support",
+      "0.2.130"
+    ],
+    [
+      "wasm-bindgen-shared",
+      "0.2.130"
+    ],
+    [
+      "windows-core",
+      "0.62.2"
+    ],
+    [
+      "windows-implement",
+      "0.60.2"
+    ],
+    [
+      "windows-interface",
+      "0.59.3"
+    ],
+    [
+      "windows-result",
+      "0.4.1"
+    ],
+    [
+      "windows-strings",
+      "0.5.1"
+    ],
+    [
+      "winnow",
+      "1.0.5"
+    ],
+    [
+      "yansi",
+      "1.0.1"
+    ]
+  ],
+  "gleisbau": {
+    "version": "0.7.5",
+    "checksum": "ac933c4eb1ee130b83108cd6b750f2092e96fd0c65883c40451933af5975c48e",
+    "revision": "735db6a060aafb4174dab1f79c7b1c99c62dfcc0",
+    "license": "MIT",
+    "rust_version": "1.83.0"
+  },
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "static_musl": {
+    "status": "blocked",
+    "reason": "x86_64-linux-musl-gcc missing; libgit2-sys/libz-sys require a musl C compiler"
+  }
+}
