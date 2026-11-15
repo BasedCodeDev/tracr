@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-') as tmp:
         output = bytearray()
         try:
             deadline = time.monotonic() + 20
-            marker = b'DIRECTMATCH' if path == '.' else b'matching'
+            marker = b'DIRECTMATCH' if path == '.' else b'currently shown'
             while marker not in output:
                 assert child.poll() is None, bytes(output[-1500:])
                 assert time.monotonic() < deadline, bytes(output[-1500:])

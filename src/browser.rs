@@ -177,6 +177,13 @@ pub struct SourceDiagnostic {
 }
 
 pub struct Browser {
+    pub ownership: BTreeMap<PathBuf, crate::git_discovery::Ownership>,
+    pub git_generation: u64,
+    retired_repositories: BTreeSet<PathBuf>,
+    repository_candidates: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+    pub repository_errors: BTreeMap<PathBuf, String>,
+    pub repositories: BTreeMap<PathBuf, crate::git::Repository>,
+    remembered_sessions: BTreeMap<PathBuf, SessionKey>,
     pub state_path: Option<PathBuf>,
     pub state_warning: Option<String>,
     pub generation: u64,
@@ -194,6 +201,13 @@ pub struct Browser {
 impl Browser {
     pub fn new(specs: Vec<SourceSpec>) -> Self {
         Self {
+            ownership: BTreeMap::new(),
+            git_generation: 0,
+            retired_repositories: BTreeSet::new(),
+            repository_candidates: BTreeMap::new(),
+            repository_errors: BTreeMap::new(),
+            repositories: BTreeMap::new(),
+            remembered_sessions: BTreeMap::new(),
             state_path: None,
             state_warning: None,
             generation: 0,
@@ -209,10 +223,235 @@ impl Browser {
             details: BTreeMap::new(),
         }
     }
+    pub fn select_folder(&mut self, next: FolderFilter) {
+        if let (FolderFilter::Path(path), Some(key)) = (&self.folder, &self.selected) {
+            self.remembered_sessions.insert(path.clone(), key.clone());
+        }
+        self.selected = match &next {
+            FolderFilter::Path(p) => self.remembered_sessions.get(p).cloned(),
+            _ => None,
+        };
+        self.folder = next;
+        self.reconcile(0);
+    }
+    pub fn install_repository(&mut self, repo: crate::git::Repository) {
+        if !self.repositories.contains_key(&repo.common_dir) {
+            if let Some(main) = repo.worktrees.first() {
+                self.expanded
+                    .extend(main.path.ancestors().map(PathBuf::from));
+            }
+        }
+        self.repositories.insert(repo.common_dir.clone(), repo);
+    }
+    pub fn apply_inventory(
+        &mut self,
+        generation: u64,
+        id: PathBuf,
+        result: Result<crate::git::Repository, String>,
+    ) -> Vec<PathBuf> {
+        if generation != self.git_generation || self.retired_repositories.contains(&id) {
+            return vec![];
+        }
+        let repo = match result {
+            Ok(repo) => repo,
+            Err(error) => {
+                self.repository_errors.insert(id, error);
+                return vec![];
+            }
+        };
+        self.repository_errors.remove(&id);
+        let removed: Vec<_> = self
+            .repositories
+            .get(&id)
+            .into_iter()
+            .flat_map(|r| &r.worktrees)
+            .filter(|old| !repo.worktrees.iter().any(|new| new.path == old.path))
+            .map(|w| w.path.clone())
+            .collect();
+        let invalid: Vec<_> = self.ownership.iter().filter(|(_, record)| matches!(record.effective(),
+            Some(crate::git_discovery::Outcome::Repository { repository, root: Some(root) }) if repository.common_dir == id && removed.contains(root)))
+            .map(|(path,_)| path.clone()).collect();
+        for path in &invalid {
+            self.ownership.remove(path);
+        }
+        self.install_repository(repo);
+        invalid
+    }
+    pub fn invalidate_git(&mut self) {
+        self.git_generation += 1;
+        self.retired_repositories.clear();
+        for id in self.repositories.keys() {
+            self.repository_errors
+                .insert(id.clone(), "Refreshing worktree information".into());
+        }
+        for record in self.ownership.values_mut() {
+            record.previous = record.effective().cloned();
+            record.outcome = None;
+            record.generation = self.git_generation;
+        }
+    }
+    pub fn apply_ownership(
+        &mut self,
+        generation: u64,
+        path: PathBuf,
+        outcome: crate::git_discovery::Outcome,
+    ) {
+        if generation != self.git_generation {
+            return;
+        }
+        if let crate::git_discovery::Outcome::Repository { repository, .. } = &outcome {
+            if self.retired_repositories.contains(&repository.common_dir) {
+                return;
+            }
+            self.repository_candidates
+                .entry(repository.common_dir.clone())
+                .or_default()
+                .insert(path.clone());
+        }
+        let previous = self
+            .ownership
+            .get(&path)
+            .and_then(|r| r.effective())
+            .cloned();
+        self.ownership.insert(
+            path,
+            crate::git_discovery::Ownership {
+                generation,
+                outcome: Some(outcome),
+                previous,
+            },
+        );
+        self.reconcile(0);
+    }
+    pub fn retire_repositories(&mut self) -> Vec<PathBuf> {
+        self.retire_repositories_except(&BTreeSet::new())
+    }
+    pub fn retire_repositories_except(&mut self, pending: &BTreeSet<PathBuf>) -> Vec<PathBuf> {
+        use crate::git_discovery::Outcome;
+        let retired: Vec<_> = self.repositories.keys().filter(|id| {
+            !pending.contains(*id) && self.repository_candidates.get(*id).is_some_and(|paths| !paths.is_empty() && paths.iter().all(|path| {
+                self.ownership.get(path).is_some_and(|record| record.generation == self.git_generation && match &record.outcome {
+                    Some(Outcome::NotRepository) => true,
+                    Some(Outcome::Repository { repository, .. }) => &repository.common_dir != *id,
+                    _ => false,
+                })
+            })) && !self.ownership.values().any(|r| matches!(&r.outcome, Some(Outcome::Repository { repository, .. }) if &repository.common_dir == *id))
+        }).cloned().collect();
+        for id in &retired {
+            self.repositories.remove(id);
+            self.repository_errors.remove(id);
+            self.repository_candidates.remove(id);
+            self.retired_repositories.insert(id.clone());
+        }
+        retired
+    }
+    pub fn navigation_ancestors(&self) -> Vec<FolderFilter> {
+        let mut stack: Vec<(usize, FolderFilter)> = Vec::new();
+        for row in self.folder_rows() {
+            while stack.last().is_some_and(|(depth, _)| *depth >= row.depth) {
+                stack.pop();
+            }
+            if row.filter == self.folder {
+                return stack.into_iter().rev().map(|(_, filter)| filter).collect();
+            }
+            stack.push((row.depth, row.filter));
+        }
+        vec![]
+    }
+    pub fn recover_navigation(&mut self, ancestors: &[FolderFilter], selected: Option<SessionKey>) {
+        let missing = matches!(&self.folder, FolderFilter::Path(path)
+            if matches!(self.folders.get(path), Some(FolderStatus::Unlinked))
+            && !self.repositories.values().any(|repo| repo.worktrees.iter().any(|worktree| &worktree.path == path)));
+        let mut rows = self.folder_rows();
+        if missing || !rows.iter().any(|r| r.filter == self.folder) {
+            if let FolderFilter::Path(path) = &self.folder {
+                self.expanded.extend(path.ancestors().map(PathBuf::from));
+                rows = self.folder_rows();
+            }
+            if missing || !rows.iter().any(|r| r.filter == self.folder) {
+                if let Some(target) = ancestors
+                    .iter()
+                    .find(|a| rows.iter().any(|r| &r.filter == *a))
+                {
+                    self.folder = target.clone();
+                } else {
+                    self.folder = if missing {
+                        FolderFilter::Unlinked
+                    } else {
+                        rows.first()
+                            .map(|r| r.filter.clone())
+                            .unwrap_or(FolderFilter::Unknown)
+                    };
+                }
+            }
+        }
+        self.selected = selected;
+        self.reconcile(0);
+    }
+    fn checkout_root(&self, path: &std::path::Path) -> Option<&std::path::Path> {
+        match self.ownership.get(path).and_then(|r| r.effective()) {
+            Some(crate::git_discovery::Outcome::Repository { root, .. }) => root.as_deref(),
+            _ => None,
+        }
+    }
+    pub fn scope_label(&self) -> String {
+        let FolderFilter::Path(path) = &self.folder else {
+            return "Sessions".into();
+        };
+        let linked = self.repositories.values().any(|repo| {
+            repo.worktrees
+                .iter()
+                .skip(1)
+                .any(|worktree| &worktree.path == path)
+        });
+        if !linked && self.checkout_root(path) != Some(path.as_path()) {
+            return "Sessions — folder".into();
+        }
+        let incomplete = self
+            .all()
+            .iter()
+            .filter_map(|s| s.cwd.as_ref())
+            .filter(|p| p.starts_with(path))
+            .any(|p| self.ownership.get(p).is_none_or(|r| r.stale()));
+        let kind = if linked { "worktree" } else { "checkout" };
+        if incomplete {
+            format!("Sessions — {kind} · scope incomplete/stale")
+        } else {
+            format!("Sessions — {kind}")
+        }
+    }
+    fn subtree_matches(&self, session: &SessionSummary, filter: &FolderFilter) -> bool {
+        let Some(cwd) = &session.cwd else {
+            return self.matches_folder(session, filter);
+        };
+        let linked = self.repositories.values().find_map(|repo| {
+            repo.worktrees
+                .iter()
+                .skip(1)
+                .filter(|w| cwd.starts_with(&w.path))
+                .max_by_key(|w| w.path.components().count())
+                .map(|w| (repo, w))
+        });
+        match filter {
+            FolderFilter::Path(path) => {
+                if let Some((repo, worktree)) = linked {
+                    if path.starts_with(&worktree.path) {
+                        return cwd.starts_with(path);
+                    }
+                    return repo
+                        .worktrees
+                        .first()
+                        .is_some_and(|main| main.path.starts_with(path));
+                }
+                cwd.starts_with(path)
+            }
+            _ => self.matches_folder(session, filter),
+        }
+    }
     /// Select an absolute, lexically normalized folder before discovery begins.
     pub fn open_folder(&mut self, path: PathBuf) {
         self.expanded.extend(path.ancestors().map(|p| p.to_owned()));
-        self.folder = FolderFilter::Path(path.clone());
+        self.select_folder(FolderFilter::Path(path.clone()));
         self.initial_folder = Some(path);
         self.reconcile(0);
     }
@@ -297,13 +536,7 @@ impl Browser {
             .into_iter()
             .filter(|s| self.include_archived || !s.archived)
         {
-            let matches = match filter {
-                FolderFilter::Path(path) => session
-                    .cwd
-                    .as_ref()
-                    .is_some_and(|cwd| cwd.starts_with(path)),
-                _ => self.matches_folder(&session, filter),
-            };
+            let matches = self.subtree_matches(&session, filter);
             if !matches {
                 continue;
             }
@@ -373,7 +606,13 @@ impl Browser {
                 .as_ref()
                 .is_some_and(|p| self.folders.get(p) == Some(&FolderStatus::Unlinked)),
             FolderFilter::Unknown => session.cwd.as_ref().is_none_or(|p| !p.is_absolute()),
-            FolderFilter::Path(path) => session.cwd.as_ref().is_some_and(|p| p == path),
+            FolderFilter::Path(path) => session.cwd.as_ref().is_some_and(|p| {
+                if self.checkout_root(path) == Some(path.as_path()) {
+                    self.checkout_root(p) == Some(path.as_path())
+                } else {
+                    p == path
+                }
+            }),
         }
     }
     pub fn folder_rows(&self) -> Vec<FolderRow> {
@@ -386,12 +625,7 @@ impl Browser {
             sessions
                 .iter()
                 // Tree totals include descendants; the session pane uses exact matches.
-                .filter(|s| match f {
-                    FolderFilter::Path(path) => {
-                        s.cwd.as_ref().is_some_and(|cwd| cwd.starts_with(path))
-                    }
-                    _ => self.matches_folder(s, f),
-                })
+                .filter(|s| self.subtree_matches(s, f))
                 .count()
         };
         let mut rows = vec![
@@ -421,7 +655,24 @@ impl Browser {
                 );
             }
         }
+        for repo in self.repositories.values() {
+            if let Some(main) = repo.worktrees.first() {
+                paths.extend(main.path.ancestors().map(PathBuf::from));
+            }
+            for worktree in &repo.worktrees {
+                paths.insert(worktree.path.clone());
+            }
+        }
+        let all_paths = paths.clone();
+        let linked: Vec<_> = self
+            .repositories
+            .values()
+            .flat_map(|r| r.worktrees.iter().skip(1))
+            .collect();
         for path in paths {
+            if linked.iter().any(|w| path.starts_with(&w.path)) {
+                continue;
+            }
             if path
                 .ancestors()
                 .skip(1)
@@ -445,6 +696,85 @@ impl Browser {
                     crate::path_picker::tree_label(&path, 0, self.expanded.contains(&path))
                 ),
             });
+            for repo in self.repositories.values().filter(|r| {
+                r.worktrees.first().is_some_and(|w| w.path == path) && r.worktrees.len() > 1
+            }) {
+                if !self.expanded.contains(&path) {
+                    continue;
+                }
+                let depth = path.components().count();
+                for worktree in repo.worktrees.iter().skip(1) {
+                    let filter = FolderFilter::Path(worktree.path.clone());
+                    rows.push(FolderRow {
+                        count: count(&filter),
+                        filter,
+                        depth,
+                        label: format!(
+                            "↳ {}{}{}",
+                            worktree
+                                .branch
+                                .as_deref()
+                                .map(|branch| branch.trim_start_matches("refs/heads/").to_owned())
+                                .unwrap_or_else(|| {
+                                    worktree
+                                        .head
+                                        .as_ref()
+                                        .map(|head| {
+                                            format!(
+                                                "detached HEAD {}",
+                                                head.chars().take(7).collect::<String>()
+                                            )
+                                        })
+                                        .unwrap_or_else(|| "detached HEAD".into())
+                                }),
+                            if !matches!(
+                                self.folders.get(&worktree.path),
+                                Some(FolderStatus::Unlinked | FolderStatus::Inaccessible { .. })
+                            ) {
+                                ""
+                            } else {
+                                " [unavailable]"
+                            },
+                            if self.repository_errors.contains_key(&repo.common_dir) {
+                                " [stale]"
+                            } else {
+                                ""
+                            }
+                        ),
+                    });
+                    if self.expanded.contains(&worktree.path) {
+                        for child in all_paths
+                            .iter()
+                            .filter(|p| **p != worktree.path && p.starts_with(&worktree.path))
+                        {
+                            if child
+                                .ancestors()
+                                .skip(1)
+                                .take_while(|p| *p != worktree.path)
+                                .any(|p| !self.expanded.contains(p))
+                            {
+                                continue;
+                            }
+                            let filter = FolderFilter::Path(child.clone());
+                            rows.push(FolderRow {
+                                count: count(&filter),
+                                filter,
+                                depth: depth
+                                    + child
+                                        .strip_prefix(&worktree.path)
+                                        .unwrap()
+                                        .components()
+                                        .count(),
+                                label: child
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .into_owned(),
+                            });
+                        }
+                    }
+                }
+            }
         }
         rows
     }
@@ -469,8 +799,57 @@ impl Browser {
                 .map(|s| s.key.clone());
         }
     }
-    pub fn apply(&mut self, update: Update) {
+    /// Cheaply reject repeated provider snapshots before rebuilding selection.
+    pub fn update_changes(&self, update: &Update) -> bool {
         if update.generation() != self.generation {
+            return false;
+        }
+        match update {
+            Update::Live {
+                source,
+                statuses,
+                error,
+                ..
+            } => {
+                let state = &self.sources[*source];
+                state.live_checked != error.is_none()
+                    || state.live_error != *error
+                    || if error.is_some() {
+                        !state.live.is_empty()
+                    } else {
+                        state.live != *statuses
+                    }
+            }
+            Update::Folder { path, status, .. } => self.folders.get(path) != Some(status),
+            Update::Detail { key, value, .. } => self.details.get(key) != Some(value.as_ref()),
+            Update::Page {
+                source,
+                sessions,
+                warnings,
+                ..
+            } => {
+                !warnings.is_empty()
+                    || sessions.iter().any(|session| {
+                        self.sources[*source]
+                            .staging
+                            .get(&session.key)
+                            .is_none_or(|old| old.updated_at < session.updated_at)
+                    })
+            }
+            Update::Finished { source, error, .. } => {
+                let state = &self.sources[*source];
+                state.loading || !state.staging.is_empty() || state.error != *error
+            }
+            Update::Ready {
+                source, provider, ..
+            } => self.sources[*source]
+                .provider
+                .as_ref()
+                .is_none_or(|old| !Arc::ptr_eq(old, provider)),
+        }
+    }
+    pub fn apply(&mut self, update: Update) {
+        if !self.update_changes(&update) {
             return;
         }
         let old_index = self

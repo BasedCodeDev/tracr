@@ -352,6 +352,11 @@ impl Picker {
         }
         false
     }
+    pub fn needs_tick(&self) -> bool {
+        self.active > 0
+            || (self.requested != Some(self.generation)
+                && self.edited.elapsed() >= Duration::from_millis(100))
+    }
     pub fn tick(&mut self, input: &mut String) {
         if let Some(w) = self.worktrees.as_mut().filter(|w| w.active) {
             if let Some(result) = w.rx.as_ref().and_then(|rx| rx.try_recv().ok()) {

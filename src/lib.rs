@@ -27,3 +27,9 @@ pub mod error_dialog;
 pub mod info_content;
 
 pub mod worktrees;
+
+pub mod git;
+
+pub mod git_discovery;
+
+pub mod git_history;

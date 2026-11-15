@@ -44,6 +44,13 @@ pub fn unavailable(browser: &Browser) -> Option<String> {
     if browser.state_path.is_none() {
         return Some("Persistent state is required for move recovery.".into());
     }
+    if let FolderFilter::Path(path) = &browser.folder {
+        if browser.repositories.values().any(|repo| {
+            repo.worktrees.len() > 1 && repo.worktrees.iter().any(|w| w.path.starts_with(path))
+        }) {
+            return Some("Git-aware worktree moves are not supported yet.".into());
+        }
+    }
     match &browser.folder {
         FolderFilter::Path(p) if p.is_dir() => None,
         _ => Some("Select an existing folder in the Folders pane.".into()),

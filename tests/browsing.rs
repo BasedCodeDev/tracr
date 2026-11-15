@@ -1276,3 +1276,626 @@ async fn footer_shares_feedback_only_when_display_width_leaves_a_gap() {
         }
     }
 }
+
+#[tokio::test]
+async fn linked_checkout_is_projected_under_repository_and_aggregates_sessions() {
+    let mut browser = loaded().await;
+    browser.include_archived = true;
+    let mut records = browser.all();
+    records.truncate(2);
+    records[0].cwd = Some("/scratch/feature/src".into());
+    records[1].cwd = Some("/projects/app/src".into());
+    browser.begin_refresh();
+    browser.apply(Update::Page {
+        generation: browser.generation,
+        source: 0,
+        sessions: records,
+        warnings: vec![],
+    });
+    browser.apply(Update::Finished {
+        generation: browser.generation,
+        source: 0,
+        error: None,
+    });
+    let wt = |path: &str| tracr::git::Worktree {
+        path: path.into(),
+        head: None,
+        branch: Some("refs/heads/main".into()),
+        bare: false,
+        locked: false,
+        prunable: false,
+    };
+    browser.install_repository(tracr::git::Repository {
+        common_dir: "/projects/app/.git".into(),
+        git_dir: "/projects/app/.git".into(),
+        worktrees: vec![wt("/projects/app"), wt("/scratch/feature")],
+    });
+    for (path, root) in [
+        ("/scratch/feature", "/scratch/feature"),
+        ("/scratch/feature/src", "/scratch/feature"),
+        ("/projects/app", "/projects/app"),
+        ("/projects/app/src", "/projects/app"),
+    ] {
+        let repository = browser.repositories.values().next().unwrap().clone();
+        browser.apply_ownership(
+            browser.git_generation,
+            path.into(),
+            tracr::git_discovery::Outcome::Repository {
+                repository: tracr::git::Directory {
+                    common_dir: repository.common_dir,
+                    git_dir: repository.git_dir,
+                },
+                root: Some(root.into()),
+            },
+        );
+    }
+    browser.open_folder("/scratch/feature".into());
+    assert_eq!(browser.visible().len(), 1);
+    let rows = browser.folder_rows();
+    let group = rows
+        .iter()
+        .position(|r| r.filter == FolderFilter::Path("/projects/app".into()))
+        .unwrap();
+    let feature = rows
+        .iter()
+        .position(|r| r.filter == FolderFilter::Path("/scratch/feature".into()))
+        .unwrap();
+    assert_eq!(feature, group + 1);
+    assert!(rows[feature].label.starts_with("↳ "));
+    assert!(!rows.iter().any(|r| r.label.starts_with("Worktrees")));
+    assert_eq!(rows[feature].depth, rows[group].depth + 1);
+    assert_eq!(rows[feature].count, 1);
+    browser.expanded.insert("/scratch/feature".into());
+    let expanded_rows = browser.folder_rows();
+    let child = expanded_rows
+        .iter()
+        .find(|r| r.filter == FolderFilter::Path("/scratch/feature/src".into()))
+        .unwrap();
+    assert_eq!(child.depth, rows[feature].depth + 1);
+    browser.expanded.remove(&PathBuf::from("/scratch/feature"));
+    assert!(
+        !browser
+            .folder_rows()
+            .iter()
+            .any(|r| r.filter == FolderFilter::Path("/scratch/feature/src".into()))
+    );
+    browser.expanded.remove(&PathBuf::from("/projects/app"));
+    assert!(
+        !browser
+            .folder_rows()
+            .iter()
+            .any(|r| r.filter == FolderFilter::Path("/scratch/feature".into()))
+    );
+    browser.expanded.insert("/projects/app".into());
+
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.filter == FolderFilter::Path("/scratch/feature".into()))
+            .count(),
+        1
+    );
+    browser.open_folder("/projects/app".into());
+    assert_eq!(browser.visible().len(), 1);
+}
+
+#[tokio::test]
+async fn ownership_refresh_preserves_stale_membership_and_rejects_old_results() {
+    let mut browser = loaded().await;
+    let path: PathBuf = "/project".into();
+    let repo = tracr::git::Repository {
+        common_dir: "/project/.git".into(),
+        git_dir: "/project/.git".into(),
+        worktrees: vec![],
+    };
+    browser.apply_ownership(
+        0,
+        path.clone(),
+        tracr::git_discovery::Outcome::Repository {
+            repository: tracr::git::Directory {
+                common_dir: repo.common_dir,
+                git_dir: repo.git_dir,
+            },
+            root: Some(path.clone()),
+        },
+    );
+    browser.invalidate_git();
+    assert!(browser.ownership[&path].stale());
+    assert!(browser.ownership[&path].effective().is_some());
+    browser.apply_ownership(
+        0,
+        path.clone(),
+        tracr::git_discovery::Outcome::NotRepository,
+    );
+    assert!(browser.ownership[&path].outcome.is_none());
+    browser.apply_ownership(
+        1,
+        path.clone(),
+        tracr::git_discovery::Outcome::Unavailable("unmounted".into()),
+    );
+    assert!(matches!(
+        browser.ownership[&path].effective(),
+        Some(tracr::git_discovery::Outcome::Repository { .. })
+    ));
+    browser.apply_ownership(
+        1,
+        path.clone(),
+        tracr::git_discovery::Outcome::NotRepository,
+    );
+    assert!(matches!(
+        browser.ownership[&path].effective(),
+        Some(tracr::git_discovery::Outcome::NotRepository)
+    ));
+}
+
+#[tokio::test]
+async fn retirement_requires_conclusive_results_and_rejects_late_inventory() {
+    use tracr::git_discovery::Outcome;
+    let mut browser = loaded().await;
+    let root: PathBuf = "/work/project".into();
+    let id: PathBuf = "/work/project/.git".into();
+    let repo = tracr::git::Repository {
+        common_dir: id.clone(),
+        git_dir: id.clone(),
+        worktrees: vec![],
+    };
+    browser.install_repository(repo.clone());
+    browser.apply_ownership(
+        0,
+        root.clone(),
+        Outcome::Repository {
+            repository: tracr::git::Directory {
+                common_dir: id.clone(),
+                git_dir: id.clone(),
+            },
+            root: Some(root.clone()),
+        },
+    );
+    browser.invalidate_git();
+    assert!(browser.retire_repositories().is_empty());
+    browser.apply_ownership(1, root.clone(), Outcome::Unavailable("offline".into()));
+    assert!(browser.retire_repositories().is_empty());
+    browser.apply_ownership(1, root, Outcome::NotRepository);
+    assert_eq!(browser.retire_repositories(), vec![id.clone()]);
+    browser.apply_inventory(1, id.clone(), Ok(repo));
+    assert!(!browser.repositories.contains_key(&id));
+}
+
+#[tokio::test]
+async fn inventory_failure_and_recovery_render_staleness_without_losing_worktrees() {
+    use ratatui::{Terminal, backend::TestBackend};
+    use tracr::tui::{View, draw};
+    let mut browser = loaded().await;
+    let id: PathBuf = "/projects/app/.git".into();
+    let wt = |path: &str| tracr::git::Worktree {
+        path: path.into(),
+        head: None,
+        branch: None,
+        bare: false,
+        locked: false,
+        prunable: false,
+    };
+    let repo = tracr::git::Repository {
+        common_dir: id.clone(),
+        git_dir: id.clone(),
+        worktrees: vec![wt("/projects/app"), wt("/scratch/feature")],
+    };
+    browser.install_repository(repo.clone());
+    browser.open_folder("/projects/app".into());
+    let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+    for failed in [true, false] {
+        let result = if failed {
+            Err("inventory unavailable".into())
+        } else {
+            Ok(repo.clone())
+        };
+        browser.apply_inventory(browser.git_generation, id.clone(), result);
+        terminal
+            .draw(|frame| draw(frame, &browser, &View::default()))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert_eq!(text.contains("[stale]"), failed);
+        assert!(text.contains("↳ detached HEAD"));
+        assert_eq!(browser.repositories[&id].worktrees.len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn removed_worktree_recovers_physical_session_or_project() {
+    for missing in [false, true] {
+        let mut browser = loaded().await;
+        let mut session = browser.all().remove(0);
+        session.archived = false;
+        session.cwd = Some("/scratch/feature".into());
+        let selected = session.key.clone();
+        browser.begin_refresh();
+        browser.apply(Update::Page {
+            generation: browser.generation,
+            source: 0,
+            sessions: vec![session],
+            warnings: vec![],
+        });
+        browser.apply(Update::Finished {
+            generation: browser.generation,
+            source: 0,
+            error: None,
+        });
+        browser.folders.insert(
+            "/scratch/feature".into(),
+            tracr::domain::FolderStatus::Available,
+        );
+        let id: PathBuf = "/projects/app/.git".into();
+        let wt = |path: &str| tracr::git::Worktree {
+            path: path.into(),
+            head: None,
+            branch: None,
+            bare: false,
+            locked: false,
+            prunable: false,
+        };
+        let mut repo = tracr::git::Repository {
+            common_dir: id.clone(),
+            git_dir: id.clone(),
+            worktrees: vec![wt("/projects/app"), wt("/scratch/feature")],
+        };
+        browser.install_repository(repo.clone());
+        browser.open_folder("/scratch/feature".into());
+        browser.selected = Some(selected.clone());
+        if missing {
+            browser.initial_folder = None;
+            browser.folders.insert(
+                "/scratch/feature".into(),
+                tracr::domain::FolderStatus::Unlinked,
+            );
+        }
+        let ancestors = browser.navigation_ancestors();
+        repo.worktrees.pop();
+        browser.apply_inventory(browser.git_generation, id, Ok(repo));
+        browser.recover_navigation(&ancestors, Some(selected.clone()));
+        if missing {
+            assert_eq!(browser.folder, FolderFilter::Path("/projects/app".into()));
+        } else {
+            assert_eq!(
+                browser.folder,
+                FolderFilter::Path("/scratch/feature".into())
+            );
+            assert_eq!(browser.selected, Some(selected));
+        }
+        assert!(
+            browser
+                .folder_rows()
+                .iter()
+                .any(|r| r.filter == browser.folder)
+        );
+    }
+}
+
+#[tokio::test]
+async fn mixed_checkout_results_keep_repository_until_all_paths_are_conclusive() {
+    use tracr::git_discovery::Outcome;
+    for reverse in [false, true] {
+        let mut browser = loaded().await;
+        let id: PathBuf = "/project/.git".into();
+        let paths: Vec<PathBuf> = vec!["/project".into(), "/linked".into()];
+        let owned = |path: &PathBuf| Outcome::Repository {
+            repository: tracr::git::Directory {
+                common_dir: id.clone(),
+                git_dir: id.clone(),
+            },
+            root: Some(path.clone()),
+        };
+        browser.install_repository(tracr::git::Repository {
+            common_dir: id.clone(),
+            git_dir: id.clone(),
+            worktrees: vec![],
+        });
+        for path in &paths {
+            browser.apply_ownership(0, path.clone(), owned(path));
+        }
+        browser.invalidate_git();
+        let mut updates = vec![
+            (paths[0].clone(), Outcome::Unavailable("offline".into())),
+            (paths[1].clone(), owned(&paths[1])),
+        ];
+        if reverse {
+            updates.reverse();
+        }
+        for (path, result) in updates {
+            browser.apply_ownership(1, path, result);
+            assert!(browser.retire_repositories().is_empty());
+        }
+        assert!(browser.ownership[&paths[0]].stale());
+        assert!(matches!(
+            browser.ownership[&paths[0]].effective(),
+            Some(Outcome::Repository { .. })
+        ));
+        browser.apply_ownership(1, paths[1].clone(), Outcome::NotRepository);
+        assert!(browser.retire_repositories().is_empty());
+        browser.apply_ownership(1, paths[0].clone(), Outcome::NotRepository);
+        assert_eq!(browser.retire_repositories(), vec![id]);
+    }
+}
+
+#[tokio::test]
+async fn inventory_refresh_preserves_collapsed_projects_and_session_focus() {
+    use ratatui::{Terminal, backend::TestBackend};
+    use tracr::tui::{View, draw};
+    let mut browser = loaded().await;
+    let session = browser
+        .all()
+        .into_iter()
+        .find(|s| !s.archived && s.cwd.is_some())
+        .unwrap();
+    browser.open_folder(session.cwd.clone().unwrap());
+    browser.selected = Some(session.key.clone());
+    let original_folder = browser.folder.clone();
+    let wt = |path: &str| tracr::git::Worktree {
+        path: path.into(),
+        head: None,
+        branch: None,
+        bare: false,
+        locked: false,
+        prunable: false,
+    };
+    let repos: Vec<_> = ["/project", "/other"]
+        .into_iter()
+        .map(|path| tracr::git::Repository {
+            common_dir: PathBuf::from(path).join(".git"),
+            git_dir: PathBuf::from(path).join(".git"),
+            worktrees: vec![wt(path), wt(&format!("{path}-linked"))],
+        })
+        .collect();
+    for repo in &repos {
+        browser.install_repository(repo.clone());
+    }
+    browser.expanded.remove(&PathBuf::from("/project"));
+    browser.expanded.remove(&PathBuf::from("/other"));
+    let expanded = browser.expanded.clone();
+    let view = View {
+        focus: 1,
+        ..View::default()
+    };
+    let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+    for repo in repos {
+        let ancestors = browser.navigation_ancestors();
+        let selected = browser.selected.clone();
+        browser.apply_inventory(browser.git_generation, repo.common_dir.clone(), Ok(repo));
+        browser.recover_navigation(&ancestors, selected);
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        assert!(!browser.expanded.contains(&PathBuf::from("/project")));
+        assert!(!browser.expanded.contains(&PathBuf::from("/other")));
+        assert_eq!(browser.expanded, expanded);
+        assert_eq!(browser.folder, original_folder);
+        assert_eq!(browser.selected, Some(session.key.clone()));
+        assert_eq!(view.focus, 1);
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(!text.contains("project-linked"));
+        assert!(!text.contains("other-linked"));
+    }
+}
+
+#[tokio::test]
+async fn worktree_labels_and_scope_titles_use_repository_identity() {
+    use tracr::git_discovery::Outcome;
+    let mut browser = loaded().await;
+    let id: PathBuf = "/project/.git".into();
+    let wt = |path: &str, branch: Option<&str>| tracr::git::Worktree {
+        path: path.into(),
+        head: Some("abcdef1234567890".into()),
+        branch: branch.map(str::to_owned),
+        bare: false,
+        locked: false,
+        prunable: false,
+    };
+    browser.install_repository(tracr::git::Repository {
+        common_dir: id.clone(),
+        git_dir: id.clone(),
+        worktrees: vec![
+            wt("/project", Some("refs/heads/main")),
+            wt("/unimportant-name", Some("refs/heads/feature/login")),
+            wt("/detached-name", None),
+        ],
+    });
+    for path in ["/project", "/unimportant-name"] {
+        browser.apply_ownership(
+            browser.git_generation,
+            path.into(),
+            Outcome::Repository {
+                repository: tracr::git::Directory {
+                    common_dir: id.clone(),
+                    git_dir: id.clone(),
+                },
+                root: Some(path.into()),
+            },
+        );
+    }
+    for (path, title) in [
+        ("/project", "checkout"),
+        ("/unimportant-name", "worktree"),
+        ("/unimportant-name/src", "folder"),
+        ("/detached-name", "worktree"),
+    ] {
+        browser.folder = FolderFilter::Path(path.into());
+        assert_eq!(browser.scope_label(), format!("Sessions — {title}"));
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(140, 40)).unwrap();
+        terminal
+            .draw(|frame| tracr::tui::draw(frame, &browser, &tracr::tui::View::default()))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains(&format!("Sessions — {title}")));
+    }
+    let rows = browser.folder_rows();
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.filter == FolderFilter::Path("/unimportant-name".into()))
+            .unwrap()
+            .label,
+        "↳ feature/login"
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.filter == FolderFilter::Path("/detached-name".into()))
+            .unwrap()
+            .label,
+        "↳ detached HEAD abcdef1"
+    );
+    browser.invalidate_git();
+    browser.folder = FolderFilter::Path("/unimportant-name".into());
+    assert!(browser.scope_label().starts_with("Sessions — worktree"));
+}
+
+#[tokio::test]
+async fn folder_pane_scrolls_whole_tree_and_resets_for_short_selection_and_resize() {
+    use ratatui::{Terminal, backend::TestBackend};
+    use tracr::tui::{View, draw};
+    let mut browser = loaded().await;
+    let path: PathBuf =
+        "/parent/long-parent/another-parent/deep/feature-with-a-very-long-name-and-extra-overflow-界界".into();
+    browser.open_folder(path.clone());
+    let view = View {
+        focus: 0,
+        ..View::default()
+    };
+    for width in [100u16, 140, 240, 80] {
+        browser.folder = FolderFilter::Path(path.clone());
+        let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        let pane_width = if width >= 100 {
+            width * 50 / 100
+        } else {
+            width
+        };
+        let lines = |terminal: &Terminal<TestBackend>| -> Vec<String> {
+            (0..40)
+                .map(|y| {
+                    (0..pane_width)
+                        .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                        .collect()
+                })
+                .collect()
+        };
+        assert_eq!(
+            terminal.backend().buffer()[(pane_width - 1, 0)].symbol(),
+            "┓"
+        );
+        if width >= 100 {
+            assert_eq!(terminal.backend().buffer()[(pane_width, 0)].symbol(), "┌");
+        }
+        let before = lines(&terminal);
+        let selected = before
+            .iter()
+            .find(|line| line.starts_with("┃> ") || line.starts_with("│> "))
+            .unwrap();
+        assert!(selected.contains("界"), "{selected}");
+        assert!(selected.contains("(0)"), "{selected}");
+        assert!(before[0].contains("Folders"));
+        if width == 100 {
+            // The same offset clips short ancestor rows completely.
+            assert!(!before.iter().any(|line| line.contains("long-parent")));
+        }
+        browser.folder = FolderFilter::Unlinked;
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        let after = lines(&terminal);
+        assert!(after.iter().any(|line| line.contains("Unlinked folders")));
+        assert!(after.iter().any(|line| line.contains("long-parent")));
+    }
+}
+
+#[tokio::test]
+async fn sessions_have_two_columns_of_right_padding() {
+    use ratatui::{Terminal, backend::TestBackend};
+    use tracr::tui::{View, draw};
+    let mut browser = loaded().await;
+    let mut session = browser.all().into_iter().find(|s| !s.archived).unwrap();
+    session.title = "Long session title ".repeat(50);
+    browser.begin_refresh();
+    browser.apply(Update::Page {
+        generation: browser.generation,
+        source: 0,
+        sessions: vec![session],
+        warnings: vec![],
+    });
+    browser.apply(Update::Finished {
+        generation: browser.generation,
+        source: 0,
+        error: None,
+    });
+    for empty in [false, true] {
+        if empty {
+            browser.folder = FolderFilter::Path("/empty-padding-fixture".into());
+        }
+        for width in [80, 100, 140] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+            terminal
+                .draw(|frame| {
+                    draw(
+                        frame,
+                        &browser,
+                        &View {
+                            focus: 1,
+                            ..View::default()
+                        },
+                    )
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            for y in 1..37 {
+                assert_eq!(buffer[(width - 2, y)].symbol(), " ");
+                assert_eq!(buffer[(width - 3, y)].symbol(), " ");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn identical_provider_updates_do_not_invalidate_the_browser() {
+    let mut browser = loaded().await;
+    let update = || Update::Live {
+        generation: 0,
+        source: 0,
+        statuses: std::collections::BTreeMap::new(),
+        error: None,
+    };
+    let generation = browser.generation;
+    let live = |statuses| Update::Live {
+        generation,
+        source: 0,
+        statuses,
+        error: None,
+    };
+    browser.apply(live(std::collections::BTreeMap::new()));
+    assert!(!browser.update_changes(&live(std::collections::BTreeMap::new())));
+    let key = browser.all()[0].key.clone();
+    let statuses = std::collections::BTreeMap::from([(key, RuntimeStatus::Idle)]);
+    assert!(browser.update_changes(&live(statuses.clone())));
+    browser.apply(live(statuses.clone()));
+    assert!(!browser.update_changes(&live(statuses)));
+    if generation != 0 {
+        assert!(!browser.update_changes(&update()));
+    }
+    let folder = || Update::Folder {
+        generation,
+        path: "/test".into(),
+        status: tracr::domain::FolderStatus::Available,
+    };
+    browser.apply(folder());
+    assert!(!browser.update_changes(&folder()));
+}

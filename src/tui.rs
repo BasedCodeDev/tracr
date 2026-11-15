@@ -117,6 +117,9 @@ fn show_folder_failure(view: &mut View, message: String, recovery: bool) {
 }
 #[derive(Default)]
 pub struct View {
+    pub history: crate::git_history::History,
+    pub git_hidden: bool,
+    pub git_focus: bool,
     pub focus: usize,
     pub editing: bool,
     pub search_query: String,
@@ -146,6 +149,7 @@ fn restore() {
 struct ShutdownSignals {
     terminate: std::sync::Arc<std::sync::atomic::AtomicBool>,
     interrupt: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    resize: std::sync::Arc<std::sync::atomic::AtomicBool>,
     registrations: Vec<signal_hook::SigId>,
 }
 impl ShutdownSignals {
@@ -153,11 +157,13 @@ impl ShutdownSignals {
         let mut guard = Self {
             terminate: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             interrupt: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resize: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             registrations: Vec::new(),
         };
         for (signal, flag) in [
             (signal_hook::consts::SIGTERM, guard.terminate.clone()),
             (signal_hook::consts::SIGINT, guard.interrupt.clone()),
+            (signal_hook::consts::SIGWINCH, guard.resize.clone()),
         ] {
             guard
                 .registrations
@@ -220,6 +226,76 @@ fn block(title: &str, focused: bool) -> Block<'_> {
         } else {
             Color::DarkGray
         }))
+}
+
+fn pane_block(title: &str, focused: bool) -> Block<'_> {
+    block(title, focused).padding(ratatui::widgets::Padding::new(0, 0, 1, 0))
+}
+
+#[derive(Default)]
+struct IdleGate {
+    dirty: bool,
+    deadline: Option<std::time::Instant>,
+}
+impl IdleGate {
+    fn wake(&mut self) {
+        self.dirty = true;
+    }
+    fn ready(&mut self, now: std::time::Instant, activity: bool) -> bool {
+        let ready = self.dirty || activity || self.deadline.is_some_and(|deadline| now >= deadline);
+        if ready {
+            self.dirty = false;
+            self.deadline = None;
+        }
+        ready
+    }
+}
+fn age_delay(updated: i64, now: i64) -> u64 {
+    let elapsed = now.saturating_sub(updated).max(0);
+    if elapsed < 60 {
+        return updated
+            .saturating_add(60)
+            .saturating_sub(now)
+            .clamp(1, 86_400) as u64;
+    }
+    let units = [31_536_000, 2_592_000, 604_800, 86_400, 3_600, 60];
+    let unit = units.into_iter().find(|unit| elapsed >= *unit).unwrap();
+    let next_bucket = units
+        .into_iter()
+        .filter(|unit| *unit > elapsed)
+        .map(|unit| unit - elapsed)
+        .min()
+        .unwrap_or(i64::MAX);
+    (unit - elapsed % unit).min(next_bucket) as u64
+}
+fn next_age_update(browser: &Browser, view: &View, height: u16) -> Option<std::time::Instant> {
+    if view.editing
+        || view.help
+        || view.error_dialog.is_some()
+        || view.relink.is_some()
+        || view.folder_move.is_some()
+    {
+        return None;
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .min(i64::MAX as u64) as i64;
+    let sessions = browser.visible();
+    let selected = sessions
+        .iter()
+        .position(|session| Some(&session.key) == browser.selected.as_ref())
+        .unwrap_or(0);
+    let count = usize::from(height / 3).max(1);
+    let start = selected.saturating_sub(count.saturating_sub(1));
+    sessions
+        .iter()
+        .skip(start)
+        .take(count)
+        .map(|session| age_delay(session.updated_at, now))
+        .min()
+        .map(|seconds| std::time::Instant::now() + Duration::from_secs(seconds))
 }
 
 fn relative_time(updated_at: i64, now: i64) -> String {
@@ -350,24 +426,7 @@ fn session_metadata(
     Line::from(spans)
 }
 
-pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
-    if let Some(dialog) = &view.error_dialog {
-        dialog.draw(frame);
-        return;
-    }
-    if let Some(modal) = &view.folder_move {
-        modal.draw(frame, browser);
-        return;
-    }
-    if let Some(info) = &view.info {
-        info.dialog.draw(frame);
-        return;
-    }
-    let area = frame.area();
-    if area.width < 12 || area.height < 4 {
-        frame.render_widget(Paragraph::new("tracr: enlarge terminal"), area);
-        return;
-    }
+fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String, String, u16) {
     let mut issues: Vec<_> = browser
         .diagnostics()
         .into_iter()
@@ -410,23 +469,75 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             + unicode_width::UnicodeWidthStr::width(first.as_str())
             + 2
             > usize::from(area.width);
+    (first, second, message, if separate_message { 3 } else { 2 })
+}
+
+pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
+    if let Some(dialog) = &view.error_dialog {
+        dialog.draw(frame);
+        return;
+    }
+    if let Some(modal) = &view.folder_move {
+        modal.draw(frame, browser);
+        return;
+    }
+    if let Some(info) = &view.info {
+        info.dialog.draw(frame);
+        return;
+    }
+    let area = frame.area();
+    if area.width < 12 || area.height < 4 {
+        frame.render_widget(Paragraph::new("tracr: enlarge terminal"), area);
+        return;
+    }
+    let (first, second, message, footer_height) = browser_footer(area, browser, view);
+    let separate_message = footer_height == 3;
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(if separate_message { 3 } else { 2 }),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(footer_height)])
         .split(area);
+    let content = if !view.git_hidden && view.history.present() && layout[0].height >= 9 {
+        let regions = Layout::vertical([Constraint::Percentage(67), Constraint::Percentage(33)])
+            .split(layout[0]);
+        let range = view
+            .history
+            .visible_range(usize::from(regions[1].height.saturating_sub(3)));
+        let selected = view.history.selected.saturating_sub(range.start);
+        let width = usize::from(regions[1].width.saturating_sub(4));
+        view.history.clamp_horizontal(width);
+        let items: Vec<_> = view.history.rows[range]
+            .iter()
+            .map(|row| {
+                ListItem::new(graph_viewport(
+                    view.history.row_spans(row),
+                    view.history.horizontal.get(),
+                    width,
+                ))
+            })
+            .collect();
+        let title = view.history.title();
+        frame.render_stateful_widget(
+            List::new(items)
+                .block(pane_block(&title, view.git_focus))
+                .highlight_symbol("> ")
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
+            regions[1],
+            &mut ListState::default().with_selected(Some(selected)),
+        );
+        regions[0]
+    } else {
+        layout[0]
+    };
     if area.width >= 100 {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-            .split(layout[0]);
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(content);
         for (index, pane) in panes.iter().enumerate() {
             draw_pane(frame, *pane, index, browser, view);
         }
     } else {
-        draw_pane(frame, layout[0], view.focus, browser, view);
+        draw_pane(frame, content, view.focus, browser, view);
     }
     draw_footer(
         frame,
@@ -1295,30 +1406,94 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     );
 }
 
+/// Slice terminal columns without splitting graphemes or wide glyphs.
+fn graph_viewport(spans: Vec<Span<'static>>, offset: usize, width: usize) -> Line<'static> {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    let end = offset.saturating_add(width);
+    let mut column = 0;
+    let mut clipped = Vec::new();
+    for span in spans {
+        for grapheme in span.content.graphemes(true) {
+            let next = column + grapheme.width();
+            if column >= end {
+                return Line::from(clipped);
+            }
+            if next > offset {
+                let text = if column >= offset && next <= end {
+                    grapheme.to_owned()
+                } else {
+                    " ".repeat(next.min(end).saturating_sub(column.max(offset)))
+                };
+                clipped.push(Span::styled(text, span.style));
+            }
+            column = next;
+        }
+    }
+    Line::from(clipped)
+}
+
+fn folder_viewport(text: &str, offset: usize, width: usize) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    let end = offset.saturating_add(width);
+    let mut column = 0;
+    let mut result = String::new();
+    for grapheme in text.graphemes(true) {
+        let next = column + grapheme.width();
+        if column >= end {
+            break;
+        }
+        if next > offset {
+            if column >= offset && next <= end {
+                result.push_str(grapheme);
+            } else {
+                result.push_str(&" ".repeat(next.min(end).saturating_sub(column.max(offset))));
+            }
+        }
+        column = next;
+    }
+    result
+}
+
 fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, view: &View) {
     match pane {
         0 => {
             let folders = browser.folder_rows();
-            let items: Vec<_> = folders
+            let selected = folders.iter().position(|row| row.filter == browser.folder);
+            let labels: Vec<_> = folders
                 .iter()
                 .map(|row| {
-                    ListItem::new(format!(
+                    format!(
                         "{}{} ({})",
                         "  ".repeat(row.depth.min(20)),
                         safe_text(&row.label),
                         row.count
-                    ))
-                    .style(
+                    )
+                })
+                .collect();
+            // Borders and the fixed selection marker occupy four columns.
+            let width = usize::from(area.width.saturating_sub(4));
+            let offset = selected
+                .map(|index| {
+                    unicode_width::UnicodeWidthStr::width(labels[index].as_str())
+                        .saturating_sub(width)
+                })
+                .unwrap_or(0);
+            let items: Vec<_> = folders
+                .iter()
+                .zip(&labels)
+                .map(|(row, label)| {
+                    ListItem::new(folder_viewport(label, offset, width)).style(
                         activity_color(browser.folder_activity(&row.filter))
                             .map_or(Style::default(), |color| Style::default().fg(color)),
                     )
                 })
                 .collect();
-            let mut state = ListState::default()
-                .with_selected(folders.iter().position(|r| r.filter == browser.folder));
+            let mut state = ListState::default().with_selected(selected);
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(block("Folders", view.focus == 0))
+                    .block(pane_block("Folders", view.focus == 0))
                     .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                     .highlight_symbol("> "),
                 area,
@@ -1327,33 +1502,15 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
         }
         1 => {
             let sessions = browser.visible();
+            // Preserve eight columns for essential status labels in tiny panes.
+            let right_padding = area.width.saturating_sub(12).min(2);
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs()
                 .min(i64::MAX as u64) as i64;
             if sessions.is_empty() {
-                let message = if browser.loading() {
-                    "Loading sessions…"
-                } else if browser.diagnostics().iter().any(|source| !source.complete) {
-                    "No matching sessions found; inventory is incomplete. Check source errors below."
-                } else {
-                    "No matching sessions. Press a to include archives, / to search globally, or Tab to choose another folder."
-                };
-                let message = if can_create(browser) {
-                    format!(
-                        "No sessions currently shown. Press a to include archives.\n\n{}Create new session — Enter",
-                        if view.focus == 1 { "> " } else { "" }
-                    )
-                } else {
-                    message.to_owned()
-                };
-                frame.render_widget(
-                    Paragraph::new(message)
-                        .wrap(Wrap { trim: false })
-                        .block(block("Sessions", view.focus == 1)),
-                    area,
-                );
+                draw_empty_sessions(frame, area, browser, view.focus == 1);
                 return;
             }
             let items: Vec<_> = sessions
@@ -1363,7 +1520,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                         session_title(
                             s,
                             browser.runtime_status(&s.key),
-                            area.width.saturating_sub(4),
+                            area.width.saturating_sub(4 + right_padding),
                         ),
                         session_metadata(browser, s, now),
                         Line::default(),
@@ -1377,7 +1534,10 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             );
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(block("Sessions", view.focus == 1))
+                    .block(
+                        pane_block(&browser.scope_label(), view.focus == 1)
+                            .padding(ratatui::widgets::Padding::new(0, right_padding, 1, 0)),
+                    )
                     .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                     .highlight_symbol("> "),
                 area,
@@ -1386,6 +1546,83 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
         }
         _ => {}
     }
+}
+
+fn draw_empty_sessions(frame: &mut Frame, area: Rect, browser: &Browser, focused: bool) {
+    let title = browser.scope_label();
+    let margin = area.width.saturating_sub(10).min(4) / 2;
+    let border =
+        pane_block(&title, focused).padding(ratatui::widgets::Padding::new(margin, margin, 1, 0));
+    let inner = border.inner(area);
+    frame.render_widget(border, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let status = if browser.loading() {
+        "Loading sessions…"
+    } else if browser.diagnostics().iter().any(|source| !source.complete) {
+        "Session inventory incomplete.\nSee source errors below."
+    } else {
+        "No sessions currently shown"
+    };
+    let primary_style = Style::default()
+        .add_modifier(Modifier::BOLD)
+        .fg(if focused { Color::Cyan } else { Color::Reset });
+    let muted = Style::default().fg(Color::DarkGray);
+    let width = inner.width.min(40);
+    let create = can_create(browser);
+    let mut gaps = true;
+    let mut hints = true;
+    let mut compact = false;
+    let paragraph = loop {
+        let mut lines: Vec<Line<'_>> = status.lines().map(Line::from).collect();
+        if create {
+            if gaps {
+                lines.push(Line::default());
+            }
+            if compact {
+                lines.push(Line::styled("Enter: new session", primary_style));
+            } else {
+                lines.push(Line::styled("Create new session", primary_style));
+                lines.push(Line::styled("Press Enter", primary_style));
+            }
+        }
+        if hints {
+            if gaps {
+                lines.push(Line::default());
+            }
+            if !browser.include_archived {
+                lines.push(Line::styled("a  Show archived sessions", muted));
+            }
+            lines.push(Line::styled("/  Search all sessions", muted));
+        }
+        let paragraph = Paragraph::new(lines)
+            .alignment(ratatui::layout::Alignment::Center)
+            .wrap(Wrap { trim: true });
+        if paragraph.line_count(width) <= usize::from(inner.height) {
+            break paragraph;
+        }
+        if gaps {
+            gaps = false;
+        } else if hints {
+            hints = false;
+        } else if create && !compact {
+            compact = true;
+        } else {
+            break paragraph;
+        }
+    };
+    let height = paragraph.line_count(width).min(usize::from(inner.height)) as u16;
+    let spare_rows = inner.height - height;
+    // The pane already supplies one blank row; add three more when space permits.
+    let top_offset = spare_rows.min(3);
+    let content = Rect::new(
+        inner.x + (inner.width - width) / 2,
+        inner.y + top_offset,
+        width,
+        height,
+    );
+    frame.render_widget(paragraph, content);
 }
 
 fn session_information(
@@ -1858,6 +2095,58 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
+    if key.code == KeyCode::Char('g') {
+        view.git_hidden = !view.git_hidden;
+        if view.git_hidden {
+            view.git_focus = false;
+        }
+        return Action::Continue;
+    }
+    if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+        && !view.git_hidden
+        && view.history.present()
+    {
+        view.git_focus = !view.git_focus;
+        return Action::Continue;
+    }
+    if view.git_focus {
+        use crate::git_history::Movement;
+        let movement = match key.code {
+            KeyCode::Esc => {
+                view.git_focus = false;
+                None
+            }
+            KeyCode::Up | KeyCode::Char('k') => Some(Movement::Up),
+            KeyCode::Down | KeyCode::Char('j') => Some(Movement::Down),
+            KeyCode::Left => {
+                view.history.scroll_horizontal(false);
+                None
+            }
+            KeyCode::Right => {
+                view.history.scroll_horizontal(true);
+                None
+            }
+            KeyCode::PageUp => Some(Movement::PageUp),
+            KeyCode::PageDown => Some(Movement::PageDown),
+            KeyCode::Char('f') => {
+                view.history.follow();
+                None
+            }
+            KeyCode::Home => Some(Movement::Home),
+            KeyCode::End => Some(Movement::End),
+            KeyCode::Char('q') => return Action::Quit,
+            KeyCode::Char('r') => return Action::Refresh,
+            KeyCode::Char('?') => {
+                view.help = true;
+                None
+            }
+            _ => None,
+        };
+        if let Some(movement) = movement {
+            view.history.navigate(movement);
+        }
+        return Action::Continue;
+    }
     let command = match key.code {
         KeyCode::Char('?') => {
             view.help = true;
@@ -1939,7 +2228,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                         i.saturating_add_signed(delta)
                             .min(rows.len().saturating_sub(1)),
                     ) {
-                        browser.folder = row.filter.clone();
+                        browser.select_folder(row.filter.clone());
                     }
                 }
                 1 => browser.move_selection(delta),
@@ -2013,6 +2302,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut discovery = Discovery::new();
     discovery.enable_live();
+    browser.invalidate_git();
     discovery.refresh(&mut browser);
     let mut view = View {
         focus: usize::from(browser.initial_folder.is_some()),
@@ -2063,8 +2353,83 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         std::path::PathBuf,
         std::collections::BTreeSet<crate::domain::SessionKey>,
     )> = None;
+    let mut git_discovery = crate::git_discovery::Controller::default();
+    let mut history_folder = None;
+    let mut candidates_dirty = true;
+    let mut candidate_context = None;
+    let mut idle = IdleGate::default();
+    idle.wake();
+    let mut modal_deadline = std::time::Instant::now();
+    let mut folder_checks_dirty = true;
     let outcome: Result<(), Box<dyn std::error::Error>> = async {
         loop {
+            for _ in 0..100 {
+                match discovery.rx.try_recv() {
+                    Ok(update) => {
+                        if browser.update_changes(&update) {
+                            let paths_changed = matches!(&update, crate::browser::Update::Page { .. } | crate::browser::Update::Finished { .. });
+                            candidates_dirty |= paths_changed; folder_checks_dirty |= paths_changed;
+                            browser.apply(update); idle.wake();
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let now = std::time::Instant::now();
+            let copy_ready = view.error_dialog.as_ref().is_some_and(|dialog| dialog.copy_task.as_ref().is_some_and(|task| task.is_finished())) || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.as_ref().is_some_and(|task| task.is_finished()));
+            let picker_ready = view.relink.as_ref().is_some_and(|modal| modal.picker.as_ref().is_some_and(|picker| picker.needs_tick()));
+            let modal_timer = view.folder_move.is_some() && now >= modal_deadline;
+            if modal_timer { modal_deadline = now + Duration::from_millis(100); }
+            let resized = signals.resize.swap(false, std::sync::atomic::Ordering::Relaxed);
+            let activity = resized || candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll() || copy_ready || picker_ready || modal_timer
+                || pending.as_ref().is_some_and(|p| p.task.is_finished())
+                || relink_task.as_ref().is_some_and(|task| task.is_finished()) || folder_task.as_ref().is_some_and(|task| task.is_finished())
+                || !relink_rx.is_empty() || !folder_rx.is_empty()
+                || signals.terminate.load(std::sync::atomic::Ordering::Relaxed) || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed);
+            if idle.ready(now, activity) {
+            git_discovery.generation(browser.git_generation);
+            let context_changed = candidate_context.as_ref().is_none_or(|(generation, folder, expanded, archived)| *generation != browser.git_generation || folder != &browser.folder || expanded != &browser.expanded || *archived != browser.include_archived);
+            if candidates_dirty || context_changed {
+                let mut candidates = Vec::new();
+                if let FolderFilter::Path(path) = &browser.folder { candidates.push(path.clone()); }
+                candidates.extend(browser.folder_rows().into_iter().filter_map(|r| match r.filter { FolderFilter::Path(p) => Some(p), _ => None }));
+                candidates.extend(browser.all().into_iter().filter_map(|s| s.cwd));
+                candidates.extend(browser.repositories.values().flat_map(|r| r.worktrees.iter().map(|w| w.path.clone())));
+                git_discovery.set_candidates(candidates);
+                candidate_context = Some((browser.git_generation, browser.folder.clone(), browser.expanded.clone(), browser.include_archived));
+                candidates_dirty = false;
+            }
+            let updates = git_discovery.poll().await;
+            candidates_dirty |= !updates.is_empty();
+            git_discovery.apply_batch(&mut browser, updates);
+            let context = match &browser.folder {
+                FolderFilter::Path(path) => browser.ownership.get(path).and_then(|r| r.effective()),
+                _ => None,
+            };
+            let pending_context = match &browser.folder {
+                FolderFilter::Path(path) => browser.ownership.get(path).is_none_or(|record| record.outcome.is_none() && record.previous.is_none()),
+                _ => false,
+            };
+            let target = match context {
+                Some(crate::git_discovery::Outcome::Repository { repository, .. }) => Some(repository.common_dir.clone()),
+                _ => None,
+            };
+            let checkout = match context { Some(crate::git_discovery::Outcome::Repository { root, .. }) => root.clone(), _ => None };
+            let selected_folder = match &browser.folder { FolderFilter::Path(path) => Some(path.clone()), _ => None };
+            let root_selected = selected_folder != history_folder && checkout.is_some() && selected_folder == checkout;
+            if !pending_context {
+                history_folder = selected_folder;
+                view.history.checkout(checkout, root_selected).await;
+            }
+            let target = if pending_context { view.history.repository() } else { target };
+            let size = terminal.size()?;
+            let area = Rect::new(0, 0, size.width, size.height);
+            let (_, _, _, footer_height) = browser_footer(area, &browser, &view);
+            let content_height = size.height.saturating_sub(footer_height);
+            let regions = Layout::vertical([Constraint::Percentage(67), Constraint::Percentage(33)]).split(Rect::new(0, 0, size.width, content_height));
+            let page = usize::from(regions[1].height.saturating_sub(3)).max(1);
+            view.history.tick(target, browser.git_generation, !view.git_hidden && content_height >= 9 && size.width >= 12, page).await;
+            if !view.history.present() { view.git_focus = false; }
             // Finish the bounded operation and archive restoration before exiting.
             if (signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
                 || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed)) && relink_task.is_none() && folder_task.is_none() {
@@ -2087,7 +2452,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     Ok(FolderMoveResult::Applied(crate::folder_move::Outcome::Complete(plan)))=>{
                         folder_relocated=Some((plan.target.clone(),browser.selected.clone()));
                         browser.open_folder(plan.target);view.folder_move=None;view.focus=0;
-                        view.message=Some("Folder and sessions moved and verified.".into());discovery.refresh(&mut browser);
+                        view.message=Some("Folder and sessions moved and verified.".into());browser.invalidate_git(); discovery.refresh(&mut browser);
                     },
                     other=>{
                         let (message,recovery)=match other {
@@ -2097,7 +2462,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             _=>unreachable!(),
                         };
                         show_folder_failure(&mut view,message,recovery);
-                        discovery.refresh(&mut browser);
+                        browser.invalidate_git(); discovery.refresh(&mut browser);
                     }
                 }
             }
@@ -2114,21 +2479,15 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     Ok(RelinkResult::Applied(crate::relocation::Outcome::Verified(p)))=>{
                         view.relink=None;view.focus=1;if p.archived {browser.include_archived=true;}browser.open_folder(p.target.clone());
                         browser.selected=Some(p.key.clone());relocated=Some(p);
-                        view.message=Some("Session relinked and verified.".into());discovery.refresh(&mut browser);
+                        view.message=Some("Session relinked and verified.".into());browser.invalidate_git(); discovery.refresh(&mut browser);
                     },
                     Ok(RelinkResult::Applied(crate::relocation::Outcome::Rejected(e)))=>{
-                        show_relink_failure(&mut view,e,false);discovery.refresh(&mut browser);
+                        show_relink_failure(&mut view,e,false);browser.invalidate_git(); discovery.refresh(&mut browser);
                     },
                     Ok(RelinkResult::Applied(crate::relocation::Outcome::Unresolved(e)))=>{
-                        show_relink_failure(&mut view,e,true);discovery.refresh(&mut browser);
+                        show_relink_failure(&mut view,e,true);browser.invalidate_git(); discovery.refresh(&mut browser);
                     },
                     Err(e)=>{show_relink_failure(&mut view,format!("Relocation stopped: {e}").into(),true);}
-                }
-            }
-            for _ in 0..100 {
-                match discovery.rx.try_recv() {
-                    Ok(update) => browser.apply(update),
-                    Err(_) => break,
                 }
             }
             if let FolderFilter::Path(path) = &browser.folder {
@@ -2154,7 +2513,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 if !modal.busy && modal.preview.is_none(){if let Some(picker)=modal.picker.as_mut(){picker.tick(&mut modal.input);}}
             }
             if let Some(modal)=view.folder_move.as_mut(){ modal.monitor(&browser); }
-            discovery.check_folders(&browser);
+            if folder_checks_dirty || browser.loading() { discovery.check_folders(&browser); folder_checks_dirty = false; }
             if pending.is_none() && relink_task.is_none() {
                 discovery.detail(&browser);
             }
@@ -2187,6 +2546,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             // Discard pending metadata events before starting a fresh generation.
                             while discovery.rx.try_recv().is_ok() {}
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
+                            git_discovery.shutdown().await;
+                            view.history.shutdown().await;
+                            crate::git::drain_reads().await;
                             guard.suspend()?;
                             let result = crate::resume::run(&command, &signals.terminate).await;
                             signals
@@ -2202,7 +2564,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                 )),
                                 Err(error) => Some(format!("Could not resume Codex: {error}")),
                             };
-                            discovery.refresh(&mut browser);
+                            browser.invalidate_git(); discovery.refresh(&mut browser);
                             // Drop queued key repeats so one Enter cannot launch a second child.
                             while event::poll(Duration::ZERO)? {
                                 let _ = event::read()?;
@@ -2220,7 +2582,16 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 usize::from(size.height.saturating_sub(2).min(22).saturating_sub(7))
                     / if size.width < 58 { 2 } else { 1 };
             terminal.draw(|frame| draw(frame, &browser, &view))?;
-            if event::poll(Duration::from_millis(40))? {
+            idle.deadline = next_age_update(&browser, &view, size.height);
+            }
+            let busy = browser.loading() || git_discovery.pending() || view.history.loading() || pending.is_some() || relink_task.is_some() || folder_task.is_some()
+                || view.relink.is_some() || view.folder_move.is_some()
+                || view.error_dialog.as_ref().is_some_and(|dialog| dialog.copy_task.is_some())
+                || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.is_some());
+            let mut wait = Duration::from_millis(if busy { 40 } else { 250 });
+            if let Some(deadline) = idle.deadline { wait = wait.min(deadline.saturating_duration_since(std::time::Instant::now())); }
+            if event::poll(wait)? {
+                idle.wake();
                 let incoming=event::read()?;
                 if let Event::Paste(text)=&incoming {
                     if let Some(modal)=view.folder_move.as_mut(){modal.paste(text);}
@@ -2338,14 +2709,14 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                         Action::Quit => break,
                         Action::Refresh => {
                             view.message = None;
-                            discovery.refresh(&mut browser);
+                            browser.invalidate_git(); discovery.refresh(&mut browser);
                         }
                         Action::CancelResume => {
                             pending.take();
                             view.preparing = false;
                             view.message = Some("Resume cancelled.".into());
                             // Cancellation may interrupt an RPC frame. Reconnect rather than reuse it.
-                            discovery.refresh(&mut browser);
+                            browser.invalidate_git(); discovery.refresh(&mut browser);
                         }
                         Action::CreateNew(index) => {
                             if !can_create(&browser) {
@@ -2371,6 +2742,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             discovery.close(&mut browser).await;
                             while discovery.rx.try_recv().is_ok() {}
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
+                            git_discovery.shutdown().await;
+                            view.history.shutdown().await;
+                            crate::git::drain_reads().await;
                             guard.suspend()?;
                             let result = crate::resume::run(&command, &signals.terminate).await;
                             signals
@@ -2384,7 +2758,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                 Ok(status) => Some(format!("Harness exited with {status}.")),
                                 Err(error) => Some(format!("Could not start session: {error}")),
                             };
-                            discovery.refresh(&mut browser);
+                            browser.invalidate_git(); discovery.refresh(&mut browser);
                             while event::poll(Duration::ZERO)? {
                                 let _ = event::read()?;
                             }
@@ -2425,11 +2799,15 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
             }
+            // Let the runtime service I/O and timers between blocking terminal polls.
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
         Ok(())
     }
     .await;
+    view.history.shutdown().await;
+    git_discovery.shutdown().await;
+    crate::git::drain_reads().await;
     drop(pending);
     discovery.close(&mut browser).await;
     save_folder(&mut browser, last_folder.as_deref(), &mut view);
@@ -2554,5 +2932,203 @@ mod cleanup_tests {
             .status()
             .unwrap();
         assert!(status.success());
+    }
+}
+
+#[cfg(test)]
+mod folder_viewport_tests {
+    use super::folder_viewport;
+    #[test]
+    fn clips_columns_without_splitting_graphemes() {
+        assert_eq!(folder_viewport("ab界cd", 3, 3), " cd");
+        assert_eq!(folder_viewport("ab界cd", 0, 3), "ab ");
+        assert_eq!(folder_viewport("ae\u{301}z", 1, 1), "e\u{301}");
+        assert_eq!(folder_viewport("a👩‍💻z", 2, 2), " z");
+        assert_eq!(folder_viewport("short", 10, 4), "");
+        assert_eq!(folder_viewport("short", 0, 0), "");
+    }
+}
+
+#[cfg(test)]
+mod graph_viewport_tests {
+    use super::*;
+    #[test]
+    fn styled_unicode_clips_by_columns() {
+        let line = graph_viewport(
+            vec![
+                Span::styled("ab界", Style::default().fg(Color::Cyan)),
+                Span::styled("éz", Style::default().fg(Color::Yellow)),
+            ],
+            3,
+            3,
+        );
+        assert_eq!(
+            line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>(),
+            " éz"
+        );
+        assert_eq!(line.spans[0].style.fg, Some(Color::Cyan));
+        assert_eq!(line.spans[1].style.fg, Some(Color::Yellow));
+    }
+    #[test]
+    fn graph_styles_and_fixed_selection_survive_horizontal_clipping() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        let spans = vec![
+            Span::styled("| * ", Style::default().fg(Color::Cyan)),
+            Span::raw("abcdef0 "),
+            Span::styled("[main] ", Style::default().fg(Color::Green)),
+            Span::styled("[remote: origin/main] ", Style::default().fg(Color::Cyan)),
+            Span::styled("[tag: v1] ", Style::default().fg(Color::Yellow)),
+            Span::raw("long subject 界界"),
+        ];
+        for offset in [0, 4, 20] {
+            terminal
+                .draw(|frame| {
+                    frame.render_stateful_widget(
+                        List::new(vec![ListItem::new(graph_viewport(
+                            spans.clone(),
+                            offset,
+                            36,
+                        ))])
+                        .block(block("Git history", true))
+                        .highlight_symbol("> ")
+                        .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
+                        frame.area(),
+                        &mut ListState::default().with_selected(Some(0)),
+                    )
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(1, 1)].symbol(), ">");
+            assert_eq!(buffer[(39, 1)].symbol(), "┃");
+            assert!(buffer.content.iter().any(|cell| cell.fg == Color::Cyan));
+            if offset == 0 {
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .any(|cell| cell.symbol() == "m" && cell.fg == Color::Green)
+                );
+            }
+            if offset == 20 {
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .any(|cell| cell.symbol() == "t" && cell.fg == Color::Yellow)
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::*;
+    #[test]
+    fn idle_gate_does_no_repeated_work_and_wakes_for_changes_or_deadlines() {
+        let now = std::time::Instant::now();
+        let mut gate = IdleGate::default();
+        gate.wake();
+        assert!(gate.ready(now, false));
+        for _ in 0..10_000 {
+            assert!(!gate.ready(now, false));
+        }
+        assert!(gate.ready(now, true));
+        assert!(!gate.ready(now, false));
+        gate.deadline = Some(now + Duration::from_secs(60));
+        assert!(!gate.ready(now + Duration::from_secs(59), false));
+        assert!(gate.ready(now + Duration::from_secs(60), false));
+        assert!(!gate.ready(now + Duration::from_secs(61), false));
+        gate.wake();
+        assert!(gate.ready(now, false));
+    }
+    #[test]
+    fn age_deadlines_track_displayed_text_boundaries() {
+        for elapsed in [
+            0, 1, 59, 60, 61, 3599, 3600, 86399, 86400, 604_799, 604_800, 2_591_999, 2_592_000,
+            31_104_000, 31_535_999, 31_536_000,
+        ] {
+            let delay = age_delay(100, 100 + elapsed);
+            let current = relative_time(100, 100 + elapsed);
+            assert_eq!(
+                relative_time(100, 100 + elapsed + delay as i64 - 1),
+                current
+            );
+            assert_ne!(relative_time(100, 100 + elapsed + delay as i64), current);
+        }
+        assert_eq!(age_delay(i64::MAX, 0), 86_400);
+    }
+}
+
+#[cfg(test)]
+mod empty_sessions_tests {
+    use super::*;
+    use crate::{browser::SourceSpec, config::SourceConfig, domain::SourceId};
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn empty_sessions_top_align_and_keep_status_when_space_is_limited() {
+        let mut browser = Browser::new(vec![SourceSpec::Codex {
+            binary: "codex".into(),
+            source: SourceConfig {
+                id: SourceId("empty-test".into()),
+                home: "/unused".into(),
+            },
+        }]);
+        browser.folder = FolderFilter::Path("/project".into());
+        let render = |browser: &Browser, width, height| {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| draw_empty_sessions(frame, frame.area(), browser, true))
+                .unwrap();
+            (0..height)
+                .map(|y| {
+                    (0..width)
+                        .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let lines = render(&browser, 60, 20);
+        assert!(lines[5].contains("No sessions currently shown"));
+        assert!(lines[7].contains("Create new session"));
+        assert!(lines[8].contains("Press Enter"));
+        for height in [14, 30, 50] {
+            let resized = render(&browser, 60, height);
+            assert!(resized[5].contains("No sessions currently shown"));
+            for row in &resized[1..5] {
+                assert!(row.chars().skip(1).take(58).all(|c| c == ' '));
+            }
+        }
+        let status = &lines[5];
+        let left = status.chars().position(|c| c == 'N').unwrap();
+        let right = 59 - (left + "No sessions currently shown".len());
+        assert!(left.abs_diff(right + 1) <= 1);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Show archived sessions"))
+        );
+        browser.include_archived = true;
+        assert!(
+            !render(&browser, 60, 20)
+                .join("\n")
+                .contains("Show archived")
+        );
+        let short = render(&browser, 60, 6).join("\n");
+        assert!(short.contains("No sessions currently shown"));
+        assert!(short.contains("Press Enter"));
+        assert!(!short.contains("Search all sessions"));
+        browser.begin_refresh();
+        let loading = render(&browser, 60, 20).join("\n");
+        assert!(loading.contains("Loading sessions"));
+        assert!(!loading.contains("Create new session"));
+        for (width, height) in [(20, 12), (8, 4), (1, 1)] {
+            render(&browser, width, height);
+        }
     }
 }

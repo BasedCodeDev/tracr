@@ -186,7 +186,10 @@ The folder and session panes show partial results while loading.
 Terminals narrower than 100 columns show the focused pane full-width.
 
 - Up / Down or `j/k`: navigate; Left selects Folders, Right selects Sessions
-  without wrapping. Tab / Shift-Tab cycle between panes.
+  without wrapping.
+- With Git history visible, Tab / Shift-Tab toggles between it and the upper browser.
+  Page Up / Page Down scroll through history when it is focused.
+  Without visible history, Tab / Shift-Tab switches upper panes.
 - Enter: expand or collapse the selected folder, resume a session, or relink a session whose folder is missing.
 - `n` in Sessions: create a new session in the selected folder.
 - `l` in Sessions: relink the selected session. Choose an existing destination,
