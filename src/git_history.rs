@@ -140,6 +140,12 @@ impl History {
             self.follow();
         }
     }
+    /// Refresh metadata without rearming follow mode or resetting the viewport.
+    pub fn request_refresh(&mut self) {
+        self.resolve_head = self.checkout.is_some();
+        self.refresh = true;
+        self.error = None;
+    }
     pub fn follow(&mut self) {
         self.horizontal.set(0);
         if self.checkout.is_some() {

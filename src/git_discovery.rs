@@ -216,6 +216,19 @@ impl Controller {
     pub fn pending(&self) -> bool {
         !self.tasks.is_empty() || !self.inventory_tasks.is_empty()
     }
+    pub fn refresh_repository(&mut self, id: &std::path::Path, topology: bool) {
+        self.schedule_dirty = true;
+        self.inventories.remove(id);
+        self.tokens.remove(&(true, id.to_owned()));
+        if let Some(task) = self.inventory_tasks.remove(id) {
+            task.abort();
+        }
+        if topology {
+            let paths: Vec<_> = self.results.iter().filter_map(|(path, outcome)|
+                matches!(outcome, Outcome::Repository { repository, .. } if repository.common_dir == id).then_some(path.clone())).collect();
+            self.forget(&paths);
+        }
+    }
     pub fn forget_repository(&mut self, id: &std::path::Path) {
         self.schedule_dirty = true;
         self.tokens.remove(&(true, id.to_owned()));
@@ -677,6 +690,86 @@ mod lifecycle_tests {
         assert!(controller.pending());
         controller.apply_batch(&mut browser, updates);
         assert!(!browser.repositories.contains_key(&id));
+    }
+    #[test]
+    fn metadata_refresh_retries_stale_ownership_without_touching_other_projects() {
+        let mut browser = crate::browser::Browser::new(vec![]);
+        for name in ["/one", "/two"] {
+            let path = PathBuf::from(name);
+            let id = path.join(".git");
+            browser.ownership.insert(
+                path.clone(),
+                Ownership {
+                    generation: 0,
+                    outcome: Some(Outcome::Unavailable("transient failure".into())),
+                    previous: Some(Outcome::Repository {
+                        repository: git::Directory {
+                            common_dir: id.clone(),
+                            git_dir: id,
+                        },
+                        root: Some(path),
+                    }),
+                },
+            );
+        }
+        let retry = browser.invalidate_git_repository(std::path::Path::new("/one/.git"), false);
+        assert_eq!(retry, vec![PathBuf::from("/one")]);
+        assert!(
+            browser.ownership[std::path::Path::new("/one")]
+                .outcome
+                .is_none()
+        );
+        assert!(matches!(
+            browser.ownership[std::path::Path::new("/two")].outcome,
+            Some(Outcome::Unavailable(_))
+        ));
+    }
+    #[test]
+    fn metadata_refresh_is_scoped_to_one_repository() {
+        let mut controller = Controller::default();
+        controller.generation(0);
+        for name in ["/one", "/two"] {
+            let path = PathBuf::from(name);
+            let id = path.join(".git");
+            controller.results.insert(
+                path.clone(),
+                Outcome::Repository {
+                    repository: git::Directory {
+                        common_dir: id.clone(),
+                        git_dir: id.clone(),
+                    },
+                    root: Some(path),
+                },
+            );
+            controller.inventories.insert(id);
+        }
+        controller.refresh_repository(std::path::Path::new("/one/.git"), false);
+        assert!(
+            controller
+                .results
+                .contains_key(std::path::Path::new("/one"))
+        );
+        assert!(
+            !controller
+                .inventories
+                .contains(std::path::Path::new("/one/.git"))
+        );
+        controller.refresh_repository(std::path::Path::new("/one/.git"), true);
+        assert!(
+            !controller
+                .results
+                .contains_key(std::path::Path::new("/one"))
+        );
+        assert!(
+            controller
+                .results
+                .contains_key(std::path::Path::new("/two"))
+        );
+        assert!(
+            controller
+                .inventories
+                .contains(std::path::Path::new("/two/.git"))
+        );
     }
     #[test]
     fn directory_and_inventory_batches_converge_in_either_order() {

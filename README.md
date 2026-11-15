@@ -182,6 +182,16 @@ The dev script builds inside the repository and launches from your caller direct
 so relative fixture and configuration arguments also resolve there.
 
 
+Git branches, worktree rows and history update automatically for the active
+repository using native metadata notifications. Hidden history pauses graph reads;
+worktree rows continue updating. Manual graph navigation preserves your selected
+commit until you press `f` to follow HEAD again.
+
+Tracr does not poll Git periodically or recursively watch project files. If native
+watching fails, the footer reports it; `r`, repository re-entry or reopening history
+retries and refreshes the data. Filesystems that silently omit notifications may
+require those refresh actions. Polling fallback is not implemented yet.
+
 The folder and session panes show partial results while loading.
 Terminals narrower than 100 columns show the focused pane full-width.
 

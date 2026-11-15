@@ -18,7 +18,7 @@ Left/Right switch upper panes. Tab/Shift-Tab toggle graph and prior upper focus.
 
 ## Automatic updates
 
-Use one notify watcher with subscriptions for relevant active-repository shared refs, per-checkout HEADs, and worktree registration. Avoid source-tree and object-store recursive watches. Debounce changes for 200ms with a one-second maximum delay. Reconcile on repository entry, return from sessions, and graph reopening. No default periodic Git polling. Optional [git] poll_interval_seconds defaults to zero; positive intervals must be at least five seconds. Unsupported filesystems may remain stale until checkpoint refresh without fallback enabled.
+Use one notify watcher with subscriptions for relevant active-repository shared refs, per-checkout HEADs, and worktree registration. Avoid source-tree and object-store recursive watches. Debounce changes for 200ms with a one-second maximum delay. Reconcile on repository entry, return from sessions, and graph reopening. No default periodic Git polling. Native watching is the first increment. Polling fallback and its configuration are deferred by explicit decision. Unsupported or silently unreliable filesystems may remain stale until manual/checkpoint refresh. Watcher failures show a persistent non-modal warning; retries occur at those checkpoints, not on a timer.
 
 ## Failure behavior
 
@@ -44,7 +44,7 @@ Worktree creation/removal/repair, merging, rebasing, fetch/push, project build/r
 
 ## Implementation status
 
-Development is in `/tmp/tracr-git-browser` on `feature/git-worktree-browser`. Logical worktree browsing, discovery lifecycle acceptance, branch-only navigation labels, folder viewport scrolling, progressive history loading, and checkout HEAD following are implemented. Reference labels, graph colours and horizontal graph scrolling are implemented. Metadata watchers and broader feature acceptance remain unfinished. The checkpoints below record implementation history.
+Development is in `/tmp/tracr-git-browser` on `feature/git-worktree-browser`. Logical worktree browsing, discovery lifecycle acceptance, branch-only navigation labels, folder viewport scrolling, progressive history loading, and checkout HEAD following are implemented. Reference labels, graph colours and horizontal graph scrolling are implemented. Native metadata watching is implemented; polling fallback and broader release acceptance remain unfinished. The checkpoints below record implementation history.
 
 ### Discovery implementation checkpoint
 
@@ -170,3 +170,16 @@ Implemented changes:
 Acceptance: compare debug and release builds using 1,000 fixture sessions, 301 commits and a linked checkout 200 commits behind HEAD. Sample settled plain-folder, visible-history, hidden-history and old-HEAD views for 30 seconds each. Record parent and reaped-child CPU, Git command counts, terminal output and input response. Require no repeated idle Git commands or unchanged-screen output; investigate any responsiveness or lifecycle regressions. Measurements and final validation are recorded in `git-worktree-browsing-validation.md`.
 
 Metadata watching remains the next feature increment. No new background monitor, Git mutation, network operation or dependency is introduced by this correction.
+
+
+## Native metadata watching slice
+
+One `notify::RecommendedWatcher` serves the active common Git directory. Subscriptions cover directory entries for common and per-worktree metadata, recursive refs only, reftable directories, packed refs, HEAD, shallow boundaries and worktree registration. The common directory's parent detects replacement; callbacks ignore unrelated siblings. Source trees, object stores and logs are never recursively watched. Subscription reconciliation covers new or atomically replaced metadata directories. Both files and reftable reference storage are supported.
+
+Callbacks perform no Git work. A bounded mailbox coalesces changes for 200 ms, capped at one second from the first event; active reads retain one follow-up batch. Access, metadata timestamp changes, index files and lock-file churn do not request refreshes. Each subscription context owns a fresh mailbox, so callbacks from previous contexts cannot publish into the current one. Rescan/overflow notifications request active-repository reconciliation. Subscription failure stops native watching, retains data and displays `Git auto-update unavailable — r to refresh` with diagnostic detail. Explicit refresh, graph reopening and repository re-entry retry setup; there is no automatic retry or polling loop.
+
+Discovery invalidation is scoped to the active repository: reference events refresh inventory and visible history, while topology events additionally rediscover its known ownership paths. Unrelated discovery caches and session inventories remain current. Watch registration precedes a checkpoint reconciliation. Moving between folders within one repository retains subscriptions. Manual history selection and scrolling survive automatic refresh; follow mode follows updated HEAD. Hidden/small graph panes defer graph reads while inventory stays current.
+
+Watchers are released on repository exit, session handoff and application exit. Shutdown removes subscriptions and waits for callback lifetime completion; Git cancellation/reaping retains its existing boundary. Returning from a session attaches and reconciles again. No new config is added. Polling fallback, automatic discovery of Git initialization in ordinary folders, and Git mutations remain deferred.
+
+Acceptance adds bounded debounce/filter/failure tests, real files/reftable and bare fixtures, metadata replacement and directory creation, terminal external changes/manual selection/hidden history/project switching, handoff descriptor cleanup and the existing four-scenario idle CPU probe. See the validation document for measured results and final verification.

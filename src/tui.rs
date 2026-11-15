@@ -119,6 +119,7 @@ fn show_folder_failure(view: &mut View, message: String, recovery: bool) {
 pub struct View {
     pub history: crate::git_history::History,
     pub git_hidden: bool,
+    pub git_watch_error: Option<String>,
     pub git_focus: bool,
     pub focus: usize,
     pub editing: bool,
@@ -447,6 +448,15 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
             )
         })
         .collect();
+    if let Some(error) = &view.git_watch_error {
+        issues.insert(
+            0,
+            format!(
+                "Git auto-update unavailable — r to refresh: {}",
+                safe_text(error)
+            ),
+        );
+    }
     for (source, spec) in browser.sources.iter().zip(&browser.specs) {
         if source.live_error.is_some() {
             issues.push(format!(
@@ -463,6 +473,12 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
             .map(|m| safe_text(m))
             .unwrap_or_else(|| issues.join(" | "))
     };
+    let message =
+        if view.git_watch_error.is_some() && !message.contains("Git auto-update unavailable") {
+            format!("{} | {message}", issues[0])
+        } else {
+            message
+        };
     let (first, second) = footer_shortcuts(area.width, browser, view.focus);
     let separate_message = !message.is_empty()
         && unicode_width::UnicodeWidthStr::width(message.as_str())
@@ -2354,6 +2370,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         std::collections::BTreeSet<crate::domain::SessionKey>,
     )> = None;
     let mut git_discovery = crate::git_discovery::Controller::default();
+    let mut git_watch = crate::git_watch::Monitor::default();
     let mut history_folder = None;
     let mut candidates_dirty = true;
     let mut candidate_context = None;
@@ -2376,6 +2393,17 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 }
             }
             let now = std::time::Instant::now();
+            if let Some(change) = git_watch.poll(now, git_discovery.pending() || view.history.loading()) {
+                git_watch.reconcile();
+                if let Some(id) = git_watch.repository() {
+                    git_discovery.refresh_repository(id, change == crate::git_watch::Change::Topology);
+                    let retry_paths = browser.invalidate_git_repository(id, change == crate::git_watch::Change::Topology);
+                    git_discovery.forget(&retry_paths);
+                    view.history.request_refresh();
+                    idle.wake();
+                }
+            }
+            if view.git_watch_error != git_watch.error { view.git_watch_error = git_watch.error.clone(); idle.wake(); }
             let copy_ready = view.error_dialog.as_ref().is_some_and(|dialog| dialog.copy_task.as_ref().is_some_and(|task| task.is_finished())) || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.as_ref().is_some_and(|task| task.is_finished()));
             let picker_ready = view.relink.as_ref().is_some_and(|modal| modal.picker.as_ref().is_some_and(|picker| picker.needs_tick()));
             let modal_timer = view.folder_move.is_some() && now >= modal_deadline;
@@ -2428,7 +2456,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let content_height = size.height.saturating_sub(footer_height);
             let regions = Layout::vertical([Constraint::Percentage(67), Constraint::Percentage(33)]).split(Rect::new(0, 0, size.width, content_height));
             let page = usize::from(regions[1].height.saturating_sub(3)).max(1);
-            view.history.tick(target, browser.git_generation, !view.git_hidden && content_height >= 9 && size.width >= 12, page).await;
+            let graph_visible = !view.git_hidden && content_height >= 9 && size.width >= 12;
+            git_watch.context(target.clone(), browser.git_generation, graph_visible);
+            view.history.tick(target, browser.git_generation, graph_visible, page).await;
             if !view.history.present() { view.git_focus = false; }
             // Finish the bounded operation and archive restoration before exiting.
             if (signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
@@ -2546,6 +2576,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             // Discard pending metadata events before starting a fresh generation.
                             while discovery.rx.try_recv().is_ok() {}
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
+                            git_watch.stop();
                             git_discovery.shutdown().await;
                             view.history.shutdown().await;
                             crate::git::drain_reads().await;
@@ -2590,6 +2621,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.is_some());
             let mut wait = Duration::from_millis(if busy { 40 } else { 250 });
             if let Some(deadline) = idle.deadline { wait = wait.min(deadline.saturating_duration_since(std::time::Instant::now())); }
+            if !git_discovery.pending() && !view.history.loading() {
+                if let Some(deadline) = git_watch.deadline() { wait = wait.min(deadline.saturating_duration_since(std::time::Instant::now())); }
+            }
             if event::poll(wait)? {
                 idle.wake();
                 let incoming=event::read()?;
@@ -2742,6 +2776,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             discovery.close(&mut browser).await;
                             while discovery.rx.try_recv().is_ok() {}
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
+                            git_watch.stop();
                             git_discovery.shutdown().await;
                             view.history.shutdown().await;
                             crate::git::drain_reads().await;
@@ -2805,6 +2840,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         Ok(())
     }
     .await;
+    git_watch.stop();
     view.history.shutdown().await;
     git_discovery.shutdown().await;
     crate::git::drain_reads().await;
@@ -3045,6 +3081,19 @@ mod idle_tests {
         assert!(!gate.ready(now + Duration::from_secs(61), false));
         gate.wake();
         assert!(gate.ready(now, false));
+    }
+    #[test]
+    fn watch_failure_remains_visible_alongside_transient_messages() {
+        let browser = Browser::new(vec![]);
+        let view = View {
+            git_watch_error: Some("native notifications unavailable".into()),
+            message: Some("Session returned".into()),
+            ..View::default()
+        };
+        let (_, _, message, _) = browser_footer(Rect::new(0, 0, 100, 30), &browser, &view);
+        assert!(message.contains("Git auto-update unavailable — r to refresh"));
+        assert!(message.contains("native notifications unavailable"));
+        assert!(message.contains("Session returned"));
     }
     #[test]
     fn age_deadlines_track_displayed_text_boundaries() {

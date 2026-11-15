@@ -148,6 +148,14 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 assert launch['cwd'] == str(linked), launch
                 assert launch['foreground'], launch
                 assert all(not alive(pid) for pid in pids), "Git processes survived session handoff"
+                descriptors = Path(f'/proc/{terminal.child.pid}/fd')
+                def no_watch_descriptors():
+                    for fd in descriptors.iterdir():
+                        try:
+                            if 'inotify' in os.readlink(fd): return False
+                        except FileNotFoundError: pass
+                    return True
+                terminal.wait(no_watch_descriptors)
                 if action == 'walkthrough':
                     # Preserve the selected folder while removing its Git registration.
                     (linked / '.git').unlink()

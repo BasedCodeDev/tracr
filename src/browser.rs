@@ -277,6 +277,26 @@ impl Browser {
         self.install_repository(repo);
         invalid
     }
+    /// Keep unrelated repositories current during a native metadata refresh.
+    pub fn invalidate_git_repository(
+        &mut self,
+        id: &std::path::Path,
+        topology: bool,
+    ) -> Vec<PathBuf> {
+        self.repository_errors
+            .insert(id.to_owned(), "Refreshing worktree information".into());
+        let mut paths = Vec::new();
+        for (path, record) in &mut self.ownership {
+            if (topology || record.stale())
+                && matches!(record.effective(), Some(crate::git_discovery::Outcome::Repository { repository, .. }) if repository.common_dir == id)
+            {
+                paths.push(path.clone());
+                record.previous = record.effective().cloned();
+                record.outcome = None;
+            }
+        }
+        paths
+    }
     pub fn invalidate_git(&mut self) {
         self.git_generation += 1;
         self.retired_repositories.clear();

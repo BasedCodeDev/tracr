@@ -33,3 +33,5 @@ pub mod git;
 pub mod git_discovery;
 
 pub mod git_history;
+
+pub mod git_watch;

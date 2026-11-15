@@ -115,3 +115,29 @@ Measured parent CPU (% of one core), before → after:
 All final samples recorded zero idle Git commands, zero reaped-child CPU and zero terminal output bytes. Post-sample input-to-output response was 7.70–12.79 ms in release and 21.25–29.94 ms in debug. Raw final records: `/tmp/tracr-cpu-verified-release.jsonl` and `/tmp/tracr-cpu-verified-debug.jsonl`. These are temporary local artifacts; this table preserves the results. The final relative-time correction was subsequently verified with expanded boundary tests and a rebuilt debug idle check; it does not affect the old fixture timestamps used for these measurements.
 
 Validation completed: the offline verifier passed formatting, build, Clippy, Rust/Python tests and all terminal checks except an outdated empty-folder text expectation (`folder_check`, expecting “matching”). That expectation now matches the existing “No sessions currently shown” UI; the complete folder helper passed on rerun, including `scripts/dev.sh`. The rebuilt debug idle helper also passed. Expanded relative-time unit tests, final Clippy, formatting and `git diff --check` passed. Full run logs: `/tmp/tracr-check-ivm_f5b2`; focused reruns: `/tmp/tracr-folder-final.log`, `/tmp/tracr-idle-final.log`, `/tmp/tracr-cpu-clippy-final.log`. No live Codex acceptance was requested or run in this increment.
+
+## Native metadata watching
+
+Implemented native-only active-repository watching; optional polling fallback was explicitly deferred. The watcher has a bounded mailbox and no Git subprocess or filesystem scan in its callback. Access, index, lock and timestamp-only notifications are filtered. Checkpoint/subscription and native rescan events reconcile only the active repository; graph work remains deferred while hidden.
+
+- Controlled tests cover 200 ms debounce, the one-second burst cap, busy-read coalescing, old mailbox isolation, failure/retry checkpoints, runtime errors, overflow, filtered paths and subscription scope.
+- Native fixtures cover ordinary and bare Git repositories using both files and reftable reference storage, nested/new refs, packed refs, worktree creation/removal and detached checkout HEADs. Reftable cases report a skip when the installed Git cannot initialize that storage format.
+- Atomic replacement and missing-directory fixtures verify HEAD rename, new refs directories, removal and re-creation of refs directories, and subsequent writes.
+- The terminal watcher check verifies external commits, branch/tag updates, detached HEAD, manual selection preservation, hidden history with zero graph commands, worktree addition/removal, quiet source/read-only Git activity and active-repository switching.
+- Lifecycle acceptance additionally checks that no inotify descriptors survive session handoff. Shutdown unregisters paths and waits for the native callback lifetime to end. Existing worker cancellation/reaping tests remain enabled.
+- Footer failure coverage checks that the persistent warning and details remain present alongside transient messages.
+
+Repeated 30-second idle samples with native watching enabled (1,000 sessions, 240×80 terminal; same fixture and method as the CPU correction):
+
+| Settled view | Debug CPU % | Release CPU % |
+| --- | ---: | ---: |
+| Plain folder | 0.067 | 0.033 |
+| Visible Git history | 0.033 | 0.000 |
+| Hidden Git history | 0.067 | 0.033 |
+| Linked checkout with old HEAD | 0.033 | 0.000 |
+
+Every sample recorded zero idle Git commands, zero reaped-child CPU and zero terminal output. Input-to-output response was 7.47–10.56 ms in release and 21.01–28.26 ms in debug. Raw local artifacts: `/tmp/tracr-watch-cpu-release.jsonl` and `/tmp/tracr-watch-cpu-debug.jsonl`. These are synthetic measurements, not hard CPU guarantees; zero means no CPU tick was observed during the window. Later changes add failure-path retry and warning coverage without changing settled successful-path work.
+
+The first full offline verifier passed all stages (logs `/tmp/tracr-check-j5kup7lw`). Expanded project-switch/manual-selection terminal checks also passed. The final run additionally covers repository-scoped recovery of stale ownership after a transient discovery failure. Native x86_64 Linux debug/release builds are available; musl cross-builds were not run because only the x86_64 GNU Rust target is installed. Live Codex and broad release acceptance remain separate from this increment.
+
+Final verification passed every offline verifier stage, including the expanded watcher and handoff checks: `/tmp/tracr-check-6fxt1zno`. Final native release build, formatting and `git diff --check` passed. The increment is complete; changes are not committed yet.
