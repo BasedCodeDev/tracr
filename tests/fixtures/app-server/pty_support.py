@@ -23,9 +23,16 @@ class Terminal:
                                       preexec_fn=setup, env={**(env if env is not None else os.environ), 'XDG_STATE_HOME': (env or {}).get('XDG_STATE_HOME', self.state.name), 'TERM':'xterm-256color'})
         self.output = bytearray()
     def resize(self, rows, cols):
+        changed = getattr(self, 'dimensions', None) != (rows, cols)
+        self.dimensions = (rows, cols)
+        offset = len(self.output) if hasattr(self, 'output') else 0
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
-        if hasattr(self, 'child'):
+        if hasattr(self, 'child') and changed:
             self.child.send_signal(signal.SIGWINCH)
+            # Ratatui clears the screen when adopting new dimensions. Wait for
+            # that redraw before sending keys: old screen text can otherwise
+            # satisfy expect() while SIGWINCH is still being processed.
+            self.wait(lambda: b'\x1b[2J' in self.output[offset:])
     def text(self):
         # Reconstruct cursor-addressed updates; stripping ANSI loses unchanged
         # characters when Ratatui redraws only differences.

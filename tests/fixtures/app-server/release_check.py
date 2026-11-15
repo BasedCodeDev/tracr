@@ -27,6 +27,7 @@ for attached in [False,True]:
                 t.expect('c Copy message');t.send(b'c');t.expect('Message copied')
                 report=capture.read_text();assert str(old) in report and str(new) in report and 'Close it and retry' in report
                 t.send(b'\x1b')
+                t.wait(lambda: "Couldn't relink session" not in t.text())
             else:t.expect('Session relinked and verified.')
             assert json.loads((home/'native.json').read_text())['cwd']==str(old if attached else new)
             t.finish()
