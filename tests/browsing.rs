@@ -1387,6 +1387,64 @@ async fn linked_checkout_is_projected_under_repository_and_aggregates_sessions()
     assert_eq!(browser.visible().len(), 1);
 }
 
+#[test]
+fn worktrees_follow_graph_order_without_moving_the_project_or_selection() {
+    let mut browser = Browser::new(vec![]);
+    let id = PathBuf::from("/project/.git");
+    let wt = |path: &str, head: &str| tracr::git::Worktree {
+        path: path.into(),
+        head: Some(head.into()),
+        branch: Some(format!("refs/heads/{head}")),
+        bare: false,
+        locked: false,
+        prunable: false,
+    };
+    browser.install_repository(tracr::git::Repository {
+        common_dir: id.clone(),
+        git_dir: id.clone(),
+        worktrees: vec![
+            wt("/project", "main"),
+            wt("/a", "older"),
+            wt("/b", "newer"),
+            wt("/c", "newer"),
+            wt("/d", "unloaded"),
+        ],
+    });
+    browser.expanded.insert("/project".into());
+    browser.open_folder("/a/src".into());
+    browser.select_folder(FolderFilter::Path("/a".into()));
+    let paths = |browser: &Browser| {
+        browser
+            .folder_rows()
+            .into_iter()
+            .filter_map(|row| match row.filter {
+                FolderFilter::Path(path) if path != Path::new("/") => Some(path),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    browser.order_worktrees(id.clone(), 1, ["newer", "main", "older"].into_iter());
+    assert_eq!(
+        paths(&browser),
+        ["/project", "/b", "/c", "/a", "/a/src", "/d"].map(PathBuf::from)
+    );
+    assert_eq!(browser.folder, FolderFilter::Path("/a".into()));
+    assert_eq!(
+        browser.repositories[&id].worktrees[0].path,
+        Path::new("/project")
+    );
+
+    // A new graph snapshot reorders whole subtrees, retaining expansion and selection.
+    browser.order_worktrees(id.clone(), 2, ["older", "newer", "main"].into_iter());
+    assert_eq!(
+        paths(&browser),
+        ["/project", "/a", "/a/src", "/b", "/c", "/d"].map(PathBuf::from)
+    );
+    browser.order_worktrees("/other/.git".into(), 3, ["newer", "older"].into_iter());
+    assert_eq!(paths(&browser)[1], Path::new("/a"));
+    assert_eq!(browser.folder, FolderFilter::Path("/a".into()));
+}
+
 #[tokio::test]
 async fn ownership_refresh_preserves_stale_membership_and_rejects_old_results() {
     let mut browser = loaded().await;

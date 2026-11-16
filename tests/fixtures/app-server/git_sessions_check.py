@@ -40,27 +40,33 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
     t = Terminal([binary, '--codex-home', tmp, '--codex-bin', str(fake), str(linked)], env)
     try:
         t.expect('Running └─ Task first · codex · feature')
-        t.send(b'\t\t\x1b[B')  # Folders -> Sessions -> Git -> first session
-        t.expect('Enter Session')
+        t.send(b'\x1b[1;3B')  # Alt+Down focuses Git from either upper pane.
+        t.expect('Enter Folder')
+        t.send(b'\x1b[B')  # First session beneath the commit.
+        t.expect('Enter Resume')
         settled = time.monotonic() + 1
         t.wait(lambda: time.monotonic() >= settled)
         count = (home/'git-reads').read_text()
         settings({'type': 'active', 'activeFlags': ['waitingOnUserInput']})
         t.expect('Input └─ Task first · codex · feature')
-        t.expect('Enter Session')
+        t.expect('Enter Resume')
         assert (home/'git-reads').read_text() == count, (count, (home/'git-reads').read_text())
         t.send(b'\r')
+        t.wait(lambda: (home/'launch.json').exists())
+        launch = json.loads((home/'launch.json').read_text())
+        assert launch['args'] == ['resume', '--cd', str(linked), '--', 'first'], launch
+        assert launch['cwd'] == str(linked) and launch['foreground'], launch
+        t.send(b'x')
         t.expect('i Info')
-        assert not (home/'resume.json').exists(), 'Enter must select, not resume'
         t.inspect('ID: first')
         t.send(b'\t\x1b[H\x1b[B')  # Sessions -> Git, then select the annotation
-        t.expect('Enter Session')
+        t.expect('Enter Resume')
         settings({'type': 'notLoaded'})
         t.wait(lambda: 'Task first · codex' not in t.text())
         t.expect('Enter Folder')
         settings({'type': 'idle'})
         t.expect('Idle └─ Task first · codex · feature')
         t.finish()
-        print('Git live sessions, selection handoff, disappearance, and cached graph: passed')
+        print('Git live sessions, direct resume, disappearance, and cached graph: passed')
     finally:
         t.close()

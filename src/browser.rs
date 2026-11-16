@@ -183,6 +183,7 @@ pub struct Browser {
     repository_candidates: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
     pub repository_errors: BTreeMap<PathBuf, String>,
     pub repositories: BTreeMap<PathBuf, crate::git::Repository>,
+    worktree_order: BTreeMap<PathBuf, (u64, BTreeMap<String, usize>)>,
     remembered_sessions: BTreeMap<PathBuf, SessionKey>,
     pub state_path: Option<PathBuf>,
     pub state_warning: Option<String>,
@@ -207,6 +208,7 @@ impl Browser {
             repository_candidates: BTreeMap::new(),
             repository_errors: BTreeMap::new(),
             repositories: BTreeMap::new(),
+            worktree_order: BTreeMap::new(),
             remembered_sessions: BTreeMap::new(),
             state_path: None,
             state_warning: None,
@@ -359,6 +361,7 @@ impl Browser {
         }).cloned().collect();
         for id in &retired {
             self.repositories.remove(id);
+            self.worktree_order.remove(id);
             self.repository_errors.remove(id);
             self.repository_candidates.remove(id);
             self.retired_repositories.insert(id.clone());
@@ -612,6 +615,27 @@ impl Browser {
             }),
         }
     }
+    /// Remember graph order per repository, including while another repository is viewed.
+    pub fn order_worktrees<'a>(
+        &mut self,
+        repository: PathBuf,
+        revision: u64,
+        commits: impl Iterator<Item = &'a str>,
+    ) {
+        if self
+            .worktree_order
+            .get(&repository)
+            .is_some_and(|(seen, _)| *seen == revision)
+        {
+            return;
+        }
+        let ranks = commits
+            .enumerate()
+            .map(|(rank, oid)| (oid.to_owned(), rank))
+            .collect();
+        self.worktree_order.insert(repository, (revision, ranks));
+    }
+
     pub fn folder_rows(&self) -> Vec<FolderRow> {
         let sessions: Vec<_> = self
             .all()
@@ -702,7 +726,19 @@ impl Browser {
                     continue;
                 }
                 let depth = path.components().count();
-                for worktree in repo.worktrees.iter().skip(1) {
+                let mut worktrees: Vec<_> = repo.worktrees.iter().skip(1).collect();
+                if let Some((_, ranks)) = self.worktree_order.get(&repo.common_dir) {
+                    // Stable sorting preserves inventory order for shared or unloaded heads.
+                    worktrees.sort_by_key(|worktree| {
+                        worktree
+                            .head
+                            .as_ref()
+                            .and_then(|head| ranks.get(head))
+                            .copied()
+                            .unwrap_or(usize::MAX)
+                    });
+                }
+                for worktree in worktrees {
                     let filter = FolderFilter::Path(worktree.path.clone());
                     rows.push(FolderRow {
                         count: count(&filter),

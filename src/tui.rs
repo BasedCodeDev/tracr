@@ -1571,12 +1571,12 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 "Git",
                 "Enter",
                 if selected_git_session(browser, view).is_some() {
-                    "Select session"
+                    "Resume session"
                 } else {
                     "Select worktree folder"
                 },
                 Some(if selected_git_session(browser, view).is_some() {
-                    ("Enter Session", "Enter Session")
+                    ("Enter Resume", "Enter Resume")
                 } else {
                     ("Enter Folder", "Enter Folder")
                 }),
@@ -2970,6 +2970,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                     view.git_focus = false;
                     view.focus = 1;
                     view.message = None;
+                    return execute_command(Command::Resume, browser, view);
                 }
                 return Action::Continue;
             }
@@ -3371,6 +3372,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let page = usize::from(git_area.map_or(0, |area| area.height.saturating_sub(3))).max(1);
             git_watch.context(target.clone(), browser.git_generation, graph_visible);
             view.history.tick(target, browser.git_generation, graph_visible, page).await;
+            if let Some(repository) = view.history.repository().filter(|_| !view.history.rows.is_empty()) {
+                browser.order_worktrees(repository, view.history.revision(), view.history.rows.iter().filter_map(|row| row.oid.as_deref()));
+            }
             if !view.history.present() { view.git_focus = false; }
             {
                 let mut presentation = view.git_sessions.borrow_mut();
@@ -3849,7 +3853,7 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn git_session_rows_render_and_enter_selects_without_resuming() {
+    async fn git_session_rows_render_and_enter_relinks_missing_folder() {
         use crate::git_sessions::tests::{add_session, fixture};
         let (mut browser, history) = fixture().await;
         let key = add_session(
@@ -3881,7 +3885,7 @@ mod cleanup_tests {
         assert!(
             menu_entries(&browser, &view)
                 .iter()
-                .any(|e| e.label == "Select session")
+                .any(|e| e.label == "Resume session")
         );
         let mut annotation = selected_git_session(&browser, &view).unwrap();
         let mut name_column = None;
@@ -3968,7 +3972,7 @@ mod cleanup_tests {
                 &mut view,
                 KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
             ),
-            Action::Continue
+            Action::OpenRelink
         ));
         assert_eq!(view.context(), 1);
         assert_eq!(browser.folder, FolderFilter::Path("/worktree/src".into()));
@@ -3981,6 +3985,48 @@ mod cleanup_tests {
                 .iter()
                 .any(|r| r.filter == browser.folder)
         );
+    }
+
+    #[tokio::test]
+    async fn git_session_enter_resumes_selected_session_in_one_step() {
+        use crate::git_sessions::tests::{add_session, fixture};
+        let cwd = tempfile::tempdir().unwrap();
+        for status in [
+            crate::domain::RuntimeStatus::Idle,
+            crate::domain::RuntimeStatus::Running,
+            crate::domain::RuntimeStatus::Waiting {
+                approval: false,
+                input: true,
+            },
+        ] {
+            let (mut browser, history) = fixture().await;
+            let key = add_session(
+                &mut browser,
+                "Direct resume",
+                cwd.path().to_str().unwrap(),
+                "/worktree",
+                "/repo/.git",
+                status,
+                1,
+            );
+            let mut view = View {
+                history,
+                git_focus: true,
+                ..View::default()
+            };
+            press(&mut browser, &mut view, KeyCode::Down);
+            assert!(matches!(
+                handle_key(
+                    &mut browser,
+                    &mut view,
+                    KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+                ),
+                Action::ResumeSelected
+            ));
+            assert_eq!(browser.selected, Some(key));
+            assert_eq!(browser.folder, FolderFilter::Path(cwd.path().into()));
+            assert_eq!(view.context(), 1);
+        }
     }
 
     #[tokio::test]
