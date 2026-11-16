@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         assert git(history, 'rev-parse', 'HEAD') == first
         assert not (created / '.worktrees').exists()
         # Wait for refreshed ownership before opening the next operation.
-        t.expect('[HEAD] [from-history]')
+        t.expect('[HEAD] [◇ from-history]')
         # Existing branch rejection retains the editable input.
         t.send(b'?\x1b[F')
         t.wait(lambda: 'Wait for Git discovery to finish.' not in t.text())
