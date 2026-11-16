@@ -9,9 +9,12 @@ import subprocess
 import sys
 import termios
 import time
+import tempfile
+from pathlib import Path
 
 binary, fixture = sys.argv[1:]
-for action in ('q', 'ctrl-c', 'sigterm'):
+for action in ('q', 'ctrl-c', 'sigterm', 'reload'):
+    control = tempfile.TemporaryDirectory(prefix='tracr-reload-test-')
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 120, 0, 0))
     original = termios.tcgetattr(slave)
@@ -20,7 +23,7 @@ for action in ('q', 'ctrl-c', 'sigterm'):
         fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
     child = subprocess.Popen([binary, 'browse', '--fixture', fixture],
                              stdin=slave, stdout=slave, stderr=slave,
-                             preexec_fn=child_setup, env={**os.environ, 'TERM':'xterm-256color'})
+                             preexec_fn=child_setup, env={**os.environ, 'TERM':'xterm-256color', **({'TRACR_DEV_CONTROL': control.name} if action == 'reload' else {})})
     try:
         output = b''
         deadline = time.monotonic() + 10
@@ -29,7 +32,10 @@ for action in ('q', 'ctrl-c', 'sigterm'):
                 raise AssertionError(f'TUI did not start: {output!r}')
             if select.select([master], [], [], 0.1)[0]:
                 output += os.read(master, 65536)
-        if action == 'sigterm':
+        if action == 'reload':
+            assert (Path(control.name) / 'ready').exists()
+            (Path(control.name) / 'request').touch()
+        elif action == 'sigterm':
             # Wait until the signal handler is installed (the first frame follows setup).
             child.send_signal(signal.SIGTERM)
         else:
@@ -40,7 +46,9 @@ for action in ('q', 'ctrl-c', 'sigterm'):
                 raise AssertionError(f'TUI failed to exit ({action}); tail: {output[-1500:]!r}')
             if select.select([master], [], [], 0.1)[0]:
                 output += os.read(master, 65536)
-        assert child.returncode == 0, output
+        assert child.returncode == (75 if action == 'reload' else 0), output
+        if action == 'reload':
+            assert (Path(control.name) / 'ack').exists()
         assert termios.tcgetattr(slave) == original, 'terminal attributes not restored'
     finally:
         if child.poll() is None:
@@ -48,3 +56,4 @@ for action in ('q', 'ctrl-c', 'sigterm'):
         child.wait()
         os.close(master)
         os.close(slave)
+        control.cleanup()

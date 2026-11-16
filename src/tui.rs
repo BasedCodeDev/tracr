@@ -2593,6 +2593,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         ..View::default()
     };
     let signals = ShutdownSignals::new()?;
+    let mut dev_reload = crate::dev_reload::DevReload::new()?;
+    let mut reloading = false;
     let mut pending: Option<PendingResume> = None;
     let mut relink_task: Option<tokio::task::JoinHandle<RelinkResult>> = None;
     let mut folder_task: Option<tokio::task::JoinHandle<FolderMoveResult>> = None;
@@ -2662,7 +2664,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let modal_timer = view.folder_move.is_some() && now >= modal_deadline;
             if modal_timer { modal_deadline = now + Duration::from_millis(100); }
             let resized = signals.resize.swap(false, std::sync::atomic::Ordering::Relaxed);
-            let activity = view.worktree_create.as_ref().is_some_and(|modal| modal.ready()) || resized || candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll() || copy_ready || picker_ready || modal_timer
+            let reload_requested = dev_reload.requested();
+            let activity = reload_requested || view.worktree_create.as_ref().is_some_and(|modal| modal.ready()) || resized || candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll() || copy_ready || picker_ready || modal_timer
                 || pending.as_ref().is_some_and(|p| p.task.is_finished())
                 || relink_task.as_ref().is_some_and(|task| task.is_finished()) || folder_task.as_ref().is_some_and(|task| task.is_finished())
                 || !relink_rx.is_empty() || !folder_rx.is_empty()
@@ -2716,6 +2719,13 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             // Finish the bounded operation and archive restoration before exiting.
             if (signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
                 || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed)) && relink_task.is_none() && folder_task.is_none() && !view.worktree_create.as_ref().is_some_and(|modal| modal.executing) {
+                break;
+            }
+            // Reload is distinct from termination: never interrupt interactive Codex.
+            // That child is awaited above this loop; mutations must also settle first.
+            if reload_requested && relink_task.is_none() && folder_task.is_none()
+                && !view.worktree_create.as_ref().is_some_and(|modal| modal.executing) {
+                reloading = true;
                 break;
             }
             let worktree_ready = view.worktree_create.as_ref().is_some_and(|modal| modal.ready());
@@ -3130,6 +3140,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     guard.suspend()?;
     if let Some(warning) = browser.state_warning.as_ref() {
         eprintln!("tracr: {}", safe_text(warning));
+    }
+    if reloading && outcome.is_ok() {
+        dev_reload.acknowledge()?;
     }
     outcome
 }

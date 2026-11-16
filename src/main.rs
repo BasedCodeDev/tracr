@@ -136,7 +136,7 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     match command {
         Command::Browse { .. } => {
             tracr::tui::run(browser).await?;
-            Ok(0)
+            Ok(tracr::dev_reload::exit_code())
         }
         Command::List { json, .. } => {
             let mut discovery = Discovery::new();

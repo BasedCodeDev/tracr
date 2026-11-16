@@ -43,3 +43,6 @@ pub mod git_render;
 pub mod worktree_create;
 
 mod worktree_create_ui;
+
+#[doc(hidden)]
+pub mod dev_reload;

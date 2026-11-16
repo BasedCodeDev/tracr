@@ -83,6 +83,23 @@ override toolchain selection. The first build needs crates.io connectivity.
 Use `./scripts/dev.sh --help` for script options or `./scripts/dev.sh -- --help`
 for the application's help.
 
+Interactive browsing watches source files by default (requires Python 3). Saving a
+file rebuilds in the background and restarts tracr after a successful build.
+Compilation failures leave the current browser running; diagnostics are written
+to the temporary log printed at startup, which you can follow with `tail -f`.
+The log remains available after exit. Edits during a build queue another build.
+Reload waits for interactive Codex sessions and running file/session operations
+to finish. Temporary UI state resets; the existing saved-folder behavior applies.
+Quitting tracr exits the watcher, and commands such as `list --json` run once.
+
+Use `./scripts/dev.sh --once [arguments...]` for the original build-and-run
+workflow without Python or watching. Runner options must precede application arguments; `--` ends runner option
+parsing and the remaining arguments are passed unchanged to tracr. Non-terminal
+invocations also use the one-shot workflow. The watcher checks `src/`, Cargo
+and toolchain configuration, and development-runner scripts every 500 ms, with a
+300 ms debounce. Build outputs and unrelated files do not trigger rebuilds.
+Changes to the runner itself require restarting `dev.sh` to load its new logic.
+
 Install Rust using your preferred method, including the toolchain pinned in
 `rust-toolchain.toml` (1.99.1, with rustfmt and Clippy). Then run:
 

@@ -18,7 +18,7 @@ import time
 
 binary = str(Path(sys.argv[1]).resolve())
 fake = str(Path(__file__).with_name('fake.py').resolve())
-for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout'):
+for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout', 'reload'):
     with tempfile.TemporaryDirectory(prefix='tracr resume $ ') as directory:
         home = Path(directory)
         import shutil
@@ -36,7 +36,7 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout'):
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
         child = subprocess.Popen([binary, '--codex-home', directory, '--codex-bin', str(executable), str(home / 'listed')],
                                  stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup,
-                                 env={**os.environ, 'XDG_STATE_HOME': str(home/'state'), 'TERM': 'xterm-256color'})
+                                 env={**os.environ, 'XDG_STATE_HOME': str(home/'state'), 'TERM': 'xterm-256color', **({'TRACR_DEV_CONTROL': directory} if action == 'reload' else {})})
         output = bytearray()
         screen = Terminal.__new__(Terminal)
         screen.output = output
@@ -73,7 +73,14 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout'):
             assert launch['cwd'] == str(home / 'resume'), launch
             assert launch['args'] == ['resume', '--cd', str(home / 'resume'), '--', session_id], launch
             assert launch['home'] == directory
-            if action in ('sigterm', 'kill-timeout'):
+            if action == 'reload':
+                (home / 'request').touch()
+                time.sleep(1)
+                assert child.poll() is None
+                assert not (home / 'ack').exists()
+                os.kill(launch['pid'], 0)  # Active Codex must survive the request.
+                os.write(master, b'x')
+            elif action in ('sigterm', 'kill-timeout'):
                 child.send_signal(signal.SIGTERM)
             else:
                 return_mark=len(output)
@@ -92,7 +99,9 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout'):
                     wait(lambda: 'Session information' not in screen.text())
                 os.write(master, b'q')
             wait(lambda: child.poll() is not None)
-            assert child.returncode == 0, bytes(output)
+            assert child.returncode == (75 if action == 'reload' else 0), bytes(output)
+            if action == 'reload':
+                assert (home / 'ack').exists()
             assert termios.tcgetattr(slave) == original, 'terminal attributes not restored'
             try:
                 os.kill(launch['pid'], 0)
