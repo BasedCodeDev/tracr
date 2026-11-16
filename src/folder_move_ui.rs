@@ -112,7 +112,7 @@ impl Modal {
             busy: false,
             executing: false,
             message: Some(format!(
-                "Recorded phase: {}\n{}\nEnter attempts guarded completion. R cycles through unfinished operations.",
+                "Recorded phase: {}\n{}\nEnter attempts guarded completion. u cycles through unfinished operations.",
                 j.phase,
                 j.error.unwrap_or_default()
             )),
@@ -196,7 +196,7 @@ impl Modal {
                 Action::Continue
             };
         }
-        if key.code == KeyCode::Char('R') && self.recovery {
+        if key.code == KeyCode::Char('u') && self.recovery {
             return Action::RecoverRelink;
         }
         if key.code == KeyCode::Esc {

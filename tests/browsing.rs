@@ -489,7 +489,7 @@ async fn initial_folder_shows_direct_sessions_and_survives_empty_refresh() {
 }
 
 #[tokio::test]
-async fn arrows_navigate_panes_and_folders_outside_search() {
+async fn enter_and_escape_navigate_panes_outside_search() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tracr::tui::{View, handle_key};
     let mut browser = loaded().await;
@@ -509,19 +509,21 @@ async fn arrows_navigate_panes_and_folders_outside_search() {
         browser.open_folder(path.clone());
         browser.expanded.remove(&path);
         handle_key(&mut browser, &mut view, key(KeyCode::Enter));
-        assert!(browser.expanded.contains(&path));
-        assert_eq!(view.editing, editing);
-        handle_key(&mut browser, &mut view, key(KeyCode::Enter));
+        assert_eq!(view.focus, 1);
         assert!(!browser.expanded.contains(&path));
-        for expected in [1, 1, 1] {
-            handle_key(&mut browser, &mut view, key(KeyCode::Right));
-            assert_eq!(view.focus, expected);
+        assert_eq!(view.editing, editing);
+        for code in [
+            KeyCode::Right,
+            KeyCode::Left,
+            KeyCode::Char('h'),
+            KeyCode::Char('l'),
+        ] {
+            handle_key(&mut browser, &mut view, key(code));
+            assert_eq!(view.focus, 1);
             assert!(!browser.expanded.contains(&path));
         }
-        for _ in 0..3 {
-            handle_key(&mut browser, &mut view, key(KeyCode::Left));
-            assert_eq!(view.focus, 0);
-        }
+        handle_key(&mut browser, &mut view, key(KeyCode::Esc));
+        assert_eq!(view.focus, 0);
         handle_key(&mut browser, &mut view, key(KeyCode::Down));
         for expected in [1, 0, 1, 0] {
             handle_key(&mut browser, &mut view, key(KeyCode::Tab));
@@ -565,7 +567,7 @@ async fn guardian_metadata_is_hidden_without_dropping_other_sessions_or_pages() 
 }
 
 #[test]
-fn escape_matches_left_navigation_but_still_closes_help_and_cancels_resume() {
+fn escape_returns_to_folders_and_closes_help_and_cancels_resume() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tracr::tui::{Action, View, handle_key};
     let mut browser = Browser::new(vec![]);
@@ -573,7 +575,8 @@ fn escape_matches_left_navigation_but_still_closes_help_and_cancels_resume() {
     {
         let editing = false;
         for focus in 0..2 {
-            for code in [KeyCode::Esc, KeyCode::Left] {
+            {
+                let code = KeyCode::Esc;
                 let mut view = View {
                     focus,
                     editing,
@@ -946,7 +949,7 @@ async fn unlinked_rows_use_explicit_undimmed_labels_and_footer_preserves_primary
                     "{width}: {footer}"
                 );
                 assert!(line(upper + 1).ends_with(if width >= 80 {
-                    "l Relink"
+                    "R Relink"
                 } else if width >= 36 {
                     "i Info"
                 } else if width >= 24 {
@@ -1051,7 +1054,7 @@ async fn information_modal_is_requested_pinned_scrollable_and_blocks_browser_act
         );
     }
     view.help = true;
-    view.help_selected = 11; // Session information; Recover is hidden.
+    view.help_selected = 10; // Session information; Recover is hidden.
     handle_key(&mut browser, &mut view, key(KeyCode::Enter));
     assert!(view.info.is_some());
     assert!(!view.help);
@@ -1088,7 +1091,7 @@ async fn footer_and_menu_follow_focus_with_stable_shared_controls() {
                         && !context.contains("Info")
                         && !context.contains("Resume")
                 );
-                if width >= 36 {
+                if width >= 80 {
                     assert!(context.contains("m Move"));
                 }
             } else {
@@ -1096,7 +1099,7 @@ async fn footer_and_menu_follow_focus_with_stable_shared_controls() {
                 if width >= 80 {
                     assert!(
                         context.contains("i Info")
-                            && context.contains("l Relink")
+                            && context.contains("R Relink")
                             && context.contains("n New")
                     );
                 }

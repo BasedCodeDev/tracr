@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
     t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
     try:
         t.inspect('ID: session')
-        t.send(b'\x1b[Dm');t.expect('Destination folder')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
         # Edit the exact destination directly; no separate naming screen.
         t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r');t.expect('Enter confirms')
         t.expect('1 sessions')
@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
         t.expect(str(root/'moved'))
         t.send(b'\r');t.expect('Enter confirms')
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
-        assert 'R Recover' not in t.text()
+        assert 'u Recover' not in t.text()
         assert not old.exists()
         assert (root/'moved/file').read_text()=='unchanged'
         assert json.loads((home/'native.json').read_text())['cwd']==str(root/'moved')
@@ -37,19 +37,19 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
     data=json.loads(journal.read_text());data['phase']='verifying';journal.write_text(json.dumps(data))
     t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(root/'moved')],env)
     try:
-        t.expect('Unfinished folder move');t.expect('R Recover')
-        t.send(b'R');t.expect('Inspect/recover folder move')
+        t.expect('Unfinished folder move');t.expect('u Recover')
+        t.send(b'u');t.expect('Inspect/recover folder move')
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
-        assert 'R Recover' not in t.text()
+        assert 'u Recover' not in t.text()
         t.finish();t.close()
         archive=root/'archive';archive.mkdir()
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(root/'moved')],env)
         t.inspect('ID: session')
-        t.send(b'\x1b[Dm');t.expect('Destination folder')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
         t.send(b'\x1b[Z\x15'+(str(archive)+'/').encode()+b'\r');t.expect('Enter confirms')
         t.expect(str(archive/'moved'))
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
-        assert 'R Recover' not in t.text()
+        assert 'u Recover' not in t.text()
         assert (archive/'moved/file').read_text()=='unchanged'
         assert json.loads((home/'native.json').read_text())['cwd']==str(archive/'moved')
         t.finish()
@@ -72,7 +72,7 @@ for recovery in (False, True):
              'PATH':str(root)+':/usr/bin:/bin','COPY_CAPTURE':str(capture)}
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         try:
-            t.inspect('ID: session');t.send(b'\x1b[Dm');t.expect('Destination folder')
+            t.inspect('ID: session');t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
             t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r')
             if recovery:
                 t.expect('Enter confirms');t.send(b'\r')
@@ -84,7 +84,7 @@ for recovery in (False, True):
             assert str(old) in report and str(root/'moved') in report,report
             assert 'Technical details:' in report and '\n\n' in report
             assert 'injected update failure' in report if recovery else 'unsupported' in report,report
-            assert ('press R' in report)==recovery,report
+            assert ('press u' in report)==recovery,report
             assert 'Affected sessions: '+('1' if recovery else 'Not yet determined') in report
             t.send(b'\x1b');t.wait(lambda:'! Folder move failed' not in t.text())
             t.finish()

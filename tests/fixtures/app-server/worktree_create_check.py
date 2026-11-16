@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     try:
         t.expect('Second creation commit')
         # Folders menu and keyboard use the same action; escape before execution is inert.
-        t.send(b'\x1b[D?')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'?')
         t.expect('Create worktree')
         t.send(b'\x1b[F\r')
         t.expect('New branch')
@@ -98,7 +98,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     t = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(fake), str(project)], old_env)
     try:
         t.expect('Second creation commit')
-        t.send(b'\x1b[Dw')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'w')
         t.expect('requires Git 2.48 or newer')
         t.send(b'\x1b')
         t.wait(lambda: 'Create worktree' not in t.text())

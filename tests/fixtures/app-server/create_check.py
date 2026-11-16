@@ -60,10 +60,10 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
     t=Terminal(single,env)
     try:
         t.inspect('ID: created')
-        t.send(b'\x1b[D');t.send(b'n');t.send(b'?');t.expect('Actions & shortcuts')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'n');t.send(b'?');t.expect('Actions & shortcuts')
         assert not (homes[1]/'launch.json').exists()
         t.send(b'\x1b');t.wait(lambda:'Actions & shortcuts' not in t.text())
-        t.send(b'\x1b[Cn')
+        t.send(b'\rn')
         t.wait(lambda:(homes[1]/'launch.json').exists())
         launch=json.loads((homes[1]/'launch.json').read_text())
         assert launch['args']==['--cd',str(project)] and launch['cwd']==str(project)

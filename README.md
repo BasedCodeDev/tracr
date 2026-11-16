@@ -195,26 +195,29 @@ require those refresh actions. Polling fallback is not implemented yet.
 The folder and session panes show partial results while loading.
 Terminals narrower than 100 columns show the focused pane full-width.
 
-- Up / Down or `j/k`: navigate; Left selects Folders, Right selects Sessions
-  without wrapping.
+- Up / Down or `k/j`: select the previous / next item. In Folders, Right / `l`
+  expands a folder or selects its first child; Left / `h` collapses it or selects
+  its displayed parent. Enter focuses Sessions; Escape returns to Folders.
+  Left / Right and `h/l` do nothing in Sessions.
 - With a Git panel present, Tab / Shift-Tab toggles between it and the last
   focused upper pane, expanding collapsed history on entry.
   Page Up / Page Down scroll through history when it is focused.
   Without a Git repository, Tab / Shift-Tab switches upper panes.
 - In Git history, Home / End selects the first / last loaded commit; approaching
-  the end loads more history. Left / Right scrolls horizontally. Manual movement
+  the end loads more history. Left / Right or `h/l` scrolls horizontally. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
   root follows HEAD automatically. `g` collapses or expands history while Git has
   focus. Collapse leaves a focused
   strip with an Expand action; Escape returns focus to the upper browser. Leaving
   Git keeps its expanded/collapsed state, remembered across folders for this run.
-- Enter: expand or collapse the selected folder, resume a session, or relink a session whose folder is missing.
+- Enter in Sessions: resume a session, relink one whose folder is missing, or
+  create a session when the selected folder has none and creation is available.
 - `n` in Sessions: create a new session in the selected folder.
 - `w` (shown and enabled only when the selection supports creation) in Folders or expanded Git history: create a new worktree from checkout HEAD
   or the selected commit, respectively.
-- `l` in Sessions: relink the selected session. Choose an existing destination,
+- `R` in Sessions: relink the selected session. Choose an existing destination,
   press Enter to preview, then Enter again to confirm. Escape cancels before execution.
-- `R`: inspect/recover an unfinished relocation or folder move. Only shown and enabled
+- `u`: inspect/recover an unfinished relocation or folder move. Only shown and enabled
   when unfinished work exists. Recovery never recreates the old folder.
 - `/`: open the search modal. Type to filter results; each result shows its title
   and path. Up/Down selects a result; Enter opens its folder and highlights the
@@ -339,12 +342,12 @@ release work.
 
 ## Relink or relocate a session
 
-Select the session and press `l`, or choose **Relink session** from `?`. Supply an
+Select the session and press `R`, or choose **Relink session** from `?`. Supply an
 existing directory using the folder tree or the editable **New folder** field
 (absolute, `~/…`, or relative to tracr's launch directory).
 
 - Up/Down selects a folder and fills the path field, including while typing.
-- Enter in the tree expands or collapses the folder, just like the Folders tab.
+- Enter in the picker tree expands or collapses the folder.
 - Tab switches between the path field, tree, and **Use this folder** button.
 - Type or paste a path to reveal it in the tree. Ctrl+U clears the field.
 - Enter in the field or on **Use this folder** opens the preview; Esc cancels.
@@ -372,7 +375,7 @@ Restarting an older installed binary does not load these source changes.
 Failures remain in a **Couldn't relink session** dialog until you press Enter or
 Esc. The dialog explains whether tracr left the folder unchanged. If an operation
 may have changed the folder, **Relink needs recovery** directs you to close the
-dialog and press `R`. Up/Down scrolls long explanations; technical details are
+dialog and press `u`. Up/Down scrolls long explanations; technical details are
 included below the session and destination. Press `c` to copy the complete message
 as plain text, with paragraph breaks but no dialog borders or visual line wrapping.
 The dialog reports copy success or failure and stays open. Clipboard support uses
@@ -388,8 +391,8 @@ The original folder may still exist or be missing. Selecting the same directory,
 including a symlink alias, is rejected. Use the separate **Move folder** action below to move files and descendant sessions together.
 
 Private recovery journals live in `$XDG_STATE_HOME/tracr/relocations` (default
-`~/.local/state/tracr/relocations`). If execution is interrupted, press `R` to inspect
-and attempt guarded completion. Conflicting later changes are left untouched.
+`~/.local/state/tracr/relocations`). If execution is interrupted, press `u` to inspect
+and attempt guarded completion. Press `u` in recovery to cycle unfinished operations. Conflicting later changes are left untouched.
 Escape cannot abandon a running mutation; forced termination leaves a journal.
 
 See [relocation compatibility](docs/codex-relocation-compatibility.md) for the native

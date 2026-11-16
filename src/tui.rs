@@ -48,7 +48,7 @@ pub fn relink_error(
         &failure.detail
     };
     let outcome = if needs_recovery {
-        "The folder may already have changed. Close this dialog and press R to inspect/recover the operation."
+        "The folder may already have changed. Close this dialog and press u to inspect/recover the operation."
     } else if failure.kind == crate::relocation::FailureKind::PermissionProfile {
         "Its folder was not changed. Your session remains available, but tracr cannot move it with its current permission settings."
     } else {
@@ -100,7 +100,7 @@ fn show_folder_failure(view: &mut View, message: String, recovery: bool) {
             "Folder was not moved"
         };
         let outcome = if recovery {
-            "Files may already be at the destination. Close this dialog and press R to inspect and finish the move."
+            "Files may already be at the destination. Close this dialog and press u to inspect and finish the move."
         } else {
             "tracr did not move the folder during this attempt."
         };
@@ -1027,7 +1027,8 @@ enum Command {
     CyclePane,
     PreviousItem,
     NextItem,
-    ToggleFolder,
+    FolderLeft,
+    FolderRight,
     Resume,
     Info,
     Relink,
@@ -1091,23 +1092,17 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         (
             Recover,
             "General",
-            "R",
+            "u",
             "Inspect/recover relocation",
-            Some(("R Recover", "R Recover")),
+            Some(("u Recover", "u Recover")),
         ),
-        (
-            PreviousPane,
-            "Navigation",
-            "← / Esc",
-            "Select Folders",
-            None,
-        ),
+        (PreviousPane, "Navigation", "Esc", "Select Folders", None),
         (
             NextPane,
-            "Navigation",
-            "→",
+            "Folders",
+            "Enter",
             "Select Sessions",
-            Some(("←/→ Tabs", "←/→ Tabs")),
+            Some(("Enter Sessions", "Enter Sessions")),
         ),
         (
             PreviousItem,
@@ -1124,15 +1119,26 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             None,
         ),
     ];
-    entries.retain(|entry| entry.0 != Recover || view.recovery_available);
+    entries.retain(|entry| {
+        (entry.0 != Recover || view.recovery_available)
+            && (entry.0 != NextPane || view.context() == 0)
+            && (entry.0 != PreviousPane || view.context() == 1)
+    });
     if view.context() == 0 {
         entries.extend([
             (
-                ToggleFolder,
+                FolderLeft,
                 "Folders",
-                "Enter",
-                "Expand / collapse folder",
-                Some(("Enter Expand/collapse", "Enter Toggle")),
+                "← / h",
+                "Collapse folder / select parent",
+                Some(("←/→ h/l Tree", "←/→ Tree")),
+            ),
+            (
+                FolderRight,
+                "Folders",
+                "→ / l",
+                "Expand folder / select child",
+                None,
             ),
             (
                 MoveFolder,
@@ -1180,9 +1186,9 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             (
                 Relink,
                 "Sessions",
-                "l",
+                "R",
                 "Relink session",
-                Some(("l Relink", "l Relink")),
+                Some(("R Relink", "R Relink")),
             ),
         ]);
     }
@@ -1232,11 +1238,11 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 (
                     GitLeft,
                     "Git",
-                    "←",
+                    "← / h",
                     "Scroll left",
                     Some(("←/→ Scroll", "←/→ Scroll")),
                 ),
-                (GitRight, "Git", "→", "Scroll right", None),
+                (GitRight, "Git", "→ / l", "Scroll right", None),
                 (GitPageUp, "Git", "PageUp", "Previous page", None),
                 (GitPageDown, "Git", "PageDown", "Next page", None),
                 (GitHome, "Git", "Home", "First loaded commit", None),
@@ -1308,7 +1314,9 @@ fn worktree_unavailable(browser: &Browser, view: &View) -> Option<String> {
 fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<String> {
     match command {
         Command::CreateWorktree => worktree_unavailable(browser, view),
-        Command::ToggleFolder if !matches!(browser.folder, FolderFilter::Path(_)) => {
+        Command::FolderLeft | Command::FolderRight
+            if !matches!(browser.folder, FolderFilter::Path(_)) =>
+        {
             Some("Select a concrete folder first.".into())
         }
         Command::Info if selected_session(browser).is_none() => {
@@ -2134,7 +2142,7 @@ fn resume_hint(browser: &Browser, session: &crate::domain::SessionSummary) -> St
     }
     if is_unlinked(browser, session) {
         return relink_unavailable(browser)
-            .unwrap_or_else(|| "Folder missing — Enter or l to relink.".into());
+            .unwrap_or_else(|| "Folder missing — Enter or R to relink.".into());
     }
     "Enter to resume in this terminal; the destination is checked again before launch.".into()
 }
@@ -2190,7 +2198,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         match key.code {
             KeyCode::Esc => view.relink = None,
-            KeyCode::Char('R') if modal.recovery => return Action::RecoverRelink,
+            KeyCode::Char('u') if modal.recovery => return Action::RecoverRelink,
             KeyCode::Enter => {
                 return if modal.preview.is_some() {
                     Action::ApplyRelink
@@ -2339,8 +2347,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             KeyCode::Char('w') => Command::CreateWorktree,
             KeyCode::Up | KeyCode::Char('k') => Command::GitUp,
             KeyCode::Down | KeyCode::Char('j') => Command::GitDown,
-            KeyCode::Left => Command::GitLeft,
-            KeyCode::Right => Command::GitRight,
+            KeyCode::Left | KeyCode::Char('h') => Command::GitLeft,
+            KeyCode::Right | KeyCode::Char('l') => Command::GitRight,
             KeyCode::PageUp => Command::GitPageUp,
             KeyCode::PageDown => Command::GitPageDown,
             KeyCode::Home => Command::GitHome,
@@ -2364,21 +2372,23 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('r') => Command::Refresh,
         KeyCode::Char('i') if view.focus == 1 => Command::Info,
         KeyCode::Char('n') if view.focus == 1 => Command::Create,
-        KeyCode::Char('l') if view.focus == 1 => Command::Relink,
+        KeyCode::Char('R') if view.focus == 1 => Command::Relink,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
         KeyCode::Char('w') if view.focus == 0 => Command::CreateWorktree,
-        KeyCode::Char('R') => Command::Recover,
+        KeyCode::Char('u') => Command::Recover,
         KeyCode::Char('a') => Command::Archives,
         KeyCode::Tab => Command::CyclePane,
         KeyCode::BackTab => {
             view.message = None;
             Command::CyclePane
         }
-        KeyCode::Right => Command::NextPane,
-        KeyCode::Left | KeyCode::Esc => Command::PreviousPane,
+        KeyCode::Right | KeyCode::Char('l') if view.focus == 0 => Command::FolderRight,
+        KeyCode::Left | KeyCode::Char('h') if view.focus == 0 => Command::FolderLeft,
+        KeyCode::Esc => Command::PreviousPane,
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
-        KeyCode::Enter if view.focus == 0 => Command::ToggleFolder,
+        KeyCode::Enter if key.kind == KeyEventKind::Repeat => return Action::Continue,
+        KeyCode::Enter if view.focus == 0 => Command::NextPane,
         KeyCode::Enter
             if view.focus == 1 && can_create(browser) && browser.visible().is_empty() =>
         {
@@ -2483,10 +2493,35 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 _ => {}
             }
         }
-        Command::ToggleFolder => {
-            if let FolderFilter::Path(path) = &browser.folder {
-                if !browser.expanded.remove(path) {
+        Command::FolderLeft | Command::FolderRight => {
+            let FolderFilter::Path(path) = browser.folder.clone() else {
+                return Action::Continue;
+            };
+            let rows = browser.folder_rows();
+            let Some(index) = rows.iter().position(|row| row.filter == browser.folder) else {
+                return Action::Continue;
+            };
+            let depth = rows[index].depth;
+            if command == Command::FolderRight {
+                if !browser.expanded.contains(&path) {
                     browser.expanded.insert(path.clone());
+                    if !browser
+                        .folder_rows()
+                        .get(index + 1)
+                        .is_some_and(|row| row.depth > depth)
+                    {
+                        browser.expanded.remove(&path);
+                    }
+                } else if let Some(child) = rows.get(index + 1).filter(|row| row.depth > depth) {
+                    browser.select_folder(child.filter.clone());
+                }
+            } else if !browser.expanded.remove(&path) {
+                if let Some(parent) = rows[..index]
+                    .iter()
+                    .rev()
+                    .find(|row| row.depth < depth && matches!(row.filter, FolderFilter::Path(_)))
+                {
+                    browser.select_folder(parent.filter.clone());
                 }
             }
         }
@@ -2573,10 +2608,10 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         .map(|p| p.to_path_buf());
     if let Some((count, folder)) = refresh_recovery(relocation_state.as_deref(), &mut view) {
         if folder {
-            view.message = Some("Unfinished folder move. Press R to inspect/recover.".into());
+            view.message = Some("Unfinished folder move. Press u to inspect/recover.".into());
         } else if count > 0 {
             view.message = Some(format!(
-                "{count} unfinished relocation(s). Press R to inspect/recover."
+                "{count} unfinished relocation(s). Press u to inspect/recover."
             ));
         }
     }
@@ -2955,7 +2990,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                 Ok(journals)=>if let Some(j)=journals.get(index){
                                     let p=j.preview.clone();
                                     let session=crate::domain::SessionSummary{key:p.key.clone(),title:"Unfinished relocation".into(),cwd:Some(p.old.clone()),created_at:p.created_at,updated_at:0,archived:p.archived,can_accept_direct_input:None,source_kind:None,git:None};
-                                    view.relink=Some(RelinkModal{session,input:p.target.display().to_string(),picker:None,preview:Some(p),recovery:true,busy:false,executing:false,error:Some(format!("Recorded phase: {}. Enter attempts guarded completion. R cycles through {} unfinished operation(s).",j.phase,journals.len()))});
+                                    view.relink=Some(RelinkModal{session,input:p.target.display().to_string(),picker:None,preview:Some(p),recovery:true,busy:false,executing:false,error:Some(format!("Recorded phase: {}. Enter attempts guarded completion. u cycles through {} unfinished operation(s).",j.phase,journals.len()))});
                                 }else{view.message=Some("No unfinished relocations.".into());},
                                 Err(e)=>view.message=Some(e),
                             }
@@ -3104,6 +3139,127 @@ mod cleanup_tests {
     use super::*;
 
     #[test]
+    fn tree_navigation_follows_visible_hierarchy_with_arrow_and_vim_keys() {
+        for (left, right) in [
+            (KeyCode::Left, KeyCode::Right),
+            (KeyCode::Char('h'), KeyCode::Char('l')),
+        ] {
+            let mut browser = Browser::new(vec![]);
+            browser.open_folder("/project/child/leaf".into());
+            browser.select_folder(FolderFilter::Path("/project".into()));
+            let mut view = View::default();
+            let press = |browser: &mut Browser, view: &mut View, code| {
+                handle_key(browser, view, KeyEvent::new(code, KeyModifiers::NONE))
+            };
+            press(&mut browser, &mut view, left);
+            assert!(!browser.expanded.contains(std::path::Path::new("/project")));
+            assert!(
+                browser
+                    .expanded
+                    .contains(std::path::Path::new("/project/child"))
+            );
+            press(&mut browser, &mut view, right);
+            assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
+            press(&mut browser, &mut view, right);
+            assert_eq!(browser.folder, FolderFilter::Path("/project/child".into()));
+            press(&mut browser, &mut view, left);
+            assert_eq!(browser.folder, FolderFilter::Path("/project/child".into()));
+            press(&mut browser, &mut view, left);
+            assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
+            browser.open_folder("/project/child/leaf".into());
+            browser
+                .expanded
+                .remove(std::path::Path::new("/project/child/leaf"));
+            press(&mut browser, &mut view, right);
+            assert!(
+                !browser
+                    .expanded
+                    .contains(std::path::Path::new("/project/child/leaf"))
+            );
+            press(&mut browser, &mut view, left);
+            assert_eq!(browser.folder, FolderFilter::Path("/project/child".into()));
+            browser.select_folder(FolderFilter::Path("/".into()));
+            press(&mut browser, &mut view, left);
+            press(&mut browser, &mut view, left);
+            assert_eq!(browser.folder, FolderFilter::Path("/".into()));
+            for filter in [FolderFilter::Unlinked, FolderFilter::Unknown] {
+                browser.select_folder(filter.clone());
+                let expanded = browser.expanded.clone();
+                press(&mut browser, &mut view, left);
+                press(&mut browser, &mut view, right);
+                assert_eq!(browser.folder, filter);
+                assert_eq!(browser.expanded, expanded);
+                press(&mut browser, &mut view, KeyCode::Enter);
+                assert_eq!(view.focus, 1);
+                press(&mut browser, &mut view, KeyCode::Esc);
+                assert_eq!(view.focus, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn worktree_parent_is_displayed_repository_and_enter_repeat_is_ignored() {
+        let mut browser = Browser::new(vec![]);
+        browser.open_folder("/project".into());
+        let worktree = |path: &str| crate::git::Worktree {
+            path: path.into(),
+            head: None,
+            branch: None,
+            bare: false,
+            locked: false,
+            prunable: false,
+        };
+        browser.install_repository(crate::git::Repository {
+            common_dir: "/project/.git".into(),
+            git_dir: "/project/.git".into(),
+            worktrees: vec![worktree("/project"), worktree("/elsewhere/feature")],
+        });
+        let mut view = View::default();
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        handle_key(&mut browser, &mut view, key(KeyCode::Right));
+        assert_eq!(
+            browser.folder,
+            FolderFilter::Path("/elsewhere/feature".into())
+        );
+        handle_key(&mut browser, &mut view, key(KeyCode::Left));
+        assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
+        let expanded = browser.expanded.clone();
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter));
+        assert_eq!(view.focus, 1);
+        assert_eq!(browser.expanded, expanded);
+        assert_eq!(
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Repeat)
+            ),
+            Action::Continue
+        );
+        assert_eq!(
+            handle_key(&mut browser, &mut view, key(KeyCode::Char('R'))),
+            Action::OpenRelink
+        );
+        assert_eq!(
+            handle_key(&mut browser, &mut view, key(KeyCode::Char('r'))),
+            Action::Refresh
+        );
+        for code in [
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Char('h'),
+            KeyCode::Char('l'),
+        ] {
+            assert_eq!(
+                handle_key(&mut browser, &mut view, key(code)),
+                Action::Continue
+            );
+            assert_eq!(view.focus, 1);
+        }
+        handle_key(&mut browser, &mut view, key(KeyCode::Esc));
+        assert_eq!(view.focus, 0);
+    }
+
+    #[test]
     fn worktree_action_tracks_selected_repository_availability() {
         use crate::git_discovery::{Outcome, Ownership};
         let path = std::path::PathBuf::from("/project");
@@ -3198,7 +3354,7 @@ mod cleanup_tests {
                 assert_eq!(
                     footer_shortcuts(240, &browser, &view)
                         .0
-                        .contains("R Recover"),
+                        .contains("u Recover"),
                     available
                 );
                 assert_eq!(
@@ -3206,7 +3362,7 @@ mod cleanup_tests {
                         handle_key(
                             &mut browser,
                             &mut view,
-                            KeyEvent::new(KeyCode::Char('R'), KeyModifiers::NONE)
+                            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)
                         ),
                         Action::RecoverRelink
                     ),
@@ -3299,7 +3455,13 @@ mod cleanup_tests {
         assert!(!view.help && !view.git_hidden);
         assert_eq!(view.history.selected, 7);
         assert_eq!(view.history.horizontal.get(), 3);
+        press(&mut browser, &mut view, KeyCode::Char('l'));
+        assert_eq!(view.history.horizontal.get(), 7);
+        press(&mut browser, &mut view, KeyCode::Char('h'));
+        assert_eq!(view.history.horizontal.get(), 3);
         view.git_size_limited = true;
+        press(&mut browser, &mut view, KeyCode::Char('l'));
+        press(&mut browser, &mut view, KeyCode::Char('h'));
         press(&mut browser, &mut view, KeyCode::Left);
         assert_eq!(view.history.horizontal.get(), 3);
         assert!(

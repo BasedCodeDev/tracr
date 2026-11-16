@@ -43,7 +43,7 @@ must never authorize a move. Built-in workspace protections for `.git`, `.agents
 `.codex` and `.aws` rebind to the new root in the verified native cases.
 
 Private journals use 0600 files in a 0700 directory and record checkpoints before
-mutation. Coordination locks serialize operations. `R` performs guarded recovery;
+mutation. Coordination locks serialize operations. `u` performs guarded recovery;
 changed identity, paths, settings, profiles or source configuration prevent it.
 Journal format 1 remains readable with additive profile/permission-validation
 fields. Old journals cannot implicitly authorize built-in or custom-policy changes.

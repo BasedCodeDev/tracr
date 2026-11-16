@@ -18,7 +18,7 @@ for attached in [False,True]:
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         try:
             t.inspect('ID: session');t.expect('Idle')
-            t.send(b'l');t.expect('Use this folder')
+            t.send(b'R');t.expect('Use this folder')
             t.send(b'\x15'+str(new).encode()+b'\r');t.expect('Enter confirms')
             assert 'thread/resume' not in (home/'live_requests.jsonl').read_text()
             t.send(b'\r');t.expect('Releasing idle session')
