@@ -110,7 +110,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     t = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(fake), str(project)], old_env)
     try:
         t.expect('Second creation commit')
-        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');t.send(b'w')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');select_worktree_action(t);t.send(b'\r')
         t.expect('requires Git 2.48 or newer')
         t.send(b'\x1b')
         t.wait(lambda: 'Create worktree' not in t.text())

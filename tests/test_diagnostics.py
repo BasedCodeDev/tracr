@@ -156,6 +156,9 @@ d.run_cli(main)
         code = '''from pathlib import Path
 import sys
 import diagnostics as d
+# Exercise concurrent report locking independently of unrelated /proc processes.
+# Busy scratch protection is covered by test_child_reaped_before_cleanup.
+d.busy_paths = lambda root: False
 run = d.DiagnosticRun('parallel', diagnostics=Path(sys.argv[1]))
 token = d._CURRENT.set(run)
 try:
