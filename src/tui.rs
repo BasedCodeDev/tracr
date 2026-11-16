@@ -119,6 +119,7 @@ fn show_folder_failure(view: &mut View, message: String, recovery: bool) {
 pub struct View {
     pub history: crate::git_history::History,
     pub git_hidden: bool,
+    pub git_size_limited: bool,
     pub git_watch_error: Option<String>,
     pub git_focus: bool,
     pub focus: usize,
@@ -137,6 +138,35 @@ pub struct View {
     pub recovery_index: usize,
     pub error_dialog: Option<crate::error_dialog::ErrorDialog>,
 }
+impl View {
+    fn context(&self) -> usize {
+        if self.git_focus { 2 } else { self.focus }
+    }
+}
+
+fn selection_style(focused: bool) -> Style {
+    Style::default().add_modifier(if focused {
+        Modifier::BOLD
+    } else {
+        Modifier::DIM
+    })
+}
+
+// Shared by rendering and history scheduling, including short-terminal fallback.
+fn git_regions(area: Rect, view: &View, present: bool) -> (Rect, Option<Rect>, bool) {
+    if !present || area.width < 12 || area.height < 2 {
+        return (area, None, false);
+    }
+    let expanded = !view.git_hidden && area.height >= 9;
+    let constraints = if expanded {
+        [Constraint::Percentage(67), Constraint::Percentage(33)]
+    } else {
+        [Constraint::Min(1), Constraint::Length(1)]
+    };
+    let regions = Layout::vertical(constraints).split(area);
+    (regions[0], Some(regions[1]), expanded)
+}
+
 fn restore() {
     let _ = terminal::disable_raw_mode();
     let _ = execute!(
@@ -320,8 +350,8 @@ fn relative_time(updated_at: i64, now: i64) -> String {
     unreachable!("elapsed is at least one minute")
 }
 
-fn footer_shortcuts(width: u16, browser: &Browser, focus: usize) -> (String, String) {
-    let entries = menu_entries(browser, focus);
+fn footer_shortcuts(width: u16, browser: &Browser, view: &View) -> (String, String) {
+    let entries = menu_entries(browser, view);
     let fit = |context: bool| {
         let hints: Vec<_> = entries
             .iter()
@@ -479,7 +509,7 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
         } else {
             message
         };
-    let (first, second) = footer_shortcuts(area.width, browser, view.focus);
+    let (first, second) = footer_shortcuts(area.width, browser, view);
     let separate_message = !message.is_empty()
         && unicode_width::UnicodeWidthStr::width(message.as_str())
             + unicode_width::UnicodeWidthStr::width(first.as_str())
@@ -512,38 +542,60 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(footer_height)])
         .split(area);
-    let content = if !view.git_hidden && view.history.present() && layout[0].height >= 9 {
-        let regions = Layout::vertical([Constraint::Percentage(67), Constraint::Percentage(33)])
-            .split(layout[0]);
-        let range = view
-            .history
-            .visible_range(usize::from(regions[1].height.saturating_sub(3)));
-        let selected = view.history.selected.saturating_sub(range.start);
-        let width = usize::from(regions[1].width.saturating_sub(4));
-        view.history.clamp_horizontal(width);
-        let items: Vec<_> = view.history.rows[range]
-            .iter()
-            .map(|row| {
-                ListItem::new(graph_viewport(
-                    view.history.row_spans(row),
-                    view.history.horizontal.get(),
-                    width,
-                ))
-            })
-            .collect();
-        let title = view.history.title();
-        frame.render_stateful_widget(
-            List::new(items)
-                .block(pane_block(&title, view.git_focus))
-                .highlight_symbol("> ")
-                .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
-            regions[1],
-            &mut ListState::default().with_selected(Some(selected)),
-        );
-        regions[0]
-    } else {
-        layout[0]
-    };
+    let (content, git_area, expanded) = git_regions(layout[0], view, view.history.present());
+    if let Some(git_area) = git_area {
+        if expanded {
+            let range = view
+                .history
+                .visible_range(usize::from(git_area.height.saturating_sub(3)));
+            let selected = view.history.selected.saturating_sub(range.start);
+            let width = usize::from(git_area.width.saturating_sub(4));
+            view.history.clamp_horizontal(width);
+            let items: Vec<_> = view.history.rows[range]
+                .iter()
+                .map(|row| {
+                    ListItem::new(graph_viewport(
+                        view.history.row_spans(row),
+                        view.history.horizontal.get(),
+                        width,
+                    ))
+                })
+                .collect();
+            let title = view.history.title();
+            frame.render_stateful_widget(
+                List::new(items)
+                    .block(pane_block(&title, view.git_focus))
+                    .highlight_symbol("> ")
+                    .highlight_style(selection_style(view.context() == 2)),
+                git_area,
+                &mut ListState::default().with_selected(Some(selected)),
+            );
+        } else {
+            let label = if view.git_hidden {
+                "Git history · collapsed"
+            } else {
+                "Git history · enlarge terminal"
+            };
+            frame.render_widget(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_type(if view.context() == 2 {
+                        BorderType::Thick
+                    } else {
+                        BorderType::Plain
+                    })
+                    .title(format!(" {label} "))
+                    .style(if view.context() == 2 {
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    }),
+                git_area,
+            );
+        }
+    }
     if area.width >= 100 {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
@@ -929,6 +981,17 @@ pub(crate) fn render_picker(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Command {
+    GitToggle,
+    GitReturn,
+    GitUp,
+    GitDown,
+    GitLeft,
+    GitRight,
+    GitPageUp,
+    GitPageDown,
+    GitHome,
+    GitEnd,
+    GitFollow,
     Help,
     PreviousPane,
     NextPane,
@@ -954,7 +1017,7 @@ struct MenuEntry {
     label: &'static str,
     footer: Option<(&'static str, &'static str)>,
 }
-fn menu_entries(browser: &Browser, focus: usize) -> Vec<MenuEntry> {
+fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     use Command::*;
     let mut entries = vec![
         (
@@ -1032,7 +1095,7 @@ fn menu_entries(browser: &Browser, focus: usize) -> Vec<MenuEntry> {
             None,
         ),
     ];
-    if focus == 0 {
+    if view.context() == 0 {
         entries.extend([
             (
                 ToggleFolder,
@@ -1092,6 +1155,55 @@ fn menu_entries(browser: &Browser, focus: usize) -> Vec<MenuEntry> {
                 Some(("l Relink", "l Relink")),
             ),
         ]);
+    }
+    if view.context() == 2 {
+        entries.retain(|entry| matches!(entry.0, Help | Quit | Refresh));
+        entries.push((
+            GitToggle,
+            "Git",
+            "g",
+            if view.git_hidden {
+                "Expand Git history"
+            } else {
+                "Collapse Git history"
+            },
+            Some(if view.git_hidden {
+                ("g Expand", "g Expand")
+            } else {
+                ("g Collapse", "g Collapse")
+            }),
+        ));
+        if !view.git_hidden && !view.git_size_limited {
+            entries.extend([
+                (
+                    GitUp,
+                    "Git",
+                    "↑ / k",
+                    "Previous commit",
+                    Some(("↑/↓ Scroll", "↑/↓ Scroll")),
+                ),
+                (GitDown, "Git", "↓ / j", "Next commit", None),
+                (
+                    GitLeft,
+                    "Git",
+                    "←",
+                    "Scroll left",
+                    Some(("←/→ Scroll", "←/→ Scroll")),
+                ),
+                (GitRight, "Git", "→", "Scroll right", None),
+                (GitPageUp, "Git", "PageUp", "Previous page", None),
+                (GitPageDown, "Git", "PageDown", "Next page", None),
+                (GitHome, "Git", "Home", "First loaded commit", None),
+                (GitEnd, "Git", "End", "Last loaded commit", None),
+            ]);
+        }
+        entries.push((
+            GitReturn,
+            "Navigation",
+            "Tab / Shift-Tab / Esc",
+            "Return to browser",
+            None,
+        ));
     }
     entries
         .into_iter()
@@ -1183,7 +1295,7 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         Constraint::Length(1),
     ])
     .split(inner);
-    let entries = menu_entries(browser, view.focus);
+    let entries = menu_entries(browser, view);
     let selected = view.help_selected.min(entries.len() - 1);
     let mut items = Vec::new();
     let mut last_section = "";
@@ -1509,8 +1621,8 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             let mut state = ListState::default().with_selected(selected);
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(pane_block("Folders", view.focus == 0))
-                    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+                    .block(pane_block("Folders", view.context() == 0))
+                    .highlight_style(selection_style(view.context() == pane))
                     .highlight_symbol("> "),
                 area,
                 &mut state,
@@ -1526,7 +1638,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 .as_secs()
                 .min(i64::MAX as u64) as i64;
             if sessions.is_empty() {
-                draw_empty_sessions(frame, area, browser, view.focus == 1);
+                draw_empty_sessions(frame, area, browser, view.context() == 1);
                 return;
             }
             let items: Vec<_> = sessions
@@ -1551,10 +1663,10 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             frame.render_stateful_widget(
                 List::new(items)
                     .block(
-                        pane_block(&browser.scope_label(), view.focus == 1)
+                        pane_block(&browser.scope_label(), view.context() == 1)
                             .padding(ratatui::widgets::Padding::new(0, right_padding, 1, 0)),
                     )
-                    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+                    .highlight_style(selection_style(view.context() == pane))
                     .highlight_symbol("> "),
                 area,
                 &mut state,
@@ -2031,7 +2143,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         return Action::Continue;
     }
     if view.help {
-        let entries = menu_entries(browser, view.focus);
+        let entries = menu_entries(browser, view);
         view.help_selected = view.help_selected.min(entries.len() - 1);
         let step = view.help_page_size.max(1);
         match key.code {
@@ -2111,62 +2223,41 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
-    if key.code == KeyCode::Char('g') {
-        view.git_hidden = !view.git_hidden;
-        if view.git_hidden {
-            view.git_focus = false;
-        }
-        return Action::Continue;
-    }
-    if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
-        && !view.git_hidden
-        && view.history.present()
-    {
+    if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && view.history.present() {
         view.git_focus = !view.git_focus;
+        if view.git_focus {
+            view.git_hidden = false;
+        }
         return Action::Continue;
     }
     if view.git_focus {
-        use crate::git_history::Movement;
-        let movement = match key.code {
-            KeyCode::Esc => {
-                view.git_focus = false;
-                None
-            }
-            KeyCode::Up | KeyCode::Char('k') => Some(Movement::Up),
-            KeyCode::Down | KeyCode::Char('j') => Some(Movement::Down),
-            KeyCode::Left => {
-                view.history.scroll_horizontal(false);
-                None
-            }
-            KeyCode::Right => {
-                view.history.scroll_horizontal(true);
-                None
-            }
-            KeyCode::PageUp => Some(Movement::PageUp),
-            KeyCode::PageDown => Some(Movement::PageDown),
-            KeyCode::Char('f') => {
-                view.history.follow();
-                None
-            }
-            KeyCode::Home => Some(Movement::Home),
-            KeyCode::End => Some(Movement::End),
-            KeyCode::Char('q') => return Action::Quit,
-            KeyCode::Char('r') => return Action::Refresh,
+        let command = match key.code {
+            KeyCode::Char('g') => Command::GitToggle,
+            KeyCode::Esc => Command::GitReturn,
+            KeyCode::Char('q') => Command::Quit,
+            KeyCode::Char('r') => Command::Refresh,
             KeyCode::Char('?') => {
-                view.help = true;
-                None
+                view.help_selected = 0;
+                Command::Help
             }
-            _ => None,
+            _ if view.git_hidden || view.git_size_limited => return Action::Continue,
+            KeyCode::Up | KeyCode::Char('k') => Command::GitUp,
+            KeyCode::Down | KeyCode::Char('j') => Command::GitDown,
+            KeyCode::Left => Command::GitLeft,
+            KeyCode::Right => Command::GitRight,
+            KeyCode::PageUp => Command::GitPageUp,
+            KeyCode::PageDown => Command::GitPageDown,
+            KeyCode::Home => Command::GitHome,
+            KeyCode::End => Command::GitEnd,
+            KeyCode::Char('f') => Command::GitFollow,
+            _ => return Action::Continue,
         };
-        if let Some(movement) = movement {
-            view.history.navigate(movement);
-        }
-        return Action::Continue;
+        return execute_command(command, browser, view);
     }
     let command = match key.code {
         KeyCode::Char('?') => {
             view.help = true;
-            view.help_selected = menu_entries(browser, view.focus)
+            view.help_selected = menu_entries(browser, view)
                 .iter()
                 .position(|entry| unavailable(entry.command, browser).is_none())
                 .unwrap_or(0);
@@ -2204,6 +2295,28 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
 
 fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> Action {
     match command {
+        Command::GitToggle => view.git_hidden = !view.git_hidden,
+        Command::GitReturn => view.git_focus = false,
+        Command::GitLeft => view.history.scroll_horizontal(false),
+        Command::GitRight => view.history.scroll_horizontal(true),
+        Command::GitFollow => view.history.follow(),
+        Command::GitUp
+        | Command::GitDown
+        | Command::GitPageUp
+        | Command::GitPageDown
+        | Command::GitHome
+        | Command::GitEnd => {
+            use crate::git_history::Movement;
+            view.history.navigate(match command {
+                Command::GitUp => Movement::Up,
+                Command::GitDown => Movement::Down,
+                Command::GitPageUp => Movement::PageUp,
+                Command::GitPageDown => Movement::PageDown,
+                Command::GitHome => Movement::Home,
+                _ => Movement::End,
+            });
+        }
+
         Command::Help => view.help = true,
         Command::Info => {
             if let Some(session) = selected_session(browser) {
@@ -2454,9 +2567,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let area = Rect::new(0, 0, size.width, size.height);
             let (_, _, _, footer_height) = browser_footer(area, &browser, &view);
             let content_height = size.height.saturating_sub(footer_height);
-            let regions = Layout::vertical([Constraint::Percentage(67), Constraint::Percentage(33)]).split(Rect::new(0, 0, size.width, content_height));
-            let page = usize::from(regions[1].height.saturating_sub(3)).max(1);
-            let graph_visible = !view.git_hidden && content_height >= 9 && size.width >= 12;
+            view.git_size_limited = content_height < 9 || size.width < 12;
+            let (_, git_area, graph_visible) = git_regions(Rect::new(0, 0, size.width, content_height), &view, target.is_some());
+            let page = usize::from(git_area.map_or(0, |area| area.height.saturating_sub(3))).max(1);
             git_watch.context(target.clone(), browser.git_generation, graph_visible);
             view.history.tick(target, browser.git_generation, graph_visible, page).await;
             if !view.history.present() { view.git_focus = false; }
@@ -2857,6 +2970,139 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
 #[cfg(test)]
 mod cleanup_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn git_context_collapse_and_focus_transitions() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View {
+            focus: 1,
+            ..View::default()
+        };
+        // An inactive tick establishes repository presence without spawning Git.
+        view.history
+            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+            .await;
+        let press = |browser: &mut Browser, view: &mut View, code| {
+            handle_key(browser, view, KeyEvent::new(code, KeyModifiers::NONE));
+        };
+        press(&mut browser, &mut view, KeyCode::Char('g'));
+        assert!(!view.git_hidden);
+        press(&mut browser, &mut view, KeyCode::Tab);
+        assert_eq!(view.context(), 2);
+        let entries = menu_entries(&browser, &view);
+        assert!(entries.iter().any(|e| e.command == Command::GitToggle));
+        assert!(!entries.iter().any(|e| matches!(
+            e.command,
+            Command::Resume
+                | Command::Relink
+                | Command::MoveFolder
+                | Command::Search
+                | Command::Archives
+                | Command::Recover
+        )));
+        view.history.selected = 7;
+        view.history.horizontal.set(3);
+        press(&mut browser, &mut view, KeyCode::Char('g'));
+        assert!(view.git_hidden);
+        assert_eq!(view.context(), 2);
+        assert!(
+            footer_shortcuts(100, &browser, &view)
+                .1
+                .contains("g Expand")
+        );
+        assert!(
+            !menu_entries(&browser, &view)
+                .iter()
+                .any(|e| e.command == Command::GitDown)
+        );
+        press(&mut browser, &mut view, KeyCode::Down);
+        assert_eq!(view.history.selected, 7);
+        press(&mut browser, &mut view, KeyCode::Char('?'));
+        let entries = menu_entries(&browser, &view);
+        view.help_selected = entries
+            .iter()
+            .position(|e| e.command == Command::GitToggle)
+            .unwrap();
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert!(!view.help && !view.git_hidden);
+        assert_eq!(view.history.selected, 7);
+        assert_eq!(view.history.horizontal.get(), 3);
+        view.git_size_limited = true;
+        press(&mut browser, &mut view, KeyCode::Left);
+        assert_eq!(view.history.horizontal.get(), 3);
+        assert!(
+            !menu_entries(&browser, &view)
+                .iter()
+                .any(|e| e.command == Command::GitLeft)
+        );
+        view.git_size_limited = false;
+        press(&mut browser, &mut view, KeyCode::Char('g'));
+        press(&mut browser, &mut view, KeyCode::BackTab);
+        assert_eq!(view.context(), 1);
+        assert!(view.git_hidden);
+        press(&mut browser, &mut view, KeyCode::Tab);
+        assert_eq!(view.context(), 2);
+        assert!(!view.git_hidden);
+        press(&mut browser, &mut view, KeyCode::Esc);
+        assert_eq!(view.context(), 1);
+        assert!(!view.git_hidden);
+    }
+
+    #[tokio::test]
+    async fn git_strip_layout_and_focus_rendering() {
+        let browser = Browser::new(vec![]);
+        let mut view = View {
+            git_focus: true,
+            git_hidden: true,
+            ..View::default()
+        };
+        view.history
+            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+            .await;
+        for width in [80, 120] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, 24)).unwrap();
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(0, 0)].fg, Color::DarkGray);
+            if width >= 100 {
+                assert_eq!(buffer[(60, 0)].fg, Color::DarkGray);
+            }
+            let text = buffer
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(text.contains("Git history · collapsed"));
+            assert!(text.contains("g Expand"));
+            let divider = buffer
+                .content
+                .iter()
+                .find(|cell| cell.symbol() == "━")
+                .unwrap();
+            assert_eq!(divider.fg, Color::Cyan);
+            assert!(divider.modifier.contains(Modifier::BOLD));
+            view.git_focus = false;
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let (_, _, _, footer_height) =
+                browser_footer(Rect::new(0, 0, width, 24), &browser, &view);
+            let divider = &buffer[(width - 1, 24 - footer_height - 1)];
+            assert_eq!(divider.symbol(), "─");
+            assert_eq!(divider.fg, Color::DarkGray);
+            assert!(!divider.modifier.contains(Modifier::BOLD));
+            view.git_focus = true;
+        }
+        let area = Rect::new(0, 0, 80, 20);
+        assert_eq!(git_regions(area, &view, true).1.unwrap().height, 1);
+        assert!(!git_regions(area, &view, true).2);
+        view.git_hidden = false;
+        assert!(git_regions(area, &view, true).2);
+        assert!(!git_regions(Rect::new(0, 0, 80, 5), &view, true).2);
+        assert!(!view.git_hidden);
+        assert!(git_regions(area, &view, false).1.is_none());
+        assert!(selection_style(false).add_modifier.contains(Modifier::DIM));
+    }
 
     #[test]
     fn availability_labels_and_relink_gate_follow_live_updates() {

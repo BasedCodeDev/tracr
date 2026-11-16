@@ -417,7 +417,7 @@ impl History {
         } else if self.exhausted {
             "end of history"
         } else {
-            "g hide · Tab focus"
+            "Tab focus"
         };
         let context = self
             .head

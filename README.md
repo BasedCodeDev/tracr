@@ -197,13 +197,17 @@ Terminals narrower than 100 columns show the focused pane full-width.
 
 - Up / Down or `j/k`: navigate; Left selects Folders, Right selects Sessions
   without wrapping.
-- With Git history visible, Tab / Shift-Tab toggles between it and the upper browser.
+- With a Git panel present, Tab / Shift-Tab toggles between it and the last
+  focused upper pane, expanding collapsed history on entry.
   Page Up / Page Down scroll through history when it is focused.
-  Without visible history, Tab / Shift-Tab switches upper panes.
+  Without a Git repository, Tab / Shift-Tab switches upper panes.
 - In Git history, Home / End selects the first / last loaded commit; approaching
   the end loads more history. Left / Right scrolls horizontally. Manual movement
-  stops HEAD following; `f` resumes it. `g` hides or reopens history, and Escape
-  returns focus to the upper browser.
+  stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
+  root follows HEAD automatically. `g` collapses or expands history while Git has
+  focus. Collapse leaves a focused
+  strip with an Expand action; Escape returns focus to the upper browser. Leaving
+  Git keeps its expanded/collapsed state, remembered across folders for this run.
 - Enter: expand or collapse the selected folder, resume a session, or relink a session whose folder is missing.
 - `n` in Sessions: create a new session in the selected folder.
 - `l` in Sessions: relink the selected session. Choose an existing destination,
@@ -257,7 +261,11 @@ visibility affects folder counts and search.
 
 Refresh retains old results while new pages load; failed sources remain visibly
 incomplete. A successful refresh removes records no longer listed by that source.
-The browser has two panes: Folders and Sessions. The footer and `?` action menu
+The upper browser has two panes: Folders and Sessions. Git history has its own
+action context: only the focused pane is highlighted, and its footer and `?` menu
+show the applicable actions. Git offers Collapse/Expand and, when expanded,
+commit navigation and horizontal scrolling. Short terminals show a compact Git
+strip until there is enough room for the graph. The footer and `?` action menu
 follow the selected pane: folder expansion and moving belong to Folders; resume,
 Info, and relinking belong to Sessions. Shared controls stay in the same order,
 with Help and Quit first. Both action rows are right-aligned. Feedback shares

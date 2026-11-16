@@ -73,7 +73,8 @@ os.execv(os.environ['PROBE_GIT'], [os.environ['PROBE_GIT'], *sys.argv[1:]])
             if case != 'plain':
                 term.expect('[HEAD]')
             if case == 'hidden':
-                term.send(b'g')
+                term.send(b'\tg')
+                term.expect('Git history · collapsed')
             pause(3)
             start_calls = len(calls())
             before = cpu()

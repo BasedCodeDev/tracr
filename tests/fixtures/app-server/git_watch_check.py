@@ -59,7 +59,7 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
         t.send(b'f'); t.expect('following HEAD')
         git('checkout', '--detach', '-q'); t.expect('detached HEAD')
         git('checkout', '-q', 'main'); t.expect('Git history — main')
-        t.send(b'g'); t.wait(lambda: 'Git history' not in t.text()); settle()
+        t.send(b'g'); t.expect('Git history · collapsed'); settle()
         mark = len(read_calls())
         linked = root/'elsewhere'
         git('worktree', 'add', '-qb', 'watch-linked', str(linked))
@@ -74,7 +74,7 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
         git('-C', str(other), 'branch', 'inactive-change'); settle(2)
         assert len(read_calls()) == mark, read_calls()[mark:]
         assert len(t.output) == before, 'Unexpected unchanged-screen output'
-        t.send(b'/Other project session'); t.expect('Other project session')
+        t.send(b'\t/Other project session'); t.expect('Other project session')
         t.send(b'\r'); t.expect('Other initial'); settle()
         mark = len(read_calls()); before = len(t.output)
         commit('Inactive old repository'); settle(1)
