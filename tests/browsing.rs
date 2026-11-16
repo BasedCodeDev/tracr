@@ -512,12 +512,17 @@ async fn enter_and_escape_navigate_panes_outside_search() {
         assert_eq!(view.focus, 1);
         assert!(!browser.expanded.contains(&path));
         assert_eq!(view.editing, editing);
-        for code in [KeyCode::Right, KeyCode::Char('h'), KeyCode::Char('l')] {
+        for code in [
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Char('h'),
+            KeyCode::Char('l'),
+        ] {
             handle_key(&mut browser, &mut view, key(code));
             assert_eq!(view.focus, 1);
             assert!(!browser.expanded.contains(&path));
         }
-        for code in [KeyCode::Esc, KeyCode::Left, KeyCode::Backspace] {
+        for code in [KeyCode::Esc, KeyCode::Backspace] {
             view.focus = 1;
             handle_key(&mut browser, &mut view, key(code));
             assert_eq!(view.focus, 0);

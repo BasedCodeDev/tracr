@@ -1439,7 +1439,7 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         (
             PreviousPane,
             "Navigation",
-            "Esc / ← / Backspace",
+            "Esc / Backspace",
             "Select Folders",
             None,
         ),
@@ -1477,14 +1477,18 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 "Folders",
                 "← / h",
                 "Collapse folder / select parent",
-                Some(("←/→ h/l Tree", "←/→ Tree")),
+                None,
             ),
             (
                 FolderRight,
                 "Folders",
                 "→ / l",
-                "Expand folder / select child",
-                None,
+                "Expand folder / focus Sessions",
+                Some(if matches!(&browser.folder, FolderFilter::Path(path) if browser.expanded.contains(path)) {
+                    ("→/l Sessions", "→/l Sessions")
+                } else {
+                    ("→/l Expand", "→/l Expand")
+                }),
             ),
             (
                 MoveFolder,
@@ -2926,7 +2930,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('a') => Command::Archives,
         KeyCode::Right | KeyCode::Char('l') if view.focus == 0 => Command::FolderRight,
         KeyCode::Left | KeyCode::Char('h') if view.focus == 0 => Command::FolderLeft,
-        KeyCode::Left | KeyCode::Backspace if view.focus == 1 => Command::PreviousPane,
+        KeyCode::Backspace if view.focus == 1 => Command::PreviousPane,
         KeyCode::Esc => Command::PreviousPane,
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
@@ -3159,17 +3163,8 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             };
             let depth = rows[index].depth;
             if command == Command::FolderRight {
-                if !browser.expanded.contains(&path) {
-                    browser.expanded.insert(path.clone());
-                    if !browser
-                        .folder_rows()
-                        .get(index + 1)
-                        .is_some_and(|row| row.depth > depth)
-                    {
-                        browser.expanded.remove(&path);
-                    }
-                } else if let Some(child) = rows.get(index + 1).filter(|row| row.depth > depth) {
-                    browser.select_folder(child.filter.clone());
+                if !browser.expanded.insert(path) {
+                    view.focus = 1;
                 }
             } else if !browser.expanded.remove(&path) {
                 if let Some(parent) = rows[..index]
@@ -4258,7 +4253,7 @@ mod cleanup_tests {
     }
 
     #[test]
-    fn tree_navigation_follows_visible_hierarchy_with_arrow_and_vim_keys() {
+    fn right_expands_then_focuses_sessions_and_left_follows_displayed_parent() {
         for (left, right) in [
             (KeyCode::Left, KeyCode::Right),
             (KeyCode::Char('h'), KeyCode::Char('l')),
@@ -4277,9 +4272,22 @@ mod cleanup_tests {
                     .expanded
                     .contains(std::path::Path::new("/project/child"))
             );
+            let selected = browser.selected.clone();
             press(&mut browser, &mut view, right);
             assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
+            assert!(browser.expanded.contains(std::path::Path::new("/project")));
+            assert_eq!(view.focus, 0);
+            assert!(
+                footer_shortcuts(240, &browser, &view)
+                    .1
+                    .contains("→/l Sessions")
+            );
             press(&mut browser, &mut view, right);
+            assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
+            assert_eq!(browser.selected, selected);
+            assert_eq!(view.focus, 1);
+            press(&mut browser, &mut view, KeyCode::Esc);
+            press(&mut browser, &mut view, KeyCode::Down);
             assert_eq!(browser.folder, FolderFilter::Path("/project/child".into()));
             press(&mut browser, &mut view, left);
             assert_eq!(browser.folder, FolderFilter::Path("/project/child".into()));
@@ -4289,12 +4297,30 @@ mod cleanup_tests {
             browser
                 .expanded
                 .remove(std::path::Path::new("/project/child/leaf"));
+            assert!(
+                footer_shortcuts(240, &browser, &view)
+                    .1
+                    .contains("→/l Expand")
+            );
             press(&mut browser, &mut view, right);
             assert!(
-                !browser
+                browser
                     .expanded
                     .contains(std::path::Path::new("/project/child/leaf"))
             );
+            assert_eq!(view.focus, 0);
+            assert_eq!(
+                browser.folder,
+                FolderFilter::Path("/project/child/leaf".into())
+            );
+            press(&mut browser, &mut view, right);
+            assert_eq!(view.focus, 1);
+            assert_eq!(
+                browser.folder,
+                FolderFilter::Path("/project/child/leaf".into())
+            );
+            press(&mut browser, &mut view, KeyCode::Esc);
+            press(&mut browser, &mut view, left);
             press(&mut browser, &mut view, left);
             assert_eq!(browser.folder, FolderFilter::Path("/project/child".into()));
             browser.select_folder(FolderFilter::Path("/".into()));
@@ -4335,7 +4361,7 @@ mod cleanup_tests {
         });
         let mut view = View::default();
         let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
-        handle_key(&mut browser, &mut view, key(KeyCode::Right));
+        handle_key(&mut browser, &mut view, key(KeyCode::Down));
         assert_eq!(
             browser.folder,
             FolderFilter::Path("/elsewhere/feature".into())
@@ -4362,14 +4388,19 @@ mod cleanup_tests {
             handle_key(&mut browser, &mut view, key(KeyCode::Char('r'))),
             Action::Refresh
         );
-        for code in [KeyCode::Right, KeyCode::Char('h'), KeyCode::Char('l')] {
+        for code in [
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Char('h'),
+            KeyCode::Char('l'),
+        ] {
             assert_eq!(
                 handle_key(&mut browser, &mut view, key(code)),
                 Action::Continue
             );
             assert_eq!(view.focus, 1);
         }
-        for code in [KeyCode::Esc, KeyCode::Left, KeyCode::Backspace] {
+        for code in [KeyCode::Esc, KeyCode::Backspace] {
             view.focus = 1;
             handle_key(&mut browser, &mut view, key(code));
             assert_eq!(view.focus, 0);

@@ -213,9 +213,10 @@ The folder and session panes show partial results while loading.
 Terminals narrower than 100 columns show the focused pane full-width.
 
 - Up / Down or `k/j`: select the previous / next item. In Folders, Right / `l`
-  expands a folder or selects its first child; Left / `h` collapses it or selects
-  its displayed parent. Enter focuses Sessions; Escape, Left Arrow, or Backspace
-  returns to Folders. Right and `h/l` do nothing in Sessions.
+  expands a collapsed folder without changing selection; when already expanded,
+  it focuses Sessions for that folder. Left / `h` collapses the folder or selects
+  its displayed parent. Enter focuses Sessions directly; Escape or Backspace
+  returns to Folders. Left / Right and `h/l` do nothing in Sessions.
 - Alt+Left / Alt+Right moves between Folders and Sessions. Alt+Down focuses
   Git Worktrees and expands it if collapsed; Alt+Up returns to the last focused
   upper pane. Directions do not wrap. These shortcuts do nothing during dialogs,
