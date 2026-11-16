@@ -29,9 +29,9 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     try:
         t.expect('Second creation commit')
         # Folders menu and keyboard use the same action; escape before execution is inert.
-        t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'?')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'?\x1b[F')
         t.expect('Create worktree')
-        t.send(b'\x1b[F\r')
+        t.send(b'\r')
         t.expect('Starting commit:')
         t.send(b'cancelled')
         t.send(b'\r\r\r')

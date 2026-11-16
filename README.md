@@ -216,6 +216,10 @@ Terminals narrower than 100 columns show the focused pane full-width.
   expands a folder or selects its first child; Left / `h` collapses it or selects
   its displayed parent. Enter focuses Sessions; Escape, Left Arrow, or Backspace
   returns to Folders. Right and `h/l` do nothing in Sessions.
+- Alt+Left / Alt+Right moves between Folders and Sessions. Alt+Down focuses
+  Git Worktrees and expands it if collapsed; Alt+Up returns to the last focused
+  upper pane. Directions do not wrap. These shortcuts do nothing during dialogs,
+  search, or resume preparation; Alt+Down also does nothing without a Git pane.
 - Tab cycles Folders → Sessions → Git → Folders; Shift-Tab reverses the order.
   Without a Git panel, both keys switch between Folders and Sessions. Entering
   Git expands collapsed history, and leaving preserves its expansion state.

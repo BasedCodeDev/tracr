@@ -1347,6 +1347,10 @@ enum Command {
     NextPane,
     CyclePane,
     CyclePaneBack,
+    PaneUp,
+    PaneDown,
+    PaneLeft,
+    PaneRight,
     PreviousItem,
     NextItem,
     FolderLeft,
@@ -1614,6 +1618,34 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             "Return to previous upper pane",
             None,
         ));
+    }
+    let navigation_index = entries
+        .iter()
+        .position(|entry| entry.1 == "Navigation")
+        .unwrap_or(entries.len());
+    let directional = match view.context() {
+        0 => (PaneRight, "Navigation", "Alt+Right", "Focus Sessions", None),
+        1 => (PaneLeft, "Navigation", "Alt+Left", "Focus Folders", None),
+        _ => (
+            PaneUp,
+            "Navigation",
+            "Alt+Up",
+            "Focus previous upper pane",
+            None,
+        ),
+    };
+    entries.insert(navigation_index, directional);
+    if view.context() != 2 && view.history.present() {
+        entries.insert(
+            navigation_index + 1,
+            (
+                PaneDown,
+                "Navigation",
+                "Alt+Down",
+                "Focus Git Worktrees",
+                None,
+            ),
+        );
     }
     entries
         .retain(|entry| entry.0 != CreateWorktree || worktree_unavailable(browser, view).is_none());
@@ -2528,6 +2560,33 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
     if key.kind == KeyEventKind::Release {
         return Action::Continue;
     }
+    if key.modifiers == KeyModifiers::ALT {
+        let command = match key.code {
+            KeyCode::Up => Some(Command::PaneUp),
+            KeyCode::Down => Some(Command::PaneDown),
+            KeyCode::Left => Some(Command::PaneLeft),
+            KeyCode::Right => Some(Command::PaneRight),
+            _ => None,
+        };
+        if let Some(command) = command {
+            // These keys belong to pane navigation, never to a dialog's arrows.
+            if view.terminal_recovery.is_some()
+                || view.error_dialog.is_some()
+                || view.worktree_create.is_some()
+                || view.folder_move.is_some()
+                || view.relink.is_some()
+                || view.info.is_some()
+                || view.source_picker.is_some()
+                || view.worktree_picker.is_some()
+                || view.help
+                || view.editing
+                || view.preparing
+            {
+                return Action::Continue;
+            }
+            return execute_command(command, browser, view);
+        }
+    }
     if let Some(dialog) = view.terminal_recovery.as_mut() {
         use crate::terminal_recovery::Event;
         return match dialog.key(key) {
@@ -3019,6 +3078,23 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
         Command::Refresh => return Action::Refresh,
         Command::Archives => browser.include_archived = !browser.include_archived,
+        Command::PaneUp => view.git_focus = false,
+        Command::PaneDown => {
+            if !view.git_focus && view.history.present() {
+                view.git_focus = true;
+                view.git_hidden = false;
+            }
+        }
+        Command::PaneLeft => {
+            if !view.git_focus {
+                view.focus = 0;
+            }
+        }
+        Command::PaneRight => {
+            if !view.git_focus {
+                view.focus = 1;
+            }
+        }
         Command::CyclePane | Command::CyclePaneBack => {
             let count = if view.history.present() { 3 } else { 2 };
             let current = if view.git_focus && count == 3 {
@@ -4394,6 +4470,84 @@ mod cleanup_tests {
                 .unwrap()
                 .contains("Cannot inspect folder-move journal")
         );
+    }
+
+    #[tokio::test]
+    async fn alt_arrows_follow_layout_without_changing_selection_or_scrolling() {
+        for has_git in [false, true] {
+            let mut browser = Browser::new(vec![]);
+            browser.open_folder("/synthetic/repo/child".into());
+            let mut view = View::default();
+            if has_git {
+                view.history
+                    .tick(Some("/synthetic/repo".into()), 0, false, 1)
+                    .await;
+            }
+            view.history.selected = 7;
+            view.history.top.set(3);
+            view.history.horizontal.set(4);
+            view.history.following = true;
+            let folder = browser.folder.clone();
+            let expanded = browser.expanded.clone();
+            let selected = browser.selected.clone();
+            for limited in [false, true] {
+                view.git_size_limited = limited;
+                for upper in [0, 1] {
+                    for in_git in [false, true].into_iter().filter(|g| !g || has_git) {
+                        for key in [KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right] {
+                            view.focus = upper;
+                            view.git_focus = in_git;
+                            view.git_hidden = true;
+                            handle_key(
+                                &mut browser,
+                                &mut view,
+                                KeyEvent::new(key, KeyModifiers::ALT),
+                            );
+                            let expected = match (in_git, key) {
+                                (true, KeyCode::Up) => upper,
+                                (true, _) => 2,
+                                (false, KeyCode::Down) if has_git => 2,
+                                (false, KeyCode::Left) => 0,
+                                (false, KeyCode::Right) => 1,
+                                _ => upper,
+                            };
+                            assert_eq!(view.context(), expected);
+                            if !in_git && key == KeyCode::Down && has_git {
+                                assert!(!view.git_hidden);
+                            }
+                            assert_eq!(browser.folder, folder);
+                            assert_eq!(browser.selected, selected);
+                            assert_eq!(browser.expanded, expanded);
+                            assert_eq!(view.history.selected, 7);
+                            assert_eq!(view.history.top.get(), 3);
+                            assert_eq!(view.history.horizontal.get(), 4);
+                            assert!(view.history.following);
+                        }
+                    }
+                }
+            }
+            view.focus = 1;
+            view.git_focus = false;
+            for mode in 0..4 {
+                view.help = mode == 0;
+                view.editing = mode == 1;
+                view.preparing = mode == 2;
+                view.source_picker = (mode == 3).then_some(1);
+                view.help_selected = 2;
+                view.search_query = "unchanged".into();
+                for key in [KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right] {
+                    handle_key(
+                        &mut browser,
+                        &mut view,
+                        KeyEvent::new(key, KeyModifiers::ALT),
+                    );
+                    assert_eq!(view.context(), 1);
+                    assert_eq!(view.help_selected, 2);
+                    assert_eq!(view.search_query, "unchanged");
+                    assert_eq!(view.source_picker, (mode == 3).then_some(1));
+                }
+            }
+        }
     }
 
     #[tokio::test]

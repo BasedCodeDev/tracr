@@ -156,6 +156,14 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
             else:
                 terminal.expect('─ feature')
                 terminal.expect('Lifecycle root')
+                terminal.send(b'\x1b[1;3D')  # Alt+Left -> Folders
+                terminal.expect('Enter Sessions')
+                terminal.send(b'\x1b[1;3C')  # Alt+Right -> Sessions
+                terminal.expect('Enter Resume')
+                terminal.send(b'\x1b[1;3B')  # Alt+Down -> Git
+                terminal.expect('g Collapse')
+                terminal.send(b'\x1b[1;3A')  # Alt+Up -> remembered Sessions
+                terminal.expect('Enter Resume')
                 terminal.send(b'\t')
                 terminal.expect('g Collapse')
                 assert 'Enter Resume' not in terminal.text()
