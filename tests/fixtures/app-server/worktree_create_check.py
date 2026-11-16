@@ -6,15 +6,42 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pty_support import Terminal
 
 binary = str(Path(sys.argv[1]).resolve())
-def select_worktree_action(terminal):
-    terminal.send(b'?')
-    terminal.expect('Actions & shortcuts')
-    terminal.send(b'\x1b[F')
-    terminal.expect('> w Create worktree')
-    terminal.wait(lambda: 'Wait for Git discovery' not in terminal.text())
+def open_worktree(terminal, expected='Starting commit:', menu=False):
+    # Discovery can invalidate ownership between a rendered shortcut and a key.
+    # Retry only opening this non-mutating form; never retry preview or creation.
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if menu:
+            terminal.send(b'?')
+            terminal.expect('Actions & shortcuts')
+            terminal.send(b'\x1b[F')
+            try:
+                terminal.wait(lambda: '> w Create worktree' in terminal.text(), timeout=.5)
+            except AssertionError:
+                terminal.send(b'\x1b')
+                terminal.wait(lambda: 'Actions & shortcuts' not in terminal.text())
+                continue
+            terminal.send(b'\r')
+        else:
+            terminal.send(b'w')
+        try:
+            terminal.wait(lambda: expected in terminal.text(), timeout=.5)
+            return
+        except AssertionError:
+            screen = terminal.text()
+            if 'Actions & shortcuts' in screen:
+                terminal.send(b'\x1b')
+                terminal.wait(lambda: 'Actions & shortcuts' not in terminal.text())
+            elif 'Create worktree' in screen:
+                terminal.expect(expected)
+                return
+            elif 'Worktree information' in screen:
+                raise AssertionError('Worktree action unexpectedly opened information')
+    raise AssertionError(terminal.text()[-3000:])
 
 
 with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
@@ -37,10 +64,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     try:
         t.expect('Second creation commit')
         # Folders menu and keyboard use the same action; escape before execution is inert.
-        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');select_worktree_action(t)
-        t.expect('Create worktree')
-        t.send(b'\r')
-        t.expect('Starting commit:')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, menu=True)
         t.send(b'cancelled')
         t.send(b'\r\r\r')
         t.expect('Review new worktree')
@@ -50,8 +74,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         t.send(b'\x1b')
         t.wait(lambda: 'Create worktree' not in t.text())
         assert not (project / '.worktrees').exists()
-        t.send(b'w')
-        t.expect('Starting commit:')
+        open_worktree(t)
         t.send(b'feature/from-folder\r\r\r')
         t.expect('Review new worktree')
         t.expect('local exclusion /.worktrees/')
@@ -69,8 +92,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         t.expect('Second creation commit')
         t.send(b'\x1b[Z\x1b[B')
         t.expect('> ● ' + first[:7])
-        t.send(b'w')
-        t.expect('Starting commit:')
+        open_worktree(t)
         t.expect(first[:8])
         t.send(b'from-history\r\r\r')
         t.expect('Review new worktree')
@@ -83,10 +105,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         # Wait for refreshed ownership before opening the next operation.
         t.expect('[HEAD] [◇ from-history]')
         # Existing branch rejection retains the editable input.
-        t.expect('w Worktree');select_worktree_action(t)
-        t.wait(lambda: 'Wait for Git discovery to finish.' not in t.text())
-        t.send(b'\r')
-        t.expect('Starting commit:')
+        t.expect('w Worktree');open_worktree(t, menu=True)
         t.send(b'from-history\r\r\r')
         t.expect('That branch already exists')
         t.expect('from-history')
@@ -106,8 +125,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     t = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(fake), str(project)], old_env)
     try:
         t.expect('Second creation commit')
-        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');select_worktree_action(t);t.send(b'\r')
-        t.expect('requires Git 2.48 or newer')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, expected='requires Git 2.48 or newer')
         t.send(b'\x1b')
         t.wait(lambda: 'Create worktree' not in t.text())
         t.finish()
