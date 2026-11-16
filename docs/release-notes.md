@@ -1,13 +1,11 @@
-# tracr 0.4.0 — Git history and worktree browsing
+# tracr 0.5.0 — worktree creation and live Git navigation
 
-- Browse Git repositories and their registered worktrees alongside sessions, including checkouts outside the project folder.
-- Explore cached, colored Unicode commit graphs with branch and tag labels, progressive history loading, and horizontal scrolling. Press `g` to toggle history and `f` to follow the selected checkout's HEAD.
-- Refresh active repository branches, worktrees, and history automatically through native metadata notifications, with low idle CPU use. Manual navigation preserves the selected commit.
-- Choose registered worktrees as session relink destinations. Folders and Worktrees retain separate paths, and the destination is revalidated before the existing confirmation preview.
-- Use directional arrow navigation without wrapping between the folder and session panes.
-
-Native watching does not poll Git or recursively watch project files. If notifications
-are unavailable, use `r`, re-enter the repository, or reopen history to refresh.
+- Create reviewed Git worktrees from folders or selected history commits, with worktree creation offered only where available.
+- Browse worktrees in graph order, select their folders from history, and resume sessions directly from the Git pane.
+- See live sessions in Git history, linked worktrees marked with `◇`, and live uncommitted changes.
+- Navigate all panes consistently with Tab, Shift-Tab, directional Alt-arrow keys, and folder tree shortcuts. Right expands folders before focusing their sessions.
+- Use clearer modal controls, Git history scroll indicators, and explicit recovery for blocked session relinks.
+- Development launches watch for changes and reload gracefully by default.
 
 Install or update:
 
