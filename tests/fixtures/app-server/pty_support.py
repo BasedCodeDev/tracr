@@ -95,7 +95,7 @@ class Terminal:
         self.wait(lambda: text in self.text())
     def inspect(self, expected):
         self.expect('Sessions')
-        self.wait(lambda: 'Loading' not in self.text() and 'i Info' in self.text())
+        self.wait(lambda: all(marker not in self.text() for marker in ('Loading', 'refreshing', 'Fetching metadata')) and 'i Info' in self.text())
         self.send(b'i')
         self.expect('Session information')
         if expected.startswith('ID: '):

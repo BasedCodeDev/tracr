@@ -15,7 +15,7 @@ for mode in ['stop','refresh','unknown','attached','cancel']:
         def calls():return (home/'live_requests.jsonl').read_text()
         try:
             t.inspect('ID: session');t.expect('Idle');t.send(b'R');t.expect('Use this folder')
-            t.send(b'\x15'+str(new).encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms');t.send(b'\r\r')
+            t.send(b'\x15'+str(new).encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms');t.send(b'\r')
             t.expect('Background commands block relocation');t.expect('[Cancel]')
             assert '/terminate' not in calls()
             if mode=='cancel':
@@ -28,10 +28,11 @@ for mode in ['stop','refresh','unknown','attached','cancel']:
                 t.expect('sleep 300');t.expect('Stop listed commands and retry move')
                 t.resize(24,50);t.expect('[Cancel]');t.send(b'\x1b[6~');t.resize(80,240)
                 if mode=='refresh':
-                    state['terminals']=[];native.write_text(json.dumps(state));t.send(b'\t\r')
+                    state['terminals']=[];native.write_text(json.dumps(state));t.send(b'\t');t.expect('[Refresh]');t.send(b'\r')
                     t.expect('No background commands remain');t.expect('[Cancel]')
-                    t.send(b'\t\t\r')
-                else:t.send(b'\t\t\r')
+                    t.send(b'\t');t.expect('[Refresh]');t.send(b'\t');t.expect('[Retry move]');t.send(b'\r')
+                else:
+                    t.send(b'\t');t.expect('[Refresh]');t.send(b'\t');t.expect('[Stop listed commands and retry move]');t.send(b'\r')
                 if mode=='attached':
                     t.expect('Session is still loaded');t.send(b'\x1b');t.wait(lambda: 'Session is still loaded' not in t.text())
                 else:t.expect('Session relinked and verified.')
