@@ -199,6 +199,14 @@ The dev script builds inside the repository and launches from your caller direct
 so relative fixture and configuration arguments also resolve there.
 
 
+Linked worktrees use `◇` before their names in Folders and before their local branch
+labels in Git history. The main checkout and branches without linked worktrees stay
+unmarked. An amber `*` after a checkout or branch name means it has staged,
+unstaged, or untracked changes (ignored files are excluded). This also applies to
+the main checkout. File notifications refresh status without reloading history;
+press `i` on a folder for counts, or view them in session information. Counts can
+overlap when a file has both staged and unstaged changes.
+
 Git branches, worktree rows and history update automatically for the active
 repository using native metadata notifications. Hidden history pauses graph reads;
 worktree rows continue updating. Manual graph navigation preserves your selected
@@ -241,8 +249,8 @@ Terminals narrower than 100 columns show the focused pane full-width.
   Waiting sessions appear first, followed by errors, running, and idle sessions;
   newer sessions come first within each status. Unloaded and unknown sessions are
   omitted. Updates use the same live-status feed as Sessions, without reloading Git.
-- Enter on a Git session row selects its folder and session and focuses Sessions;
-  it does not resume the session. Enter on a commit selects its worktree folder,
+- Enter on a Git session row selects its folder and resumes the session,
+  or offers relinking if its folder is missing. Enter on a commit selects its worktree folder,
   offering a chooser when multiple worktrees match. Session rows appear as their
   HEAD commits become available in loaded history.
 - Enter in Sessions: resume a session, relink one whose folder is missing, or

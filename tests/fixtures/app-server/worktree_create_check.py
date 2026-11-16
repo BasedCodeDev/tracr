@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         assert not (project / '.gitignore').exists()
         # New worktree is selected in Folders, and its HEAD is followed.
         t.resize(40, 140)
-        t.expect('─ feature/from-folder')
+        t.expect('─ ◇ feature/from-folder')
         t.expect('Second creation commit')
         t.send(b'\x1b[Z\x1b[B')
         t.expect('> ● ' + first[:7])

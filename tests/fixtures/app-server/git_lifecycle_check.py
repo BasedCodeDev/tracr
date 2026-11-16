@@ -87,18 +87,18 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
             if action == 'presentation':
                 terminal.expect('[remote: origin/main]')
                 terminal.expect('[tag: light] [tag: release]')
-                terminal.expect('[HEAD] [feature]')
+                terminal.expect('[HEAD] [◇ feature]')
                 terminal.send(b'\t\x1b[C')
                 terminal.expect('g Collapse')
                 terminal.send(b'r')
                 terminal.wait(lambda: 'loading more' not in terminal.text())
                 terminal.send(b'f')
                 terminal.expect('[HEAD]')
-                terminal.expect('[HEAD] [feature]')
+                terminal.expect('[HEAD] [◇ feature]')
                 terminal.finish()
                 return
             if action == 'follow':
-                terminal.expect('[HEAD] [feature] History 099')
+                terminal.expect('[HEAD] [◇ feature] History 099')
                 terminal.send(b'\t\x1b[A')
                 oid = subprocess.check_output([real_git, '-C', str(project), 'rev-parse', 'HEAD~199'], env=env).decode().strip()[:7]
                 terminal.expect('> ● ' + oid)
@@ -117,12 +117,12 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.send(b'\x1b[A')
                 terminal.expect(f'[HEAD] [{main_branch}] History 299')
                 terminal.send(b'\x1b[B')
-                terminal.expect('[HEAD] [feature] History 099')
+                terminal.expect('[HEAD] [◇ feature] History 099')
                 terminal.finish()
                 return
             if action in ('progressive', 'expansion-quit'):
                 terminal.expect('History 299')
-                terminal.expect('[HEAD] [feature]')
+                terminal.expect('[HEAD] [◇ feature]')
                 terminal.send(b'\t\x1b[F')
                 if action == 'expansion-quit':
                     terminal.wait(lambda: bool(list(home.glob('pending-*'))))
@@ -154,7 +154,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
             if operation:
                 terminal.wait(lambda: bool(list(home.glob('pending-*'))))
             else:
-                terminal.expect('─ feature')
+                terminal.expect('─ ◇ feature')
                 terminal.expect('Lifecycle root')
                 terminal.send(b'\x1b[1;3D')  # Alt+Left -> Folders
                 terminal.expect('Enter Sessions')
@@ -215,7 +215,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.wait(lambda: b'Sessions' in terminal.output[mark:])
                 terminal.expect('Task first')
                 if action == 'walkthrough':
-                    terminal.wait(lambda: '─ feature' not in terminal.text())
+                    terminal.wait(lambda: '─ ◇ feature' not in terminal.text())
                 else:
                     terminal.wait(lambda: len(list(home.glob('pending-*'))) > len(pids))
                 terminal.send(b'q')

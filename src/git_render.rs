@@ -15,6 +15,11 @@ use crate::{
 pub const LANE_PITCH: usize = 4;
 pub const BRIDGE: char = '⌢';
 
+/// Quiet, consistent accent for linked-worktree markers in both panes.
+pub const DIRTY_COLOR: ratatui::style::Color = ratatui::style::Color::Rgb(184, 151, 94);
+
+pub const WORKTREE_COLOR: ratatui::style::Color = ratatui::style::Color::Rgb(129, 151, 181);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenderedRow {
     pub spans: Vec<GraphSpan>,

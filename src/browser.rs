@@ -184,6 +184,7 @@ pub struct Browser {
     pub repository_errors: BTreeMap<PathBuf, String>,
     pub repositories: BTreeMap<PathBuf, crate::git::Repository>,
     worktree_order: BTreeMap<PathBuf, (u64, BTreeMap<String, usize>)>,
+    pub worktree_status: BTreeMap<PathBuf, crate::worktree_status::Status>,
     remembered_sessions: BTreeMap<PathBuf, SessionKey>,
     pub state_path: Option<PathBuf>,
     pub state_warning: Option<String>,
@@ -209,6 +210,7 @@ impl Browser {
             repository_errors: BTreeMap::new(),
             repositories: BTreeMap::new(),
             worktree_order: BTreeMap::new(),
+            worktree_status: BTreeMap::new(),
             remembered_sessions: BTreeMap::new(),
             state_path: None,
             state_warning: None,
@@ -745,7 +747,8 @@ impl Browser {
                         filter,
                         depth,
                         label: format!(
-                            "{}{}{}",
+                            "{}{}{}{}",
+                            crate::git::WORKTREE_MARKER,
                             worktree
                                 .branch
                                 .as_deref()
@@ -808,6 +811,17 @@ impl Browser {
                             });
                         }
                     }
+                }
+            }
+        }
+        for row in &mut rows {
+            if let FolderFilter::Path(path) = &row.filter {
+                if self
+                    .worktree_status
+                    .get(path)
+                    .is_some_and(|s| s.as_ref().is_ok_and(|s| s.dirty()))
+                {
+                    row.label.push_str(" *");
                 }
             }
         }

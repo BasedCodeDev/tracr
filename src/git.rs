@@ -4,6 +4,9 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
+/// Display prefix shared by linked-worktree folders and local branch labels.
+pub const WORKTREE_MARKER: &str = "◇ ";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Worktree {
     pub path: PathBuf,
@@ -108,7 +111,7 @@ pub async fn drain_reads() {
     }
 }
 
-async fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+pub(crate) async fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     read_input(path, args, None).await
 }
 

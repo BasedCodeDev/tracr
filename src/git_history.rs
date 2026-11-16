@@ -165,6 +165,8 @@ pub struct History {
     head_task: Option<JoinHandle<Result<crate::git::Head, String>>>,
     pub rows: Vec<GraphRow>,
     pub references: crate::git::References,
+    linked_branches: std::collections::BTreeSet<String>,
+    dirty_branches: std::collections::BTreeSet<String>,
     pub reference_error: Option<String>,
     pub horizontal: Cell<usize>,
     max_width: Cell<Option<usize>>,
@@ -210,6 +212,8 @@ impl History {
             revision: 0,
             tails: Default::default(),
             references: crate::git::References::new(),
+            linked_branches: Default::default(),
+            dirty_branches: Default::default(),
             reference_error: None,
             horizontal: Cell::new(0),
             max_width: Cell::new(None),
@@ -299,6 +303,59 @@ impl History {
             self.horizontal.get().saturating_sub(4)
         });
     }
+    /// Synchronize decoration from the displayed repository's discovery snapshot.
+    pub(crate) fn set_worktrees(&mut self, repository: Option<&crate::git::Repository>) {
+        let branches = repository
+            .into_iter()
+            .flat_map(|repo| repo.worktrees.iter().skip(1))
+            .filter(|worktree| !worktree.bare)
+            .filter_map(|worktree| worktree.branch.clone())
+            .collect();
+        if self.linked_branches != branches {
+            self.linked_branches = branches;
+            self.max_width.set(None);
+        }
+    }
+
+    pub(crate) fn set_status(
+        &mut self,
+        repository: Option<&crate::git::Repository>,
+        statuses: &std::collections::BTreeMap<PathBuf, crate::worktree_status::Status>,
+    ) {
+        let branches = repository
+            .into_iter()
+            .flat_map(|r| &r.worktrees)
+            .filter(|w| {
+                statuses
+                    .get(&w.path)
+                    .is_some_and(|s| s.as_ref().is_ok_and(|s| s.dirty()))
+            })
+            .filter_map(|w| w.branch.clone())
+            .collect();
+        if self.dirty_branches != branches {
+            self.dirty_branches = branches;
+            self.max_width.set(None);
+        }
+    }
+    fn is_dirty(&self, label: &crate::git::RefLabel) -> bool {
+        label.kind == crate::git::RefKind::Local
+            && self
+                .dirty_branches
+                .contains(&format!("refs/heads/{}", label.name))
+    }
+
+    fn worktree_prefix(&self, label: &crate::git::RefLabel) -> &'static str {
+        if label.kind == crate::git::RefKind::Local
+            && self
+                .linked_branches
+                .contains(&format!("refs/heads/{}", label.name))
+        {
+            crate::git::WORKTREE_MARKER
+        } else {
+            ""
+        }
+    }
+
     pub fn row_spans(&self, row: &GraphRow) -> Vec<ratatui::text::Span<'static>> {
         use ratatui::{
             style::{Color, Modifier, Style},
@@ -344,10 +401,28 @@ impl History {
                         crate::git::RefKind::Remote => ("remote: ", Color::Cyan),
                         crate::git::RefKind::Tag => ("tag: ", Color::Yellow),
                     };
-                    spans.push(Span::styled(
-                        format!("[{prefix}{}] ", label.name),
-                        Style::default().fg(color),
-                    ));
+                    let style = Style::default().fg(color);
+                    if self.worktree_prefix(label).is_empty() && !self.is_dirty(label) {
+                        spans.push(Span::styled(format!("[{prefix}{}] ", label.name), style));
+                    } else {
+                        spans.push(Span::styled(format!("[{prefix}"), style));
+                        if !self.worktree_prefix(label).is_empty() {
+                            spans.push(Span::styled(
+                                "◇",
+                                Style::default().fg(crate::git_render::WORKTREE_COLOR),
+                            ));
+                            spans.push(Span::styled(" ", style));
+                        }
+                        spans.push(Span::styled(label.name.clone(), style));
+                        if self.is_dirty(label) {
+                            spans.push(Span::styled(" ", style));
+                            spans.push(Span::styled(
+                                "*",
+                                Style::default().fg(crate::git_render::DIRTY_COLOR),
+                            ));
+                        }
+                        spans.push(Span::styled("] ", style));
+                    }
                 }
             }
             spans.push(Span::raw(row.subject.clone()));
@@ -375,6 +450,8 @@ impl History {
                             if let Some(labels) = self.references.get(oid) {
                                 for label in labels {
                                     width += label.name.width()
+                                        + self.worktree_prefix(label).width()
+                                        + if self.is_dirty(label) { 2 } else { 0 }
                                         + 3
                                         + match label.kind {
                                             crate::git::RefKind::Local => 0,
@@ -677,6 +754,8 @@ impl History {
                 self.head_row = None;
                 self.max_width.set(None);
                 self.references.clear();
+                self.linked_branches.clear();
+                self.dirty_branches.clear();
                 self.reference_error = None;
                 self.horizontal.set(0);
                 self.selected = 0;
@@ -1598,6 +1677,152 @@ mod tests {
         assert!(h.references.is_empty());
         h.shutdown().await;
     }
+    #[test]
+    fn worktree_markers_follow_branch_identity_and_invalidate_width() {
+        use crate::git::{RefKind, RefLabel, Repository, Worktree};
+        let mut h = History::default();
+        h.replace(rows(1), 128);
+        let wt = |name: Option<&str>| Worktree {
+            path: "/unused".into(),
+            head: Some("shared-commit".into()),
+            branch: name.map(str::to_owned),
+            bare: false,
+            locked: false,
+            prunable: false,
+        };
+        let mut repo = Repository {
+            common_dir: "/repo/.git".into(),
+            git_dir: "/repo/.git".into(),
+            worktrees: vec![
+                wt(Some("refs/heads/main")),
+                wt(Some("refs/heads/feature/界")),
+                wt(None),
+            ],
+        };
+        h.references.insert(
+            h.rows[0].oid.clone().unwrap(),
+            vec![
+                RefLabel {
+                    kind: RefKind::Local,
+                    name: "main".into(),
+                },
+                RefLabel {
+                    kind: RefKind::Local,
+                    name: "feature/界".into(),
+                },
+                RefLabel {
+                    kind: RefKind::Local,
+                    name: "ordinary".into(),
+                },
+                RefLabel {
+                    kind: RefKind::Remote,
+                    name: "feature/界".into(),
+                },
+                RefLabel {
+                    kind: RefKind::Tag,
+                    name: "feature/界".into(),
+                },
+            ],
+        );
+        h.clamp_horizontal(1);
+        let original_width = h.max_width.get().unwrap();
+        h.set_worktrees(Some(&repo));
+        assert_eq!(h.max_width.get(), None);
+        let text = |h: &History| {
+            h.row_spans(&h.rows[0])
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        };
+        assert!(
+            text(&h).contains(
+                "[main] [◇ feature/界] [ordinary] [remote: feature/界] [tag: feature/界]"
+            )
+        );
+        let spans = h.row_spans(&h.rows[0]);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.content == "◇" && s.style.fg == Some(crate::git_render::WORKTREE_COLOR))
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.content == "feature/界"
+                    && s.style.fg == Some(ratatui::style::Color::Green))
+        );
+        h.clamp_horizontal(1);
+        assert_eq!(h.max_width.get(), Some(original_width + 2));
+        repo.worktrees[1].branch = Some("refs/heads/ordinary".into());
+        h.set_worktrees(Some(&repo));
+        assert!(text(&h).contains("[feature/界] [◇ ordinary]"));
+        repo.worktrees.truncate(1);
+        h.set_worktrees(Some(&repo));
+        assert!(!text(&h).contains('◇'));
+        h.clamp_horizontal(1);
+        assert_eq!(h.max_width.get(), Some(original_width));
+        repo.worktrees.push(wt(Some("refs/heads/ordinary")));
+        h.set_worktrees(Some(&repo));
+        h.set_worktrees(None);
+        assert!(!text(&h).contains('◇'));
+    }
+
+    #[test]
+    fn dirty_main_branch_has_amber_suffix_and_correct_width() {
+        use crate::git::{RefKind, RefLabel, Repository, Worktree};
+        let mut h = History::default();
+        h.replace(rows(1), 128);
+        h.references.insert(
+            h.rows[0].oid.clone().unwrap(),
+            vec![
+                RefLabel {
+                    kind: RefKind::Local,
+                    name: "main".into(),
+                },
+                RefLabel {
+                    kind: RefKind::Remote,
+                    name: "main".into(),
+                },
+            ],
+        );
+        let repository = Repository {
+            common_dir: "/main/.git".into(),
+            git_dir: "/main/.git".into(),
+            worktrees: vec![Worktree {
+                path: "/main".into(),
+                branch: Some("refs/heads/main".into()),
+                head: None,
+                bare: false,
+                locked: false,
+                prunable: false,
+            }],
+        };
+        h.clamp_horizontal(1);
+        let clean_width = h.max_width.get().unwrap();
+        let statuses = std::collections::BTreeMap::from([(
+            PathBuf::from("/main"),
+            Ok(crate::worktree_status::Counts {
+                untracked: 1,
+                ..Default::default()
+            }),
+        )]);
+        h.set_status(Some(&repository), &statuses);
+        let spans = h.row_spans(&h.rows[0]);
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("[main *] [remote: main]"));
+        assert!(!text.contains('◇'));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.content == "*" && s.style.fg == Some(crate::git_render::DIRTY_COLOR))
+        );
+        h.clamp_horizontal(1);
+        assert_eq!(h.max_width.get(), Some(clean_width + 2));
+        h.set_status(None, &statuses);
+        h.clamp_horizontal(1);
+        assert_eq!(h.max_width.get(), Some(clean_width));
+    }
+
     #[test]
     fn horizontal_scrolling_preserves_selection_and_styles() {
         use crate::git::{RefKind, RefLabel};

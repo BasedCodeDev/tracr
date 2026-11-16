@@ -1542,6 +1542,15 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             ),
         ]);
     }
+    if view.context() == 0 && selected_checkout(browser).is_some() {
+        entries.push((
+            Info,
+            "Folders",
+            "i",
+            "Worktree information",
+            Some(("i Info", "i Info")),
+        ));
+    }
     if view.context() == 0 {
         entries.push((
             CreateWorktree,
@@ -1716,7 +1725,10 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
         {
             Some("Select a concrete folder first.".into())
         }
-        Command::Info if selected_session(browser).is_none() => {
+        Command::Info if view.focus == 0 && selected_checkout(browser).is_none() => {
+            Some("Select a checkout folder first.".into())
+        }
+        Command::Info if view.focus == 1 && selected_session(browser).is_none() => {
             Some("Select a session first.".into())
         }
         Command::Relink => relink_unavailable(browser),
@@ -2085,17 +2097,34 @@ fn folder_tree_line(
 ) -> Line<'static> {
     let text = format!("{} ({})", safe_text(&row.label), row.count);
     let prefix = &label[..label.len() - text.len()];
-    graph_viewport(
-        vec![
-            Span::styled(prefix.to_owned(), Style::default().fg(Color::White)),
-            Span::styled(
-                text,
-                activity_color(status).map_or(Style::default(), |color| Style::default().fg(color)),
-            ),
-        ],
-        offset,
-        width,
-    )
+    let text_style =
+        activity_color(status).map_or(Style::default(), |color| Style::default().fg(color));
+    let mut spans = vec![Span::styled(
+        prefix.to_owned(),
+        Style::default().fg(Color::White),
+    )];
+    let safe_label = safe_text(&row.label);
+    let (name, dirty) = safe_label
+        .strip_suffix(" *")
+        .map_or((safe_label.as_str(), false), |s| (s, true));
+    if let Some(name) = name.strip_prefix(crate::git::WORKTREE_MARKER) {
+        spans.push(Span::styled(
+            "◇",
+            Style::default().fg(crate::git_render::WORKTREE_COLOR),
+        ));
+        spans.push(Span::styled(format!(" {name}"), text_style));
+    } else {
+        spans.push(Span::styled(name.to_owned(), text_style));
+    }
+    if dirty {
+        spans.push(Span::styled(" ", text_style));
+        spans.push(Span::styled(
+            "*",
+            Style::default().fg(crate::git_render::DIRTY_COLOR),
+        ));
+    }
+    spans.push(Span::styled(format!(" ({})", row.count), text_style));
+    graph_viewport(spans, offset, width)
 }
 
 fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, view: &View) {
@@ -2260,6 +2289,32 @@ fn draw_empty_sessions(frame: &mut Frame, area: Rect, browser: &Browser, focused
     frame.render_widget(paragraph, content);
 }
 
+fn selected_checkout(browser: &Browser) -> Option<&std::path::Path> {
+    let FolderFilter::Path(path) = &browser.folder else {
+        return None;
+    };
+    browser
+        .repositories
+        .values()
+        .flat_map(|r| &r.worktrees)
+        .find(|w| !w.bare && &w.path == path)
+        .map(|w| w.path.as_path())
+}
+
+fn worktree_status_description(browser: &Browser, path: &std::path::Path) -> String {
+    match browser
+        .worktree_status
+        .iter()
+        .filter(|(root, _)| path.starts_with(root))
+        .max_by_key(|(root, _)| root.components().count())
+        .map(|(_, s)| s)
+    {
+        Some(Ok(counts)) => counts.description(),
+        Some(Err(error)) => format!("Unavailable: {error}"),
+        None => "Not yet available".into(),
+    }
+}
+
 fn session_information(
     browser: &Browser,
     s: &crate::domain::SessionSummary,
@@ -2351,6 +2406,12 @@ fn session_information(
             local_date(s.updated_at)
         )
     };
+    if let Some(path) = s.cwd.as_ref() {
+        location.push(Row::new(
+            "Uncommitted changes",
+            worktree_status_description(browser, path),
+        ));
+    }
     location.extend([
         Row::new("Folder state", folder_state),
         Row::new(
@@ -2921,7 +2982,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('q') => Command::Quit,
         KeyCode::Char('/') => Command::Search,
         KeyCode::Char('r') => Command::Refresh,
-        KeyCode::Char('i') if view.focus == 1 => Command::Info,
+        KeyCode::Char('i') if !view.git_focus => Command::Info,
         KeyCode::Char('n') if view.focus == 1 => Command::Create,
         KeyCode::Char('R') if view.focus == 1 => Command::Relink,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
@@ -3063,7 +3124,18 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             view.help_control = 0;
         }
         Command::Info => {
-            if let Some(session) = selected_session(browser) {
+            if view.focus == 0 {
+                if let Some(path) = selected_checkout(browser) {
+                    view.error_dialog = Some(crate::error_dialog::ErrorDialog::information(
+                        "Worktree information",
+                        format!(
+                            "{}\n\nUncommitted changes: {}\n\n* marks staged, unstaged, or untracked changes. Ignored files are excluded.",
+                            path.display(),
+                            worktree_status_description(browser, path)
+                        ),
+                    ));
+                }
+            } else if let Some(session) = selected_session(browser) {
                 view.info = Some(InfoModal::new(browser, session));
             }
         }
@@ -3277,6 +3349,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         std::collections::BTreeSet<crate::domain::SessionKey>,
     )> = None;
     let mut git_discovery = crate::git_discovery::Controller::default();
+    let mut status_monitor = crate::worktree_status::Monitor::default();
     let mut git_watch = crate::git_watch::Monitor::default();
     let mut history_folder = None;
     let mut candidates_dirty = true;
@@ -3299,6 +3372,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     Err(_) => break,
                 }
             }
+            if status_monitor.tick(&mut browser).await { idle.wake(); }
             let now = std::time::Instant::now();
             if let Some(change) = git_watch.poll(now, git_discovery.pending() || view.history.loading()) {
                 git_watch.reconcile();
@@ -3370,6 +3444,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if let Some(repository) = view.history.repository().filter(|_| !view.history.rows.is_empty()) {
                 browser.order_worktrees(repository, view.history.revision(), view.history.rows.iter().filter_map(|row| row.oid.as_deref()));
             }
+            let displayed_repository = view.history.repository();
+            view.history.set_worktrees(displayed_repository.as_ref().and_then(|id| browser.repositories.get(id)));
+            view.history.set_status(displayed_repository.as_ref().and_then(|id| browser.repositories.get(id)), &browser.worktree_status);
             if !view.history.present() { view.git_focus = false; }
             {
                 let mut presentation = view.git_sessions.borrow_mut();
@@ -3533,6 +3610,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             while discovery.rx.try_recv().is_ok() {}
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
                             git_watch.stop();
+                            status_monitor.shutdown().await;
                             git_discovery.shutdown().await;
                             view.history.shutdown().await;
                             crate::git::drain_reads().await;
@@ -3759,6 +3837,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             while discovery.rx.try_recv().is_ok() {}
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
                             git_watch.stop();
+                            status_monitor.shutdown().await;
                             git_discovery.shutdown().await;
                             view.history.shutdown().await;
                             crate::git::drain_reads().await;
@@ -3824,6 +3903,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     .await;
     git_watch.stop();
     view.history.shutdown().await;
+    status_monitor.shutdown().await;
     git_discovery.shutdown().await;
     crate::git::drain_reads().await;
     drop(pending);
@@ -4981,7 +5061,7 @@ mod folder_viewport_tests {
         use ratatui::style::Color;
         let row = FolderRow {
             filter: FolderFilter::Path("/project".into()),
-            label: "project".into(),
+            label: "◇ project *".into(),
             depth: 2,
             count: 1,
         };
@@ -4994,10 +5074,15 @@ mod folder_viewport_tests {
             },
         ] {
             for offset in [0, 1, 3, 4, 6] {
-                let line = super::folder_tree_line(&row, "│  └─ project (1)", status, offset, 40);
+                let line =
+                    super::folder_tree_line(&row, "│  └─ ◇ project * (1)", status, offset, 40);
                 for span in line.spans {
                     if span.content.contains(['│', '└', '─']) {
                         assert_eq!(span.style.fg, Some(Color::White));
+                    } else if span.content == "*" {
+                        assert_eq!(span.style.fg, Some(crate::git_render::DIRTY_COLOR));
+                    } else if span.content == "◇" {
+                        assert_eq!(span.style.fg, Some(crate::git_render::WORKTREE_COLOR));
                     } else if span.content.chars().any(char::is_alphabetic) {
                         assert_eq!(span.style.fg, super::activity_color(status));
                     }
