@@ -187,35 +187,82 @@ fn cancellation_interrupts_wide_routing_without_returning_partial_output() {
 }
 
 #[test]
-fn session_continuations_preserve_topology_across_every_fixture() {
+fn shared_session_rows_preserve_topology_across_every_fixture_and_prefix() {
+    use tracr::{
+        git::GraphRow,
+        git_render::RenderedRow,
+        git_sessions::{Row, compose_rows},
+    };
     for (name, commits) in fixtures::fixtures() {
-        let model = layout(&commits).unwrap();
-        let original = render(&model);
-        let mut graph = original.clone();
-        graph.rows.clear();
-        graph.positions.clear();
-        for row in original.rows {
-            if let Some(oid) = &row.oid {
-                graph.positions.insert(oid.clone(), graph.rows.len());
-            }
-            graph.rows.push(row.clone());
-            if let Some(oid) = &row.oid {
-                let commit = commits.iter().find(|c| c.oid == oid.as_ref()).unwrap();
-                let input = tracr::git::GraphRow {
-                    graph: row.text(),
-                    graph_spans: row.spans.clone(),
-                    oid: Some(oid.to_string()),
-                    parents: commit.parents.clone(),
+        for len in 1..=commits.len() {
+            let commits = &commits[..len];
+            let model = layout(commits).unwrap();
+            let original = render(&model);
+            let tails = original.commit_tail_ranges();
+            let rows: Vec<_> = original
+                .rows
+                .iter()
+                .chain(original.boundary.iter())
+                .map(|r| GraphRow {
+                    graph: r.text(),
+                    graph_spans: r.spans.clone(),
+                    oid: r.oid.as_ref().map(ToString::to_string),
+                    parents: r
+                        .oid
+                        .as_ref()
+                        .and_then(|oid| commits.iter().find(|c| c.oid == oid.as_ref()))
+                        .map(|c| c.parents.clone())
+                        .unwrap_or_default(),
                     subject: String::new(),
-                };
-                for _ in 0..3 {
-                    graph.rows.push(tracr::git_render::RenderedRow {
-                        spans: tracr::git_render::annotation_continuation(&input),
-                        oid: None,
-                    });
+                })
+                .collect();
+            for count in [0, 1, 3, 8] {
+                let session_oids: Vec<_> = commits
+                    .iter()
+                    .flat_map(|c| std::iter::repeat_n(c.oid.as_str(), count))
+                    .collect();
+                let presented = compose_rows(&rows, &tails, &session_oids);
+                let shared: usize = tails.values().map(|tail| count.min(tail.len())).sum();
+                assert_eq!(presented.len(), rows.len() + session_oids.len() - shared);
+                let mut graph = original.clone();
+                graph.rows.clear();
+                graph.positions.clear();
+                graph.boundary = None;
+                for row in presented {
+                    let (spans, oid) = match row {
+                        Row::Graph(i) => {
+                            let row = &rows[i];
+                            if let Some(oid) = &row.oid {
+                                graph
+                                    .positions
+                                    .insert(oid.as_str().into(), graph.rows.len());
+                            }
+                            if i == original.rows.len() {
+                                // Open ancestry stays a separate, final boundary.
+                                graph.boundary = original.boundary.clone();
+                                continue;
+                            }
+                            (row.graph_spans.clone(), row.oid.as_deref().map(Into::into))
+                        }
+                        Row::Session {
+                            anchor, connector, ..
+                        } => {
+                            assert!(connector.is_none_or(|i| i < original.rows.len()));
+                            (
+                                connector
+                                    .map(|i| rows[i].graph_spans.clone())
+                                    .unwrap_or_else(|| {
+                                        tracr::git_render::annotation_continuation(&rows[anchor])
+                                    }),
+                                None,
+                            )
+                        }
+                    };
+                    graph.rows.push(RenderedRow { spans, oid });
                 }
+                oracle::check(commits, &model, &graph)
+                    .unwrap_or_else(|e| panic!("{name}/{len}/{count}: {e}"));
             }
         }
-        oracle::check(&commits, &model, &graph).unwrap_or_else(|e| panic!("{name}: {e}"));
     }
 }

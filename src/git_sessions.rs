@@ -112,7 +112,44 @@ pub fn annotations(browser: &Browser, history: &History) -> Vec<Annotation> {
 #[derive(Clone, Debug)]
 pub enum Row {
     Graph(usize),
-    Session { anchor: usize, annotation: usize },
+    Session {
+        anchor: usize,
+        annotation: usize,
+        connector: Option<usize>,
+    },
+}
+
+/// Share the first connector rows with the final sessions in each commit block.
+/// Unpaired sessions precede routing, where existing vertical continuations apply.
+pub fn compose_rows(
+    rows: &[crate::git::GraphRow],
+    tails: &BTreeMap<usize, std::ops::Range<usize>>,
+    session_oids: &[&str],
+) -> Vec<Row> {
+    let mut attached: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (index, oid) in session_oids.iter().enumerate() {
+        attached.entry(oid).or_default().push(index);
+    }
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < rows.len() {
+        result.push(Row::Graph(i));
+        if let Some(indices) = rows[i].oid.as_deref().and_then(|oid| attached.get(oid)) {
+            let tail = tails.get(&i).cloned().unwrap_or(i + 1..i + 1);
+            let shared = indices.len().min(tail.len());
+            let extra = indices.len() - shared;
+            for (position, &annotation) in indices.iter().enumerate() {
+                result.push(Row::Session {
+                    anchor: i,
+                    annotation,
+                    connector: (position >= extra).then(|| tail.start + position - extra),
+                });
+            }
+            i += shared;
+        }
+        i += 1;
+    }
+    result
 }
 
 #[derive(Default)]
@@ -153,22 +190,9 @@ impl Presentation {
             self.selection = history_oid.clone().map(Selection::Commit);
         }
         if repository_changed || self.geometry != geometry || self.annotations != annotations {
-            self.rows.clear();
             self.annotations = annotations;
-            let mut attached: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-            for (i, annotation) in self.annotations.iter().enumerate() {
-                attached.entry(&annotation.oid).or_default().push(i);
-            }
-            for (i, row) in history.rows.iter().enumerate() {
-                self.rows.push(Row::Graph(i));
-                if let Some(indices) = row.oid.as_deref().and_then(|oid| attached.get(oid)) {
-                    self.rows
-                        .extend(indices.iter().map(|&annotation| Row::Session {
-                            anchor: i,
-                            annotation,
-                        }));
-                }
-            }
+            let oids: Vec<_> = self.annotations.iter().map(|a| a.oid.as_str()).collect();
+            self.rows = compose_rows(&history.rows, &history.tails, &oids);
             self.positions = self
                 .rows
                 .iter()
@@ -383,6 +407,155 @@ pub(crate) mod tests {
             .collect();
         history.exhausted = true;
         (browser, history)
+    }
+
+    #[tokio::test]
+    async fn shared_parent_gap_disappears_and_session_navigation_survives_updates() {
+        use crate::{
+            git::CommitRecord,
+            tui::{View, draw, handle_key},
+        };
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let (mut browser, mut history) = fixture().await;
+        history.replace_records_for_test(vec![
+            CommitRecord {
+                oid: "left".into(),
+                parents: vec!["base".into()],
+                subject: "left tip".into(),
+            },
+            CommitRecord {
+                oid: "right".into(),
+                parents: vec!["base".into()],
+                subject: "right tip".into(),
+            },
+            CommitRecord {
+                oid: "base".into(),
+                parents: vec![],
+                subject: "shared base".into(),
+            },
+        ]);
+        let repo = browser
+            .repositories
+            .get_mut(std::path::Path::new("/repo/.git"))
+            .unwrap();
+        repo.worktrees[0].head = Some("left".into());
+        repo.worktrees[1].head = Some("right".into());
+        add_session(
+            &mut browser,
+            "session-left",
+            "/repo",
+            "/repo",
+            "/repo/.git",
+            RuntimeStatus::Idle,
+            1,
+        );
+        let key = add_session(
+            &mut browser,
+            "session-right",
+            "/worktree",
+            "/worktree",
+            "/repo/.git",
+            RuntimeStatus::Running,
+            1,
+        );
+        let right = history
+            .rows
+            .iter()
+            .position(|r| r.oid.as_deref() == Some("right"))
+            .unwrap();
+        let connector = history.tails[&right].start;
+        let original = history.rows.clone();
+        let revision = history.revision();
+        let mut view = View {
+            history,
+            git_focus: true,
+            ..View::default()
+        };
+        for _ in 0..3 {
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            );
+        }
+        {
+            let presentation = view.git_sessions.borrow();
+            assert_eq!(presentation.session().unwrap().session.key, key);
+            assert!(
+                matches!(presentation.rows[presentation.selected], Row::Session { connector: Some(i), .. } if i == connector)
+            );
+            assert!(
+                matches!(presentation.rows[presentation.selected + 1], Row::Graph(i) if view.history.rows[i].oid.as_deref() == Some("base"))
+            );
+        }
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let lines: Vec<String> = (0..40)
+            .map(|y| (0..120).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect();
+        let session_row = lines
+            .iter()
+            .rposition(|s| s.contains("session-right"))
+            .unwrap();
+        assert!(lines[session_row + 1].contains("shared base"));
+        let plain: String = view
+            .history
+            .session_spans(right, Some(connector))
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(lines[session_row].contains(plain.trim_end()));
+        let extra = add_session(
+            &mut browser,
+            "newer-right",
+            "/worktree",
+            "/worktree",
+            "/repo/.git",
+            RuntimeStatus::Waiting {
+                approval: true,
+                input: false,
+            },
+            2,
+        );
+        {
+            let mut presentation = view.git_sessions.borrow_mut();
+            presentation.sync(&browser, &view.history);
+            assert_eq!(presentation.session().unwrap().session.key, key);
+            assert!(
+                matches!(presentation.rows[presentation.selected], Row::Session { connector: Some(i), .. } if i == connector)
+            );
+            assert!(matches!(
+                presentation.rows[presentation.selected - 1],
+                Row::Session {
+                    connector: None,
+                    ..
+                }
+            ));
+            browser.sources[0]
+                .live
+                .insert(key.clone(), RuntimeStatus::Unloaded);
+            presentation.sync(&browser, &view.history);
+            assert!(presentation.session().is_none());
+            assert_eq!(presentation.anchor(), Some(right));
+            assert!(presentation.rows.iter().any(|r| matches!(r, Row::Session { connector: Some(i), annotation, .. } if *i == connector && presentation.annotations[*annotation].session.key == extra)));
+        }
+        assert_eq!(view.history.rows, original);
+        assert_eq!(view.history.revision(), revision);
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+        );
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        assert_eq!(browser.selected, Some(extra));
+        assert_eq!(view.focus, 1);
+        assert!(!view.git_focus);
     }
 
     #[tokio::test]

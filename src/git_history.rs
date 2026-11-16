@@ -67,6 +67,7 @@ type ReadTask = (u64, usize, JoinHandle<ReadResult>);
 
 struct Snapshot {
     rows: Vec<GraphRow>,
+    tails: std::collections::BTreeMap<usize, std::ops::Range<usize>>,
     positions: std::collections::HashMap<String, usize>,
     selectable: Vec<usize>,
     width: usize,
@@ -94,6 +95,7 @@ fn construct(records: Vec<CommitRecord>, cancel: &AtomicBool) -> Result<Option<S
     };
     drop(layout);
     let width = graph.width;
+    let tails = graph.commit_tail_ranges();
     let mut records = records.into_iter();
     let mut rows = Vec::with_capacity(graph.rows.len() + usize::from(graph.boundary.is_some()));
     let mut positions = std::collections::HashMap::new();
@@ -125,6 +127,7 @@ fn construct(records: Vec<CommitRecord>, cancel: &AtomicBool) -> Result<Option<S
     }
     Ok(Some(Snapshot {
         rows,
+        tails,
         positions,
         selectable,
         width,
@@ -143,6 +146,7 @@ impl Drop for BuildTask {
 }
 
 pub struct History {
+    pub(crate) tails: std::collections::BTreeMap<usize, std::ops::Range<usize>>,
     revision: u64,
     build: Option<BuildTask>,
     #[cfg(test)]
@@ -204,6 +208,7 @@ impl History {
             head_task: None,
             rows: vec![],
             revision: 0,
+            tails: Default::default(),
             references: crate::git::References::new(),
             reference_error: None,
             horizontal: Cell::new(0),
@@ -398,9 +403,11 @@ impl History {
     pub fn loading(&self) -> bool {
         self.task.is_some() || self.build.is_some() || self.head_task.is_some()
     }
-    pub fn title(&self) -> String {
+    pub fn notice(&self) -> Option<String> {
         if let Some(error) = &self.error {
-            return format!("Git history — {error} · r retry (previous data may be stale)");
+            return Some(format!(
+                "Git: {error} · r retry (previous data may be stale)"
+            ));
         }
         let status = if self.reference_error.is_some() {
             "references unavailable/stale · r retry"
@@ -416,30 +423,10 @@ impl History {
             "loading more…"
         } else if self.loaded && self.rows.is_empty() {
             "empty"
-        } else if self.exhausted {
-            "end of history"
         } else {
-            "Tab cycle panes"
+            return None;
         };
-        let context = self
-            .head
-            .as_ref()
-            .map(|head| {
-                crate::browser::safe_text(head.branch.as_deref().unwrap_or("detached HEAD"))
-            })
-            .unwrap_or_default();
-        if context.is_empty() {
-            format!("Git history — {status}")
-        } else {
-            format!(
-                "Git history — {context} · {status} · {}",
-                if self.following {
-                    "following HEAD"
-                } else {
-                    "f follow HEAD"
-                }
-            )
-        }
+        Some(format!("Git: {status}"))
     }
     pub fn visible_range(&self, height: usize) -> std::ops::Range<usize> {
         self.page.set(height.max(1));
@@ -522,9 +509,15 @@ impl History {
                 < self.page.get();
     }
 
-    pub fn session_spans(&self, anchor: usize) -> Vec<ratatui::text::Span<'static>> {
-        let row = &self.rows[anchor];
-        let spans = crate::git_render::annotation_continuation(row);
+    pub fn session_spans(
+        &self,
+        anchor: usize,
+        connector: Option<usize>,
+    ) -> Vec<ratatui::text::Span<'static>> {
+        let spans = match connector {
+            Some(index) => self.rows[index].graph_spans.clone(),
+            None => crate::git_render::annotation_continuation(&self.rows[anchor]),
+        };
         let graph: String = spans.iter().map(|s| s.text.as_str()).collect();
         let annotation = GraphRow {
             graph: graph.clone(),
@@ -561,6 +554,15 @@ impl History {
         self.extend = false;
     }
     #[cfg(test)]
+    pub(crate) fn replace_records_for_test(&mut self, records: Vec<CommitRecord>) {
+        let limit = records.len() + 1;
+        let snapshot = construct(records, &AtomicBool::new(false))
+            .unwrap()
+            .unwrap();
+        self.install(snapshot, limit);
+    }
+
+    #[cfg(test)]
     fn replace(&mut self, rows: Vec<GraphRow>, limit: usize) {
         let positions = rows
             .iter()
@@ -579,6 +581,7 @@ impl History {
             .unwrap_or(0);
         self.install(
             Snapshot {
+                tails: Default::default(),
                 rows,
                 positions,
                 selectable,
@@ -590,6 +593,7 @@ impl History {
     fn install(&mut self, snapshot: Snapshot, limit: usize) {
         let Snapshot {
             rows,
+            tails,
             positions,
             selectable,
             width,
@@ -621,6 +625,7 @@ impl History {
         self.selectable = selectable;
         self.graph_width = width;
         self.rows = rows;
+        self.tails = tails;
         self.revision = self.revision.wrapping_add(1);
         self.head_row = self
             .head
@@ -665,6 +670,7 @@ impl History {
             if path != self.path {
                 self.following = self.checkout.is_some();
                 self.rows.clear();
+                self.tails.clear();
                 self.positions.clear();
                 self.selectable.clear();
                 self.graph_width = 0;
@@ -1105,7 +1111,7 @@ mod tests {
         assert_eq!(h.selected, 1);
         h.replace(vec![], 128);
         assert!(h.exhausted);
-        assert!(h.title().contains("empty"));
+        assert!(h.notice().unwrap().contains("empty"));
     }
     #[tokio::test]
     async fn merge_prefixes_preserve_commits_and_connectors() {
@@ -1241,7 +1247,7 @@ mod tests {
         assert!(text(&terminal).contains("commit 127"));
         view.history.replace(vec![], 128);
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-        assert!(text(&terminal).contains("Git history — empty"));
+        assert!(text(&terminal).contains("Git: empty"));
         view.history.head = Some(crate::git::Head {
             oid: None,
             branch: Some("new-branch".into()),
@@ -1260,7 +1266,8 @@ mod tests {
         terminal.backend_mut().resize(140, 40);
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
         let screen = text(&terminal);
-        assert!(screen.contains("detached HEAD"));
+        assert!(!screen.contains("Git history"));
+        assert!(!screen.contains("detached HEAD"));
         assert!(screen.contains("[HEAD] commit 3"));
         assert!(screen.contains("> ● 0000000 commit 2"));
         assert_eq!(screen.matches("[HEAD]").count(), 1);
@@ -1330,7 +1337,7 @@ mod tests {
         pump(&mut h).await;
         let (limit, _, reply) = reads.recv().await.unwrap();
         assert_eq!(limit, 256);
-        assert!(h.title().contains("locating HEAD"));
+        assert!(h.notice().unwrap().contains("locating HEAD"));
         reply.send(Ok(rows(220))).unwrap();
         finish(&mut h).await;
         assert_eq!(h.selected, 180);
@@ -1569,7 +1576,7 @@ mod tests {
         tokio::task::yield_now().await;
         h.tick(Some("/repo".into()), 1, true, 20).await;
         assert_eq!(h.references, labels);
-        assert!(h.title().contains("references unavailable/stale"));
+        assert!(h.notice().unwrap().contains("references unavailable/stale"));
         assert_eq!(h.selectable.len(), 200);
         h.tick(Some("/repo".into()), 2, true, 20).await;
         refs.recv()

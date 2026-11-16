@@ -607,6 +607,11 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
             )
         })
         .collect();
+    if view.history.present() && !view.git_hidden {
+        if let Some(notice) = view.history.notice() {
+            issues.insert(0, safe_text(&notice));
+        }
+    }
     if let Some(error) = &view.git_watch_error {
         issues.insert(
             0,
@@ -688,11 +693,12 @@ fn git_session_name_width(presentation: &crate::git_sessions::Presentation) -> u
 fn git_session_spans(
     view: &View,
     anchor: usize,
+    connector: Option<usize>,
     annotation: &crate::git_sessions::Annotation,
     last: bool,
     name_width: usize,
 ) -> Vec<Span<'static>> {
-    let mut spans = view.history.session_spans(anchor);
+    let mut spans = view.history.session_spans(anchor, connector);
     // Reserve the longest status label even when no session currently uses it,
     // so names stay aligned as live statuses change.
     let status = git_session_status(annotation.status);
@@ -782,10 +788,15 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 .rows
                 .iter()
                 .filter_map(|row| match row {
-                    crate::git_sessions::Row::Session { anchor, annotation } => Some(
+                    crate::git_sessions::Row::Session {
+                        anchor,
+                        annotation,
+                        connector,
+                    } => Some(
                         git_session_spans(
                             view,
                             *anchor,
+                            *connector,
                             &presentation.annotations[*annotation],
                             presentation.is_last_session(*annotation),
                             name_width,
@@ -812,31 +823,25 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                         crate::git_sessions::Row::Graph(i) => {
                             view.history.row_spans(&view.history.rows[*i])
                         }
-                        crate::git_sessions::Row::Session { anchor, annotation } => {
-                            git_session_spans(
-                                view,
-                                *anchor,
-                                &presentation.annotations[*annotation],
-                                presentation.is_last_session(*annotation),
-                                name_width,
-                            )
-                        }
+                        crate::git_sessions::Row::Session {
+                            anchor,
+                            annotation,
+                            connector,
+                        } => git_session_spans(
+                            view,
+                            *anchor,
+                            *connector,
+                            &presentation.annotations[*annotation],
+                            presentation.is_last_session(*annotation),
+                            name_width,
+                        ),
                     };
                     ListItem::new(graph_viewport(spans, view.history.horizontal.get(), width))
                 })
                 .collect();
-            let title = graph_viewport(
-                vec![Span::raw(view.history.title())],
-                0,
-                usize::from(
-                    git_area
-                        .width
-                        .saturating_sub(if more_above { 5 } else { 2 }),
-                ),
-            );
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(pane_block("", view.git_focus).title(title))
+                    .block(pane_block("Git Worktrees", view.git_focus))
                     .highlight_symbol("> ")
                     .highlight_style(selection_style(view.context() == 2)),
                 git_area,
@@ -858,11 +863,6 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 }
             }
         } else {
-            let label = if view.git_hidden {
-                "Git history · collapsed"
-            } else {
-                "Git history · enlarge terminal"
-            };
             frame.render_widget(
                 Block::default()
                     .borders(Borders::TOP)
@@ -871,7 +871,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                     } else {
                         BorderType::Plain
                     })
-                    .title(format!(" {label} "))
+                    .title(" Git Worktrees ")
                     .style(if view.context() == 2 {
                         Style::default()
                             .fg(Color::Cyan)
@@ -3827,7 +3827,7 @@ mod cleanup_tests {
             },
         ] {
             annotation.status = status;
-            let spans = git_session_spans(&view, 0, &annotation, true, 0);
+            let spans = git_session_spans(&view, 0, None, &annotation, true, 0);
             assert_eq!(
                 spans
                     .iter()
@@ -3852,14 +3852,14 @@ mod cleanup_tests {
                 _ => "Input",
             };
             assert!(line[..title_start].ends_with(&format!("{expected:>8} └─ ")));
-            let continuing: String = git_session_spans(&view, 0, &annotation, false, 0)
+            let continuing: String = git_session_spans(&view, 0, None, &annotation, false, 0)
                 .iter()
                 .map(|span| span.content.as_ref())
                 .collect();
             assert_eq!(continuing, line.replace(" └─ ", " ├─ "));
             let prefix: String = view
                 .history
-                .session_spans(0)
+                .session_spans(0, None)
                 .iter()
                 .map(|span| span.content.as_ref())
                 .collect();
@@ -3945,10 +3945,16 @@ mod cleanup_tests {
         );
         let mut provider_column = None;
         for row in &presentation.rows {
-            if let crate::git_sessions::Row::Session { anchor, annotation } = row {
+            if let crate::git_sessions::Row::Session {
+                anchor,
+                annotation,
+                connector,
+            } = row
+            {
                 let spans = git_session_spans(
                     &view,
                     *anchor,
+                    *connector,
                     &presentation.annotations[*annotation],
                     presentation.is_last_session(*annotation),
                     width,
@@ -4579,7 +4585,8 @@ mod cleanup_tests {
                 .iter()
                 .map(|cell| cell.symbol())
                 .collect::<String>();
-            assert!(text.contains("Git history · collapsed"));
+            assert!(text.contains("Git Worktrees"));
+            assert!(!text.contains("Git history"));
             assert!(text.contains("g Expand"));
             let divider = buffer
                 .content

@@ -38,6 +38,24 @@ pub struct RenderedGraph {
     pub width: usize,
 }
 
+impl RenderedGraph {
+    /// Trailing rows owned by each commit, excluding the open-history boundary.
+    pub fn commit_tail_ranges(&self) -> BTreeMap<usize, std::ops::Range<usize>> {
+        let mut starts: Vec<_> = self.positions.values().copied().collect();
+        starts.sort_unstable();
+        starts
+            .iter()
+            .enumerate()
+            .map(|(i, &start)| {
+                (
+                    start,
+                    start + 1..starts.get(i + 1).copied().unwrap_or(self.rows.len()),
+                )
+            })
+            .collect()
+    }
+}
+
 fn color(color: LaneColor) -> u8 {
     match color {
         LaneColor::Cyan => 36,
