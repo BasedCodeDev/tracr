@@ -11,7 +11,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Scrollbar,
         ScrollbarState, Wrap,
     },
 };
@@ -128,6 +128,12 @@ pub struct View {
     pub search_selected: Option<crate::domain::SessionKey>,
     pub help: bool,
     pub help_selected: usize,
+    pub help_control: usize,
+    pub search_control: usize,
+    pub source_control: usize,
+    pub relink_back: bool,
+    pub relink_scroll: u16,
+    pub relink_scroll_limit: std::cell::Cell<u16>,
     pub help_page_size: usize,
     pub info: Option<InfoModal>,
     pub message: Option<String>,
@@ -647,26 +653,30 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         draw_help(frame, browser, view);
     }
     if let Some(selected) = view.source_picker {
-        let popup = Rect::new(
-            area.x + 1,
-            area.y + 1,
-            area.width.saturating_sub(2),
-            area.height.saturating_sub(2).min(12),
+        let inner = crate::modal::shell(frame, "Choose harness", 76, 18);
+        let regions = crate::modal::regions(inner);
+        modal_actions(
+            frame,
+            regions.actions,
+            "Cancel",
+            "Create session",
+            view.source_control,
+            !creation_sources(browser).is_empty(),
+            true,
         );
-        frame.render_widget(Clear, popup);
+        frame.render_widget(
+            Paragraph::new("↑/↓ select · Enter creates · Esc cancels"),
+            regions.hints,
+        );
         let items: Vec<_> = creation_sources(browser)
             .iter()
             .map(|&i| ListItem::new(safe_text(&browser.specs[i].label())))
             .collect();
         frame.render_stateful_widget(
             List::new(items)
-                .block(block(
-                    "Choose harness — ↑/↓ select · Enter creates · Esc cancels",
-                    true,
-                ))
                 .highlight_symbol("> ")
-                .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
-            popup,
+                .highlight_style(selection_style(view.source_control == 0)),
+            regions.body,
             &mut ListState::default().with_selected(Some(selected)),
         );
     }
@@ -678,16 +688,6 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             draw_path_picker(frame, modal);
             return;
         }
-        let area = frame.area();
-        let width = area.width.saturating_sub(2).min(76);
-        let height = area.height.saturating_sub(2).min(21);
-        let popup = Rect::new(
-            area.x + (area.width - width) / 2,
-            area.y + (area.height - height) / 2,
-            width,
-            height,
-        );
-        frame.render_widget(Clear, popup);
         let mut text = format!(
             "{}\nSource: {}\nFrom: {}\nArchived: {}\n\nDestination: {}\n\n",
             safe_text(&modal.session.title),
@@ -722,20 +722,72 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         if let Some(error) = modal.error.as_ref().filter(|_| !modal.busy) {
             text.push_str(&format!("\n\n{}", safe_text(error)));
         }
-        let outer = block(
+        let inner = crate::modal::shell(
+            frame,
             if modal.recovery {
                 "Inspect/recover relocation"
             } else {
                 "Relink session"
             },
-            true,
+            84,
+            28,
         );
-        let inner = outer.inner(popup);
-        frame.render_widget(outer, popup);
-        let sections = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
-        frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
-        frame.render_widget(Paragraph::new(controls), sections[1]);
+        let regions = crate::modal::regions(inner);
+        view.relink_scroll_limit.set(crate::modal::body(
+            frame,
+            regions.body,
+            text,
+            view.relink_scroll,
+        ));
+        frame.render_widget(
+            Paragraph::new(controls).wrap(Wrap { trim: false }),
+            regions.status,
+        );
+        modal_actions(
+            frame,
+            regions.actions,
+            "Cancel",
+            if modal.recovery {
+                "Continue recovery"
+            } else {
+                "Relink session"
+            },
+            if view.relink_back { 1 } else { 2 },
+            !modal.busy,
+            !modal.executing,
+        );
     }
+}
+
+fn modal_actions(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    secondary: &'static str,
+    primary: &'static str,
+    focus: usize,
+    enabled: bool,
+    cancellable: bool,
+) {
+    use crate::modal::Button;
+    crate::modal::buttons(
+        frame,
+        area,
+        &[
+            Button {
+                action: 0,
+                label: secondary,
+                enabled: cancellable,
+                primary: false,
+            },
+            Button {
+                action: 1,
+                label: primary,
+                enabled,
+                primary: true,
+            },
+        ],
+        focus.checked_sub(1),
+    );
 }
 
 fn draw_path_picker(frame: &mut Frame<'_>, modal: &RelinkModal) {
@@ -774,22 +826,12 @@ pub(crate) fn render_picker(
     input: &str,
     text: PickerText<'_>,
 ) {
-    let area = frame.area();
-    let width = area
-        .width
-        .saturating_sub(2)
-        .min(if text.sidebar.is_some() { 120 } else { 84 });
-    let height = area.height.saturating_sub(2).min(28);
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
+    let inner = crate::modal::shell(
+        frame,
+        text.title,
+        if text.sidebar.is_some() { 120 } else { 84 },
+        30,
     );
-    frame.render_widget(Clear, popup);
-    let outer = block(text.title, true);
-    let inner = outer.inner(popup);
-    frame.render_widget(outer, popup);
     if inner.height < 10 {
         frame.render_widget(
             Paragraph::new("Enlarge terminal to choose a folder. Esc cancels."),
@@ -819,29 +861,21 @@ pub(crate) fn render_picker(
         Constraint::Length(heading_height),
         Constraint::Length(3),
         Constraint::Min(1),
-        Constraint::Length(1),
         Constraint::Length(2),
+        Constraint::Length(1),
+        Constraint::Length(1),
     ])
     .split(inner);
     frame.render_widget(heading, parts[0]);
-    // Keep the caret visible in long paths without altering the input value.
-    let caret = picker.caret.min(input.len());
-    let available = usize::from(parts[1].width.saturating_sub(3));
-    let mut start = 0;
-    while unicode_width::UnicodeWidthStr::width(&input[start..caret]) >= available.max(1)
-        && start < caret
-    {
-        start += input[start..].chars().next().unwrap().len_utf8();
-    }
-    let rendered_input = safe_text(&input[start..]);
-    frame.render_widget(
-        Paragraph::new(rendered_input).block(block(text.field, picker.focus == 0)),
+    crate::modal::text_field(
+        frame,
         parts[1],
+        text.field,
+        input,
+        picker.caret,
+        picker.focus == 0,
+        !text.busy,
     );
-    if picker.focus == 0 && !text.busy && parts[1].width > 2 {
-        let offset = unicode_width::UnicodeWidthStr::width(&input[start..caret]) as u16;
-        frame.set_cursor_position((parts[1].x + 1 + offset, parts[1].y + 1));
-    }
     let worktrees = picker.worktrees.as_ref().filter(|w| w.active);
     let (items, selected): (Vec<ListItem>, Option<usize>) = if let Some(w) = worktrees {
         let items = w
@@ -957,23 +991,23 @@ pub(crate) fn render_picker(
         List::new(items)
             .block(block(title, picker.focus == 1))
             .highlight_symbol("> ")
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
+            .highlight_style(selection_style(picker.focus == 1)),
         tree_area,
         &mut state,
     );
     let ready = picker.valid && !picker.loading && !text.busy;
-    frame.render_widget(
-        Paragraph::new(if picker.focus == 2 {
-            "> [ Use this folder ]"
-        } else {
-            "  [ Use this folder ]"
-        })
-        .style(if ready {
-            Style::default().add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        }),
-        parts[3],
+    modal_actions(
+        frame,
+        parts[4],
+        "Cancel",
+        "Use this folder",
+        match picker.focus {
+            3 => 1,
+            2 => 2,
+            _ => 0,
+        },
+        ready,
+        true,
     );
     let hint = if picker.focus == 1 && worktrees.is_some() {
         "←/→ views · ↑/↓ select · Enter fills path"
@@ -982,7 +1016,7 @@ pub(crate) fn render_picker(
     } else if picker.focus == 1 {
         "↑/↓ select · Enter expand/collapse"
     } else {
-        "↑/↓ select · Enter uses folder"
+        "Enter focuses Use this folder · Tab controls"
     };
     let status = if text.busy {
         "Checking native state… Esc cancels".into()
@@ -1001,10 +1035,8 @@ pub(crate) fn render_picker(
             "Tab switch controls · Esc cancel".into()
         }
     };
-    frame.render_widget(
-        Paragraph::new(vec![Line::from(hint), Line::from(status)]),
-        parts[4],
-    );
+    frame.render_widget(Paragraph::new(status).wrap(Wrap { trim: false }), parts[3]);
+    frame.render_widget(Paragraph::new(hint), parts[5]);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1096,7 +1128,13 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             "Inspect/recover relocation",
             Some(("u Recover", "u Recover")),
         ),
-        (PreviousPane, "Navigation", "Esc", "Select Folders", None),
+        (
+            PreviousPane,
+            "Navigation",
+            "Esc / ← / Backspace",
+            "Select Folders",
+            None,
+        ),
         (
             NextPane,
             "Folders",
@@ -1360,19 +1398,7 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
     }
 }
 fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
-    let area = frame.area();
-    let width = area.width.saturating_sub(2).min(76);
-    let height = area.height.saturating_sub(2).min(22);
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    frame.render_widget(Clear, popup);
-    let border = block("Actions & shortcuts", true);
-    let inner = border.inner(popup);
-    frame.render_widget(border, popup);
+    let inner = crate::modal::shell(frame, "Actions & shortcuts", 80, 28);
     if inner.width < 26 || inner.height < 6 {
         frame.render_widget(
             Paragraph::new("Enlarge terminal. Esc closes.").wrap(Wrap { trim: false }),
@@ -1380,20 +1406,19 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         );
         return;
     }
-    let inner = Rect::new(
-        inner.x + 1,
-        inner.y,
-        inner.width.saturating_sub(2),
-        inner.height,
-    );
-    let sections = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(2),
-        Constraint::Length(1),
-    ])
-    .split(inner);
+    let regions = crate::modal::regions(inner);
+    let sections = [regions.body, regions.status, regions.hints];
     let entries = menu_entries(browser, view);
     let selected = view.help_selected.min(entries.len() - 1);
+    modal_actions(
+        frame,
+        regions.actions,
+        "Close",
+        "Run action",
+        view.help_control,
+        unavailable(entries[selected].command, browser, view).is_none(),
+        true,
+    );
     let mut items = Vec::new();
     let mut last_section = "";
     let mut selected_row = 0;
@@ -1460,7 +1485,7 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     frame.render_stateful_widget(
         List::new(items)
             .highlight_symbol("> ")
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED)),
+            .highlight_style(selection_style(view.help_control == 0)),
         body,
         &mut state,
     );
@@ -1484,9 +1509,9 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         Paragraph::new(if inner.width >= 43 {
             "↑/↓ select · Enter activate · Esc close"
         } else if inner.width >= 32 {
-            "↑↓ select · Enter run · Esc close"
+            "Esc close · ↑↓ select · Enter run"
         } else {
-            "↑↓ · Enter run · Esc close"
+            "Esc close · ↑↓ · Enter run"
         }),
         sections[2],
     );
@@ -1555,36 +1580,32 @@ fn session_title(
 }
 
 fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
-    let area = frame.area();
-    let width = area.width.saturating_sub(2).min(100);
-    let height = area.height.saturating_sub(2).min(30);
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    frame.render_widget(Clear, popup);
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
-        .split(popup);
-    let query = safe_text(&view.search_query);
-    let query_width = Line::from(query.clone()).width();
-    let input_width = sections[0].width.saturating_sub(2) as usize;
-    let offset = query_width.saturating_sub(input_width.saturating_sub(1));
-    frame.render_widget(
-        Paragraph::new(query)
-            .scroll((0, offset.min(u16::MAX as usize) as u16))
-            .block(block("Search sessions — Esc cancels", true)),
+    let inner = crate::modal::shell(frame, "Search sessions", 100, 30);
+    let regions = crate::modal::regions(inner);
+    let sections =
+        Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).split(regions.body);
+    crate::modal::text_field(
+        frame,
         sections[0],
+        "Search",
+        &view.search_query,
+        view.search_query.len(),
+        view.search_control == 0,
+        true,
     );
-    if input_width > 0 && sections[0].height >= 3 {
-        frame.set_cursor_position((
-            sections[0].x + 1 + query_width.saturating_sub(offset) as u16,
-            sections[0].y + 1,
-        ));
-    }
+    modal_actions(
+        frame,
+        regions.actions,
+        "Cancel",
+        "Open",
+        view.search_control,
+        !browser.search_results(&view.search_query).is_empty(),
+        true,
+    );
+    frame.render_widget(
+        Paragraph::new("↑/↓ results · Enter opens · Esc cancels"),
+        regions.hints,
+    );
     let results = browser.search_results(&view.search_query);
     if results.is_empty() {
         frame.render_widget(
@@ -1624,7 +1645,7 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     frame.render_stateful_widget(
         List::new(items)
             .block(block("Results — ↑/↓ select · Enter opens folder", false))
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+            .highlight_style(selection_style(view.help_control == 0))
             .highlight_symbol("> "),
         sections[1],
         &mut ListState::default().with_selected(Some(index)),
@@ -2186,6 +2207,46 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 Action::Continue
             };
         }
+        if modal.preview.is_none()
+            && modal.picker.as_ref().is_some_and(|p| p.focus == 3)
+            && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
+        {
+            return Action::CancelRelink;
+        }
+        if modal.preview.is_some() {
+            match key.code {
+                KeyCode::Up | KeyCode::PageUp => {
+                    view.relink_scroll = view.relink_scroll.saturating_sub(1);
+                    return Action::Continue;
+                }
+                KeyCode::Down | KeyCode::PageDown => {
+                    view.relink_scroll = view
+                        .relink_scroll
+                        .saturating_add(1)
+                        .min(view.relink_scroll_limit.get());
+                    return Action::Continue;
+                }
+                KeyCode::Home => {
+                    view.relink_scroll = 0;
+                    return Action::Continue;
+                }
+                KeyCode::End => {
+                    view.relink_scroll = view.relink_scroll_limit.get();
+                    return Action::Continue;
+                }
+                _ => {}
+            }
+        }
+        if modal.preview.is_some() && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            view.relink_back = !view.relink_back;
+            return Action::Continue;
+        }
+        if modal.preview.is_some()
+            && view.relink_back
+            && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
+        {
+            return Action::CancelRelink;
+        }
         if modal.preview.is_none() && key.code != KeyCode::Esc {
             if let Some(picker) = modal.picker.as_mut() {
                 modal.error = None;
@@ -2199,7 +2260,9 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         match key.code {
             KeyCode::Esc => view.relink = None,
             KeyCode::Char('u') if modal.recovery => return Action::RecoverRelink,
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char(' ')
+                if key.code == KeyCode::Enter || modal.preview.is_some() =>
+            {
                 return if modal.preview.is_some() {
                     Action::ApplyRelink
                 } else {
@@ -2231,6 +2294,21 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
     if let Some(selected) = view.source_picker.as_mut() {
         let sources = creation_sources(browser);
         match key.code {
+            KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
+                &mut view.source_control,
+                &[true, true, !sources.is_empty()],
+                key.code == KeyCode::BackTab,
+            ),
+            KeyCode::Enter | KeyCode::Char(' ') if view.source_control == 1 => {
+                view.source_picker = None
+            }
+            KeyCode::Char(' ') if view.source_control == 2 => {
+                let source = sources.get(*selected).copied();
+                view.source_picker = None;
+                if let Some(source) = source {
+                    return Action::CreateNew(source);
+                }
+            }
             KeyCode::Esc => view.source_picker = None,
             KeyCode::Up => *selected = selected.saturating_sub(1),
             KeyCode::Down => *selected = (*selected + 1).min(sources.len().saturating_sub(1)),
@@ -2249,7 +2327,15 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         let entries = menu_entries(browser, view);
         view.help_selected = view.help_selected.min(entries.len() - 1);
         let step = view.help_page_size.max(1);
+        let action_enabled =
+            unavailable(entries[view.help_selected].command, browser, view).is_none();
         match key.code {
+            KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
+                &mut view.help_control,
+                &[true, true, action_enabled],
+                key.code == KeyCode::BackTab,
+            ),
+            KeyCode::Enter | KeyCode::Char(' ') if view.help_control == 1 => view.help = false,
             KeyCode::Esc | KeyCode::Char('?') => view.help = false,
             KeyCode::Up | KeyCode::Char('k') => {
                 view.help_selected = view.help_selected.saturating_sub(1)
@@ -2263,7 +2349,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             }
             KeyCode::Home => view.help_selected = 0,
             KeyCode::End => view.help_selected = entries.len() - 1,
-            KeyCode::Enter if key.kind != KeyEventKind::Repeat => {
+            KeyCode::Enter | KeyCode::Char(' ') if key.kind != KeyEventKind::Repeat => {
                 let command = entries[view.help_selected].command;
                 if unavailable(command, browser, view).is_none() {
                     view.help = false;
@@ -2281,6 +2367,12 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             .position(|s| Some(&s.key) == view.search_selected.as_ref())
             .unwrap_or(0);
         match key.code {
+            KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
+                &mut view.search_control,
+                &[true, true, !results.is_empty()],
+                key.code == KeyCode::BackTab,
+            ),
+            KeyCode::Enter | KeyCode::Char(' ') if view.search_control == 1 => view.editing = false,
             KeyCode::Esc => view.editing = false,
             KeyCode::Up | KeyCode::Down => {
                 let next = if key.code == KeyCode::Up {
@@ -2290,7 +2382,9 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 };
                 view.search_selected = results.get(next).map(|s| s.key.clone());
             }
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char(' ')
+                if key.code == KeyCode::Enter || view.search_control == 2 =>
+            {
                 if let Some(session) = results.get(index) {
                     browser.query.clear();
                     if let Some(path) = session.cwd.as_ref().filter(|path| path.is_absolute()) {
@@ -2315,9 +2409,10 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 view.search_selected = None;
             }
             KeyCode::Char(c)
-                if !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                if view.search_control == 0
+                    && !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
                 view.search_query.push(c);
                 view.search_selected = None;
@@ -2361,6 +2456,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
     let command = match key.code {
         KeyCode::Char('?') => {
             view.help = true;
+            view.help_control = 0;
             view.help_selected = menu_entries(browser, view)
                 .iter()
                 .position(|entry| unavailable(entry.command, browser, view).is_none())
@@ -2384,6 +2480,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         KeyCode::Right | KeyCode::Char('l') if view.focus == 0 => Command::FolderRight,
         KeyCode::Left | KeyCode::Char('h') if view.focus == 0 => Command::FolderLeft,
+        KeyCode::Left | KeyCode::Backspace if view.focus == 1 => Command::PreviousPane,
         KeyCode::Esc => Command::PreviousPane,
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
@@ -2442,7 +2539,10 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             });
         }
 
-        Command::Help => view.help = true,
+        Command::Help => {
+            view.help = true;
+            view.help_control = 0;
+        }
         Command::Info => {
             if let Some(session) = selected_session(browser) {
                 view.info = Some(InfoModal::new(browser, session));
@@ -2458,6 +2558,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
         Command::Search => {
             view.editing = true;
+            view.search_control = 0;
             view.search_query.clear();
             view.search_selected = None;
         }
@@ -2536,6 +2637,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 return Action::CreateNew(sources[0]);
             }
             view.source_picker = Some(0);
+            view.source_control = 0;
         }
         Command::Resume => {
             if selected_session(browser).is_some_and(|s| {
@@ -2788,7 +2890,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 while event::poll(Duration::ZERO)?{let _=event::read()?;}
                 match task.await {
                     Ok(RelinkResult::Preview(result))=>match result {
-                        Ok(p)=>if let Some(modal)=view.relink.as_mut(){modal.busy=false;modal.input=p.target.display().to_string();modal.preview=Some(p);},
+                        Ok(p)=>if let Some(modal)=view.relink.as_mut(){modal.busy=false;modal.input=p.target.display().to_string();modal.preview=Some(p);view.relink_back=false;view.relink_scroll=0;},
                         Err(e)=>show_relink_failure(&mut view,e,false),
                     },
                     Ok(RelinkResult::Applied(crate::relocation::Outcome::Verified(p)))=>{
@@ -3256,20 +3358,20 @@ mod cleanup_tests {
             handle_key(&mut browser, &mut view, key(KeyCode::Char('r'))),
             Action::Refresh
         );
-        for code in [
-            KeyCode::Left,
-            KeyCode::Right,
-            KeyCode::Char('h'),
-            KeyCode::Char('l'),
-        ] {
+        for code in [KeyCode::Right, KeyCode::Char('h'), KeyCode::Char('l')] {
             assert_eq!(
                 handle_key(&mut browser, &mut view, key(code)),
                 Action::Continue
             );
             assert_eq!(view.focus, 1);
         }
-        handle_key(&mut browser, &mut view, key(KeyCode::Esc));
-        assert_eq!(view.focus, 0);
+        for code in [KeyCode::Esc, KeyCode::Left, KeyCode::Backspace] {
+            view.focus = 1;
+            handle_key(&mut browser, &mut view, key(code));
+            assert_eq!(view.focus, 0);
+            assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
+            assert_eq!(browser.expanded, expanded);
+        }
     }
 
     #[test]

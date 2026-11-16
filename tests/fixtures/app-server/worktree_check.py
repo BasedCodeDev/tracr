@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-worktrees-') as tmp:
         t.expect('> external worktree · feature/worktree')
         t.wait(lambda:'Loading worktrees' not in t.text())
         t.resize(24,60);t.expect('[Worktrees]')
-        t.send(b'\t\r');t.expect('Enter confirms')
+        t.send(b'\t\t\r');t.expect('Enter confirms')
         assert json.loads(native.read_text())['cwd']==str(old)
         t.send(b'\r');t.expect('Session relinked and verified.')
         assert json.loads(native.read_text())['cwd']==str(new)

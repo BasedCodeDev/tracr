@@ -1,0 +1,14 @@
+TODO: 
+
+- [x] Give Git its own action context and focus styling; collapse to a focused strip and expand on Tab entry.
+
+- [x] Create new worktrees from Folders HEAD or the selected Git commit, defaulting to main/.worktrees with local exclusions and relative links.
+
+- Support archiving a session (for codex)
+  - Investigate how other harnesses handle this.
+
+- Hide the "Recover" option if there are no unfinished reolocations.
+
+- Investigate actually deleting chats, in a way that codex doesn't seem to support.
+
+- Herdr style mouse compatibility.

@@ -275,8 +275,22 @@ impl Picker {
             return false;
         }
         match key.code {
-            KeyCode::Tab => self.focus = (self.focus + 1) % 3,
-            KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
+            KeyCode::Tab => {
+                self.focus = match self.focus {
+                    0 => 1,
+                    1 => 3,
+                    3 => 2,
+                    _ => 0,
+                }
+            }
+            KeyCode::BackTab => {
+                self.focus = match self.focus {
+                    0 => 2,
+                    2 => 3,
+                    3 => 1,
+                    _ => 0,
+                }
+            }
             KeyCode::Up | KeyCode::Down => {
                 if !self.rows.is_empty() {
                     let index = self
@@ -314,8 +328,10 @@ impl Picker {
                     self.changed();
                 }
             }
-            KeyCode::Enter if self.focus == 0 => return !input.is_empty(),
-            KeyCode::Enter => return self.valid && !self.loading,
+            KeyCode::Enter if self.focus == 0 => self.focus = 2,
+            KeyCode::Enter | KeyCode::Char(' ') if self.focus == 2 => {
+                return self.valid && !self.loading;
+            }
             KeyCode::Left if self.focus == 0 => self.caret = previous(input, self.caret),
             KeyCode::Right if self.focus == 0 => self.caret = next(input, self.caret),
             KeyCode::Home if self.focus == 0 => self.caret = 0,
@@ -659,6 +675,8 @@ mod tests {
         assert!(picker.expanded.contains(&root.path().join("empty")));
         picker.valid = true;
         picker.loading = false;
+        picker.key(&mut input, key(KeyCode::Tab));
+        assert_eq!(picker.focus, 3);
         picker.key(&mut input, key(KeyCode::Tab));
         assert!(picker.key(&mut input, key(KeyCode::Enter)));
     }

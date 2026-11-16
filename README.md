@@ -214,8 +214,8 @@ Terminals narrower than 100 columns show the focused pane full-width.
 
 - Up / Down or `k/j`: select the previous / next item. In Folders, Right / `l`
   expands a folder or selects its first child; Left / `h` collapses it or selects
-  its displayed parent. Enter focuses Sessions; Escape returns to Folders.
-  Left / Right and `h/l` do nothing in Sessions.
+  its displayed parent. Enter focuses Sessions; Escape, Left Arrow, or Backspace
+  returns to Folders. Right and `h/l` do nothing in Sessions.
 - With a Git panel present, Tab / Shift-Tab toggles between it and the last
   focused upper pane, expanding collapsed history on entry.
   Page Up / Page Down scroll through history when it is focused.
@@ -357,6 +357,20 @@ The pseudo-terminal helper has passed against the compiled binary. The full Rust
 artifacts require their own verification; broader terminal/version coverage remains
 release work.
 
+## Dialog controls
+
+Dialogs share padded frames, bordered text fields, and a fixed bottom action row.
+The focused control has a stronger border or highlighted button. Tab/Shift-Tab
+moves between controls; Enter advances through form fields and activates a focused
+button. Space also activates buttons. Search, action lists, and harness selection
+retain Enter-to-open/run behavior. Escape cancels, closes, or returns to editing
+according to the current step.
+
+Long content scrolls independently of the action row. Copy feedback and progress
+stay above the buttons. In small terminals spacing is reduced; an explicit resize
+message appears when controls cannot fit. Running file/session mutations retain
+their existing cancellation restrictions.
+
 ## Relink or relocate a session
 
 Select the session and press `R`, or choose **Relink session** from `?`. Supply an
@@ -365,9 +379,10 @@ existing directory using the folder tree or the editable **New folder** field
 
 - Up/Down selects a folder and fills the path field, including while typing.
 - Enter in the picker tree expands or collapses the folder.
-- Tab switches between the path field, tree, and **Use this folder** button.
+- Tab switches between the path field, tree, **Cancel**, and **Use this folder**.
 - Type or paste a path to reveal it in the tree. Ctrl+U clears the field.
-- Enter in the field or on **Use this folder** opens the preview; Esc cancels.
+- Enter in the field focuses **Use this folder**; Enter on that button opens
+  the preview. Esc cancels.
 
 The tree starts at the closest existing parent of the original folder. It includes
 hidden directories and loads expanded folders in the background.
@@ -451,8 +466,9 @@ Enter a new branch name and review the destination. By default, tracr suggests
 For example, `feature/login` creates `.worktrees/feature/login` under the main
 checkout. The suggestion follows the branch name until you edit the destination.
 Custom paths may be absolute, `~/…`, or relative to the source checkout root.
-Tab/Shift-Tab switches controls; Ctrl-U clears a field. Enter opens the preview;
-Enter again creates the worktree. Escape returns from preview to editing, then
+Tab/Shift-Tab switches controls; Ctrl-U clears a field. Enter advances from
+New branch to Destination, then focuses **Review**. Enter on **Review** opens
+the preview; Enter on **Create worktree** confirms it. Escape returns from preview to editing, then
 cancels. Creation itself cannot be cancelled through the dialog.
 
 The preview fixes the starting commit: later HEAD changes do not silently alter

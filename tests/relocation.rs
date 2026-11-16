@@ -255,8 +255,13 @@ fn failure_dialog_is_explicit_scrollable_and_only_dismisses() {
             reports.push(view.error_dialog.as_ref().unwrap().report());
             let text = render(&mut terminal, &view);
             assert!(text.contains("! Relink failed"));
-            assert!(text.contains("c Copy message"));
-            assert!(text.contains("Enter/Esc close"));
+            if width >= 36 {
+                assert!(text.contains("c Copy message"));
+                assert!(text.contains("Esc close"));
+            } else {
+                assert!(text.contains("Esc close"));
+                assert!(text.contains("Enlarge terminal"));
+            }
             if width == 100 {
                 assert!(text.contains(if recovery {
                     "may already have changed"
@@ -283,8 +288,11 @@ fn failure_dialog_is_explicit_scrollable_and_only_dismisses() {
                 .iter()
                 .map(|c| c.symbol())
                 .collect();
-            assert!(text.contains("native profile"));
-            assert!(text.contains("Enter/Esc close"));
+            assert!(
+                text.contains("native") && text.contains("profile"),
+                "{width}x{height}: {text}"
+            );
+            assert!(text.contains("Esc close"));
             assert_eq!(
                 view.error_dialog.as_ref().unwrap().report(),
                 *reports.last().unwrap()

@@ -113,18 +113,14 @@ impl Information {
         frame: &mut Frame<'_>,
         inner: Rect,
         scroll: u16,
-        feedback: Option<&str>,
+        _feedback: Option<&str>,
     ) -> u16 {
         let title = Paragraph::new(safe_text(&self.title))
             .style(Style::default().add_modifier(Modifier::BOLD))
             .wrap(Wrap { trim: false });
         let title_height = title.line_count(inner.width).min(3) as u16;
-        let parts = Layout::vertical([
-            Constraint::Length(title_height + 1),
-            Constraint::Min(1),
-            Constraint::Length(2),
-        ])
-        .split(inner);
+        let parts = Layout::vertical([Constraint::Length(title_height + 1), Constraint::Min(1)])
+            .split(inner);
         frame.render_widget(title, parts[0]);
         let mut lines = self.lines(parts[1].width as usize, inner.width + 2 < 50);
         // Extremely long titles remain available in full in the scrolling content.
@@ -142,23 +138,6 @@ impl Information {
             .saturating_sub(parts[1].height as usize)
             .min(u16::MAX as usize) as u16;
         frame.render_widget(Paragraph::new(lines).scroll((scroll.min(max), 0)), parts[1]);
-        let controls = if inner.width >= 60 {
-            "c Copy information · Enter/Esc/i close"
-        } else {
-            "c Copy · Esc/i close"
-        };
-        let navigation = feedback.unwrap_or(if inner.width >= 50 {
-            "↑/↓ PgUp/PgDn scroll · Home/End"
-        } else {
-            "↑/↓ scroll · Home/End"
-        });
-        frame.render_widget(
-            Paragraph::new(vec![
-                Line::from(controls),
-                Line::from(safe_text(navigation)),
-            ]),
-            parts[2],
-        );
         max
     }
 }
@@ -300,7 +279,7 @@ mod tests {
         assert!(!report.contains("Some("));
     }
     #[test]
-    fn scroll_keeps_heading_and_copy_feedback_fixed() {
+    fn content_keeps_heading_and_leaves_actions_to_dialog() {
         let info = example();
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(36, 12)).unwrap();
@@ -317,7 +296,7 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect();
         assert!(text.contains("A session with a readable title"));
-        assert!(text.contains("Message copied"));
-        assert!(text.contains("c Copy"));
+        assert!(!text.contains("Message copied"));
+        assert!(!text.contains("c Copy"));
     }
 }

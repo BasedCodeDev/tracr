@@ -33,14 +33,14 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
         assert json.loads((home/'native.json').read_text())['cwd']==str(old)
         t.send(b'\r')  # Tree Enter expands/collapses, never confirms.
         assert json.loads((home/'native.json').read_text())['cwd']==str(old)
-        t.send(b'\x15'+str(new).encode()+b'\r');t.expect('Enter confirms');t.expect('Permissions: Workspace')
+        t.send(b'\x15'+str(new).encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms');t.expect('Permissions: Workspace')
         t.send(b'\x1b');t.wait(lambda:'Enter confirms' not in t.text())
         assert json.loads((home/'native.json').read_text())['cwd']==str(old)
         t.send(b'\r');t.expect('New folder');t.expect('Use this folder')
         t.resize(24, 36);t.expect('New folder');t.expect('Use this folder')
         t.resize(10, 24);t.expect('Enlarge terminal')
         t.resize(80, 240);t.expect('Use this folder')
-        t.send(b'\x15\x1b[200~'+str(new).encode()+b'\x1b[201~\r');t.expect('Enter confirms')
+        t.send(b'\x15\x1b[200~'+str(new).encode()+b'\x1b[201~\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms')
         t.send(b'\r');t.expect('Session relinked and verified.')
         t.inspect('ID: session')
         t.wait(lambda:'Unlinked · codex' not in t.text())
@@ -85,7 +85,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
     t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(new)],env)
     try:
         t.inspect('ID: session');t.send(b'R');t.expect('New folder')
-        t.send(b'\x15'+str(child).encode()+b'\r');t.expect('Enter confirms')
+        t.send(b'\x15'+str(child).encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms')
         t.expect('Project files stay where they are.')
         t.send(b'\r');t.expect('Session relinked and verified.')
         t.inspect('ID: session')
@@ -113,11 +113,11 @@ for uncertain in (False, True):
         t=Terminal(command,env)
         try:
             t.inspect('ID: session');t.send(b'R');t.expect('New folder')
-            t.send(b'\x15'+str(new).encode()+b'\r')
+            t.send(b'\x15'+str(new).encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r')
             if uncertain:
                 t.expect('Enter confirms');t.send(b'\r')
             t.expect('! Relink failed')
-            t.expect('Enter/Esc close')
+            t.expect('Esc close')
             if uncertain:
                 t.expect('Relink needs recovery');t.expect('folder may already have changed')
                 assert 'folder was not changed' not in t.text()
@@ -130,9 +130,9 @@ for uncertain in (False, True):
             report=reports[0]
             assert str(old) in report and str(new) in report and 'Technical details:' in report
             assert '\n\n' in report and 'Enter/Esc' not in report and '┃' not in report
-            t.resize(12,36);t.expect('! Relink failed');t.expect('Enter/Esc close')
+            t.resize(12,36);t.expect('! Relink failed');t.expect('Esc close')
             t.expect('c Copy message')
-            t.send(b'\x1b[6~');t.expect('Enter/Esc close')
+            t.send(b'\x1b[6~');t.expect('Esc close')
             t.send(b'c');t.wait(lambda:len(capture.read_text().splitlines())==2)
             assert json.loads(capture.read_text().splitlines()[1])==report
             t.expect('Message copied')

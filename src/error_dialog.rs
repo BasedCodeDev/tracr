@@ -1,14 +1,12 @@
 //! Shared copyable, scrollable error presentation; operation reports are supplied by callers.
-use crate::browser::safe_text;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
 };
 use std::cell::Cell;
 
+#[derive(Clone, Copy)]
 pub enum Event {
     None,
     Copy,
@@ -21,6 +19,7 @@ pub struct ErrorDialog {
     information: bool,
     content: Option<crate::info_content::Information>,
     pub scroll: u16,
+    pub button_focus: usize,
     pub scroll_limit: Cell<u16>,
     pub copy_status: Option<String>,
     pub copy_task: Option<tokio::task::JoinHandle<Result<(), String>>>,
@@ -38,6 +37,7 @@ impl ErrorDialog {
             information: false,
             content: None,
             scroll: 0,
+            button_focus: 1,
             scroll_limit: Cell::new(0),
             copy_status: None,
             copy_task: None,
@@ -70,7 +70,34 @@ impl ErrorDialog {
         self.scroll = self.scroll.min(self.scroll_limit.get());
         match key.code {
             KeyCode::Char('c') if self.copy_task.is_none() => return Event::Copy,
-            KeyCode::Enter | KeyCode::Esc => return Event::Close,
+            KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
+                &mut self.button_focus,
+                &[self.copy_task.is_none(), true],
+                key.code == KeyCode::BackTab,
+            ),
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                use crate::modal::Button;
+                return crate::modal::activate(
+                    key,
+                    &[
+                        Button {
+                            action: Event::Copy,
+                            label: "Copy",
+                            enabled: self.copy_task.is_none(),
+                            primary: false,
+                        },
+                        Button {
+                            action: Event::Close,
+                            label: "Close",
+                            enabled: true,
+                            primary: true,
+                        },
+                    ],
+                    self.button_focus,
+                )
+                .unwrap_or(Event::None);
+            }
+            KeyCode::Esc => return Event::Close,
             KeyCode::Char('i') if self.information => return Event::Close,
             KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
             KeyCode::Down => {
@@ -114,65 +141,64 @@ impl ErrorDialog {
             frame.render_widget(Paragraph::new("tracr: enlarge terminal"), area);
             return;
         }
-        let width = area.width.min(if self.information { 80 } else { 76 });
-        let height = area.height.min(if self.information { 28 } else { 24 });
-        let popup = Rect::new(
-            area.x + (area.width - width) / 2,
-            area.y + (area.height - height) / 2,
-            width,
-            height,
+        let inner = crate::modal::shell(
+            frame,
+            &self.title,
+            if self.information { 80 } else { 76 },
+            if self.information { 28 } else { 24 },
         );
-        frame.render_widget(Clear, popup);
-        let outer = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Thick)
-            .title(safe_text(&self.title));
-        let inner = outer.inner(popup);
-        frame.render_widget(outer, popup);
+        let regions = crate::modal::regions(inner);
         if let Some(content) = &self.content {
-            self.scroll_limit.set(content.draw(
-                frame,
-                inner,
-                self.scroll,
-                self.copy_status.as_deref(),
-            ));
-            return;
-        }
-        let parts = Layout::vertical([
-            Constraint::Length(if self.information { 0 } else { 1 }),
-            Constraint::Min(1),
-            Constraint::Length(3),
-        ])
-        .split(inner);
-        frame.render_widget(
-            Paragraph::new(safe_text(&self.summary))
-                .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            parts[0],
-        );
-        let text = if let Some(status) = &self.copy_status {
-            format!("{status}\n\n{}", self.body)
+            self.scroll_limit
+                .set(content.draw(frame, regions.body, self.scroll, None));
         } else {
-            self.body.clone()
-        };
-        let text = text
-            .split('\n')
-            .map(safe_text)
-            .collect::<Vec<_>>()
-            .join("\n");
-        let body = Paragraph::new(text).wrap(Wrap { trim: false });
-        let max = body
-            .line_count(parts[1].width)
-            .saturating_sub(parts[1].height as usize)
-            .min(u16::MAX as usize) as u16;
-        self.scroll_limit.set(max);
-        frame.render_widget(body.scroll((self.scroll.min(max), 0)), parts[1]);
-        frame.render_widget(
-            Paragraph::new(if self.information {
-                "c Copy information\nEnter/Esc/i close\n↑/↓ PgUp/PgDn scroll · Home/End"
+            let text = if self.summary.is_empty() {
+                self.body.clone()
             } else {
-                "c Copy message\nEnter/Esc close\n↑/↓ scroll · Home top"
+                format!("{}\n\n{}", self.summary, self.body)
+            };
+            self.scroll_limit
+                .set(crate::modal::body(frame, regions.body, text, self.scroll));
+        }
+        frame.render_widget(
+            Paragraph::new(self.copy_status.as_deref().unwrap_or("")).wrap(Wrap { trim: false }),
+            regions.status,
+        );
+        use crate::modal::Button;
+        crate::modal::buttons(
+            frame,
+            regions.actions,
+            &[
+                Button {
+                    action: Event::Copy,
+                    label: if self.information {
+                        "Copy information"
+                    } else {
+                        "Copy message"
+                    },
+                    enabled: self.copy_task.is_none(),
+                    primary: false,
+                },
+                Button {
+                    action: Event::Close,
+                    label: "Close",
+                    enabled: true,
+                    primary: true,
+                },
+            ],
+            Some(self.button_focus),
+        );
+        frame.render_widget(
+            Paragraph::new(if inner.width < 32 {
+                "Esc close · c Copy"
+            } else if inner.width < 50 {
+                "c Copy message · Esc close"
+            } else if self.information {
+                "c Copy · Enter activate · Esc close · ↑/↓ scroll"
+            } else {
+                "c Copy message · Enter activate · Esc close · ↑/↓ scroll"
             }),
-            parts[2],
+            regions.hints,
         );
     }
 }

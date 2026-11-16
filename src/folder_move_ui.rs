@@ -6,10 +6,9 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::Paragraph,
 };
 use std::path::{Path, PathBuf};
 
@@ -67,6 +66,7 @@ pub struct Modal {
     pub executing: bool,
     pub message: Option<String>,
     pub scroll: u16,
+    action_back: bool,
     scroll_limit: std::cell::Cell<u16>,
     release_task: Option<tokio::task::JoinHandle<()>>,
     release_attempts: std::collections::BTreeMap<crate::domain::SessionKey, std::time::Instant>,
@@ -96,6 +96,7 @@ impl Modal {
             executing: false,
             message: None,
             scroll: 0,
+            action_back: false,
             scroll_limit: std::cell::Cell::new(0),
             release_task: None,
             release_attempts: Default::default(),
@@ -117,6 +118,7 @@ impl Modal {
                 j.error.unwrap_or_default()
             )),
             scroll: 0,
+            action_back: false,
             scroll_limit: std::cell::Cell::new(0),
             release_task: None,
             release_attempts: Default::default(),
@@ -196,19 +198,31 @@ impl Modal {
                 Action::Continue
             };
         }
+        if self.plan.is_none()
+            && self.picker.as_ref().is_some_and(|p| p.focus == 3)
+            && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
+        {
+            return Action::CloseFolderMove;
+        }
+        if self.plan.is_some() && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            self.action_back = !self.action_back;
+            return Action::Continue;
+        }
+        let back = self.action_back && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '));
         if key.code == KeyCode::Char('u') && self.recovery {
             return Action::RecoverRelink;
         }
-        if key.code == KeyCode::Esc {
+        if key.code == KeyCode::Esc || back {
             if self.plan.is_some() && !self.recovery {
                 self.plan = None;
+                self.action_back = false;
                 self.message = None;
                 self.scroll = 0;
             } else {
                 return Action::CloseFolderMove;
             }
         } else if self.plan.is_some() {
-            if key.code == KeyCode::Enter {
+            if matches!(key.code, KeyCode::Enter | KeyCode::Char(' ')) {
                 return Action::ApplyFolderMove;
             }
             match key.code {
@@ -290,25 +304,17 @@ impl Modal {
                 return;
             }
         }
-        let area = frame.area();
-        let width = area.width.saturating_sub(2).min(86);
-        let height = area.height.saturating_sub(2).min(28);
-        let popup = Rect::new(
-            area.x + (area.width - width) / 2,
-            area.y + (area.height - height) / 2,
-            width,
-            height,
+        let inner = crate::modal::shell(
+            frame,
+            if self.recovery {
+                "Inspect/recover folder move"
+            } else {
+                "Move folder"
+            },
+            90,
+            30,
         );
-        frame.render_widget(Clear, popup);
-        let title = if self.recovery {
-            "Inspect/recover folder move"
-        } else {
-            "Move folder"
-        };
-        let block = Block::default().borders(Borders::ALL).title(title);
-        let inner = block.inner(popup);
-        frame.render_widget(block, popup);
-        let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).split(inner);
+        let regions = crate::modal::regions(inner);
         let target = self
             .target()
             .map(|p| p.display().to_string())
@@ -344,13 +350,37 @@ impl Modal {
         } else {
             "Enter previews · Esc cancels"
         };
-        frame.render_widget(
-            Paragraph::new(text.lines().map(safe_text).collect::<Vec<_>>().join("\n"))
-                .wrap(Wrap { trim: false })
-                .scroll((self.scroll, 0)),
-            parts[0],
+        self.scroll_limit
+            .set(crate::modal::body(frame, regions.body, text, self.scroll));
+        frame.render_widget(Paragraph::new(controls), regions.status);
+        use crate::modal::Button;
+        crate::modal::buttons(
+            frame,
+            regions.actions,
+            &[
+                Button {
+                    action: 0,
+                    label: if self.recovery { "Close" } else { "Back" },
+                    enabled: !self.executing,
+                    primary: false,
+                },
+                Button {
+                    action: 1,
+                    label: if self.recovery {
+                        "Continue recovery"
+                    } else {
+                        "Move folder"
+                    },
+                    enabled: !self.busy,
+                    primary: true,
+                },
+            ],
+            Some(usize::from(!self.action_back)),
         );
-        frame.render_widget(Paragraph::new(controls), parts[1]);
+        frame.render_widget(
+            Paragraph::new("Tab buttons · Enter activate · Esc back"),
+            regions.hints,
+        );
     }
 }
 

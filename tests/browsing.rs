@@ -512,18 +512,18 @@ async fn enter_and_escape_navigate_panes_outside_search() {
         assert_eq!(view.focus, 1);
         assert!(!browser.expanded.contains(&path));
         assert_eq!(view.editing, editing);
-        for code in [
-            KeyCode::Right,
-            KeyCode::Left,
-            KeyCode::Char('h'),
-            KeyCode::Char('l'),
-        ] {
+        for code in [KeyCode::Right, KeyCode::Char('h'), KeyCode::Char('l')] {
             handle_key(&mut browser, &mut view, key(code));
             assert_eq!(view.focus, 1);
             assert!(!browser.expanded.contains(&path));
         }
-        handle_key(&mut browser, &mut view, key(KeyCode::Esc));
-        assert_eq!(view.focus, 0);
+        for code in [KeyCode::Esc, KeyCode::Left, KeyCode::Backspace] {
+            view.focus = 1;
+            handle_key(&mut browser, &mut view, key(code));
+            assert_eq!(view.focus, 0);
+            assert_eq!(browser.folder, FolderFilter::Path(path.clone()));
+            assert!(!browser.expanded.contains(&path));
+        }
         handle_key(&mut browser, &mut view, key(KeyCode::Down));
         for expected in [1, 0, 1, 0] {
             handle_key(&mut browser, &mut view, key(KeyCode::Tab));
@@ -1037,6 +1037,12 @@ async fn information_modal_is_requested_pinned_scrollable_and_blocks_browser_act
     info.refresh(&browser);
     assert!(info.dialog.report().contains("Metadata unavailable"));
     assert!(info.dialog.report().contains(&session.key.native_id));
+    // Tab moved focus to Copy; Enter activates that button, not Close.
+    assert_eq!(
+        handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
+        Action::CopyInformation
+    );
+    handle_key(&mut browser, &mut view, key(KeyCode::Tab));
     assert_eq!(
         handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
         Action::CloseInformation

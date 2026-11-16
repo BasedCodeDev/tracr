@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
         t.inspect('ID: session')
         t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
         # Edit the exact destination directly; no separate naming screen.
-        t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r');t.expect('Enter confirms')
+        t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms')
         t.expect('1 sessions')
         t.send(b'\x1b')
         t.wait(lambda: 'Enter confirms' not in t.text())
@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(root/'moved')],env)
         t.inspect('ID: session')
         t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
-        t.send(b'\x1b[Z\x15'+(str(archive)+'/').encode()+b'\r');t.expect('Enter confirms')
+        t.send(b'\x1b[Z\x15'+(str(archive)+'/').encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms')
         t.expect(str(archive/'moved'))
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
         assert 'u Recover' not in t.text()
@@ -73,7 +73,7 @@ for recovery in (False, True):
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         try:
             t.inspect('ID: session');t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
-            t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r')
+            t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r')
             if recovery:
                 t.expect('Enter confirms');t.send(b'\r')
             t.expect('! Folder move failed');t.expect('c Copy message')

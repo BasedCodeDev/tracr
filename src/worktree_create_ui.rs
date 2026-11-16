@@ -1,12 +1,12 @@
 //! Shared worktree dialog for checkout HEAD and selected history commits.
 use crate::worktree_create::{self as backend, Context, Plan};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout},
     style::{Color, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    text::Line,
+    widgets::{Paragraph, Wrap},
 };
 use std::path::PathBuf;
 
@@ -27,6 +27,8 @@ pub struct Modal {
     edited_destination: bool,
     caret: [usize; 2],
     scroll: u16,
+    preview_focus: usize,
+    scroll_limit: std::cell::Cell<u16>,
 }
 impl Drop for Modal {
     fn drop(&mut self) {
@@ -50,6 +52,8 @@ impl Modal {
             edited_destination: false,
             caret: [0, 0],
             scroll: 0,
+            preview_focus: 1,
+            scroll_limit: std::cell::Cell::new(0),
             task: Some(tokio::spawn(async move {
                 backend::context(&origin, commit.as_deref())
                     .await
@@ -78,6 +82,7 @@ impl Modal {
             }
             Ok(ResultStage::Preview(plan)) => {
                 self.plan = Some(plan);
+                self.preview_focus = 1;
                 self.scroll = 0;
             }
             Ok(ResultStage::Created(path)) => {
@@ -137,19 +142,33 @@ impl Modal {
             }
             return true;
         }
-        if self.task.is_some() {
-            return false;
+        if self.task.is_some() || self.context.is_none() {
+            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+                self.focus = 2;
+            }
+            return self.focus == 2 && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '));
         }
         if let Some(plan) = &self.plan {
             match key.code {
-                KeyCode::Enter if key.kind != KeyEventKind::Repeat => {
+                KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
+                    &mut self.preview_focus,
+                    &[true, true],
+                    key.code == KeyCode::BackTab,
+                ),
+                KeyCode::Enter | KeyCode::Char(' ') if key.kind != KeyEventKind::Repeat => {
+                    if self.preview_focus == 0 {
+                        self.plan = None;
+                        return false;
+                    }
                     let plan = plan.clone();
                     self.executing = true;
                     self.task = Some(tokio::spawn(async move {
                         backend::execute(plan).await.map(ResultStage::Created)
                     }));
                 }
-                KeyCode::Down | KeyCode::PageDown => self.scroll = self.scroll.saturating_add(1),
+                KeyCode::Down | KeyCode::PageDown => {
+                    self.scroll = self.scroll.saturating_add(1).min(self.scroll_limit.get())
+                }
                 KeyCode::Up | KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(1),
                 KeyCode::Home => self.scroll = 0,
                 _ => {}
@@ -160,9 +179,19 @@ impl Modal {
             return false;
         }
         match key.code {
-            KeyCode::Tab => self.focus = (self.focus + 1) % 3,
-            KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
-            KeyCode::Enter if key.kind != KeyEventKind::Repeat => {
+            KeyCode::Tab => crate::modal::cycle(&mut self.focus, &[true, true, true, true], false),
+            KeyCode::BackTab => {
+                crate::modal::cycle(&mut self.focus, &[true, true, true, true], true)
+            }
+            KeyCode::Enter if self.focus < 2 && key.kind != KeyEventKind::Repeat => {
+                self.focus = if self.focus == 0 { 1 } else { 3 };
+            }
+            KeyCode::Enter | KeyCode::Char(' ')
+                if self.focus >= 2 && key.kind != KeyEventKind::Repeat =>
+            {
+                if self.focus == 2 {
+                    return true;
+                }
                 let context = self.context.clone().unwrap();
                 match backend::destination(&context, &self.destination) {
                     Ok(destination) => {
@@ -183,42 +212,8 @@ impl Modal {
                 } else {
                     &mut self.destination
                 };
-                let caret = &mut self.caret[self.focus];
-                let previous = input[..*caret].char_indices().last().map_or(0, |(i, _)| i);
-                let next = input[*caret..]
-                    .chars()
-                    .next()
-                    .map_or(*caret, |c| *caret + c.len_utf8());
-                match key.code {
-                    KeyCode::Left => *caret = previous,
-                    KeyCode::Right => *caret = next,
-                    KeyCode::Home => *caret = 0,
-                    KeyCode::End => *caret = input.len(),
-                    KeyCode::Backspace if *caret > 0 => {
-                        input.replace_range(previous..*caret, "");
-                        *caret = previous;
-                        self.changed();
-                    }
-                    KeyCode::Delete => {
-                        input.replace_range(*caret..next, "");
-                        self.changed();
-                    }
-                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        input.clear();
-                        *caret = 0;
-                        self.changed();
-                    }
-                    KeyCode::Char(c)
-                        if !key
-                            .modifiers
-                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                            && !c.is_control() =>
-                    {
-                        input.insert(*caret, c);
-                        *caret += c.len_utf8();
-                        self.changed();
-                    }
-                    _ => {}
+                if crate::modal::edit(input, &mut self.caret[self.focus], key) {
+                    self.changed();
                 }
             }
             _ => {}
@@ -231,26 +226,17 @@ impl Modal {
             frame.render_widget(Paragraph::new("Create worktree: enlarge terminal"), area);
             return;
         }
-        let width = area.width.min(96);
-        let height = area.height.min(28);
-        let area = Rect::new(
-            area.x + (area.width - width) / 2,
-            area.y + (area.height - height) / 2,
-            width,
-            height,
-        );
-        frame.render_widget(Clear, area);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(if self.plan.is_some() {
+        let inner = crate::modal::shell(
+            frame,
+            if self.plan.is_some() {
                 "Review new worktree"
             } else {
                 "Create worktree"
-            })
-            .border_style(Style::default().fg(Color::Cyan));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let sections = Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).split(inner);
+            },
+            96,
+            28,
+        );
+        let sections = crate::modal::regions(inner);
         let mut lines = vec![];
         if let Some(context) = &self.context {
             lines.push(Line::from(format!(
@@ -280,94 +266,121 @@ impl Modal {
                 String::new(),
                 "Starts from committed content; uncommitted changes stay in the source checkout.".into(),
                 "Relative Git links require Git 2.48+ and compatible tools. Git enables a repository extension; older Git cannot open this repository.".into(),
-                portability.into(), exclusion, String::new(), "Enter: Create worktree".into(),
+                portability.into(), exclusion,
             ];
             for line in details {
                 lines.push(Line::from(crate::browser::safe_text(&line)));
             }
-        } else if self.context.is_some() {
-            for (index, (label, value)) in [
-                ("New branch", &self.branch),
-                ("Destination", &self.destination),
-            ]
+        }
+        let summary = lines
             .iter()
-            .enumerate()
-            {
-                lines.push(Line::from(*label));
-                let mut value = value.to_string();
-                if self.focus == index {
-                    value.insert(self.caret[index], '▏');
-                }
-                // Scroll with the caret and account for wide Unicode characters.
-                let limit = usize::from(inner.width).saturating_sub(2);
-                let cursor = if self.focus == index {
-                    self.caret[index]
-                } else {
-                    value.len()
-                };
-                let mut start = cursor;
-                let mut columns = 1;
-                for (offset, character) in value[..cursor].char_indices().rev() {
-                    let width = unicode_width::UnicodeWidthChar::width(character).unwrap_or(0);
-                    if columns + width > limit {
-                        break;
-                    }
-                    columns += width;
-                    start = offset;
-                }
-                let mut columns = 0;
-                let shown: String = value[start..]
-                    .chars()
-                    .take_while(|character| {
-                        columns += unicode_width::UnicodeWidthChar::width(*character).unwrap_or(0);
-                        columns <= limit
-                    })
-                    .collect();
-                lines.push(Line::from(Span::styled(
-                    shown,
-                    if self.focus == index {
-                        Style::default().fg(Color::Cyan)
-                    } else {
-                        Style::default()
-                    },
-                )));
-            }
-            lines.push(Line::from(Span::styled(
-                "[ Review ]",
-                if self.focus == 2 {
-                    Style::default().fg(Color::Cyan)
-                } else {
-                    Style::default()
-                },
-            )));
-            lines.push(Line::from(
-                "Relative destinations use the source checkout root.",
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if self.plan.is_some() {
+            self.scroll_limit.set(crate::modal::body(
+                frame,
+                sections.body,
+                summary,
+                self.scroll,
             ));
-        }
-        if let Some(error) = &self.error {
-            lines.push(Line::from(Span::styled(
-                crate::browser::safe_text(error),
-                Style::default().fg(Color::Red),
-            )));
-        }
-        frame.render_widget(
-            Paragraph::new(lines)
+        } else {
+            let gap = u16::from(sections.body.height >= 12);
+            let summary_height = Paragraph::new(summary.clone())
                 .wrap(Wrap { trim: false })
-                .scroll((self.scroll, 0)),
-            sections[0],
-        );
-        let controls = if self.executing {
+                .line_count(sections.body.width)
+                .min(4) as u16;
+            let summary_height =
+                summary_height.min(sections.body.height.saturating_sub(6 + 2 * gap));
+            let fields = Layout::vertical([
+                Constraint::Length(summary_height),
+                Constraint::Length(gap),
+                Constraint::Length(3),
+                Constraint::Length(gap),
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .split(sections.body);
+            crate::modal::body(frame, fields[0], summary, 0);
+            crate::modal::text_field(
+                frame,
+                fields[2],
+                "New branch",
+                &self.branch,
+                self.caret[0],
+                self.focus == 0,
+                self.task.is_none(),
+            );
+            crate::modal::text_field(
+                frame,
+                fields[4],
+                "Destination",
+                &self.destination,
+                self.caret[1],
+                self.focus == 1,
+                self.task.is_none(),
+            );
+        }
+        let status = if self.executing {
             "Creating worktree… Please wait. Cancellation is disabled."
         } else if self.task.is_some() {
             "Checking repository… Esc cancels"
-        } else if self.plan.is_some() {
-            "Enter Create worktree · Esc edit · ↑/↓ scroll"
         } else {
-            "Tab controls · Enter review · Ctrl-U clear · Esc cancel"
+            self.error
+                .as_deref()
+                .unwrap_or("Relative destinations use the source checkout root.")
         };
         frame.render_widget(
-            Paragraph::new(controls).wrap(Wrap { trim: false }),
-            sections[1],
+            Paragraph::new(status)
+                .wrap(Wrap { trim: false })
+                .style(Style::default().fg(if self.error.is_some() {
+                    Color::Red
+                } else {
+                    Color::Gray
+                })),
+            sections.status,
+        );
+        use crate::modal::Button;
+        let buttons = [
+            Button {
+                action: 0,
+                label: if self.plan.is_some() {
+                    "Back"
+                } else {
+                    "Cancel"
+                },
+                enabled: !self.executing,
+                primary: false,
+            },
+            Button {
+                action: 1,
+                label: if self.plan.is_some() {
+                    "Create worktree"
+                } else {
+                    "Review"
+                },
+                enabled: self.task.is_none() && self.context.is_some(),
+                primary: true,
+            },
+        ];
+        crate::modal::buttons(
+            frame,
+            sections.actions,
+            &buttons,
+            if self.plan.is_some() {
+                Some(self.preview_focus)
+            } else {
+                self.focus.checked_sub(2)
+            },
+        );
+        frame.render_widget(
+            Paragraph::new("Tab controls · Enter activate/next · Esc back"),
+            sections.hints,
         );
     }
 }
