@@ -214,7 +214,8 @@ Terminals narrower than 100 columns show the focused pane full-width.
   or the selected commit, respectively.
 - `l` in Sessions: relink the selected session. Choose an existing destination,
   press Enter to preview, then Enter again to confirm. Escape cancels before execution.
-- `R`: inspect/recover an unfinished relocation. Recovery never recreates the old folder.
+- `R`: inspect/recover an unfinished relocation or folder move. Only shown and enabled
+  when unfinished work exists. Recovery never recreates the old folder.
 - `/`: open the search modal. Type to filter results; each result shows its title
   and path. Up/Down selects a result; Enter opens its folder and highlights the
   session without resuming it. Escape cancels without changing your location.

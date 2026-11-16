@@ -26,6 +26,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
         t.expect(str(root/'moved'))
         t.send(b'\r');t.expect('Enter confirms')
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
+        assert 'R Recover' not in t.text()
         assert not old.exists()
         assert (root/'moved/file').read_text()=='unchanged'
         assert json.loads((home/'native.json').read_text())['cwd']==str(root/'moved')
@@ -36,9 +37,10 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
     data=json.loads(journal.read_text());data['phase']='verifying';journal.write_text(json.dumps(data))
     t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(root/'moved')],env)
     try:
-        t.expect('Unfinished folder move')
+        t.expect('Unfinished folder move');t.expect('R Recover')
         t.send(b'R');t.expect('Inspect/recover folder move')
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
+        assert 'R Recover' not in t.text()
         t.finish();t.close()
         archive=root/'archive';archive.mkdir()
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(root/'moved')],env)
@@ -47,6 +49,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
         t.send(b'\x1b[Z\x15'+(str(archive)+'/').encode()+b'\r');t.expect('Enter confirms')
         t.expect(str(archive/'moved'))
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
+        assert 'R Recover' not in t.text()
         assert (archive/'moved/file').read_text()=='unchanged'
         assert json.loads((home/'native.json').read_text())['cwd']==str(archive/'moved')
         t.finish()

@@ -137,11 +137,34 @@ pub struct View {
     pub folder_move: Option<crate::folder_move_ui::Modal>,
     pub worktree_create: Option<crate::worktree_create_ui::Modal>,
     pub recovery_index: usize,
+    pub recovery_available: bool,
     pub error_dialog: Option<crate::error_dialog::ErrorDialog>,
 }
 impl View {
     fn context(&self) -> usize {
         if self.git_focus { 2 } else { self.focus }
+    }
+}
+
+fn refresh_recovery(state: Option<&std::path::Path>, view: &mut View) -> Option<(usize, bool)> {
+    view.recovery_available = false;
+    let state = state?;
+    let result = (|| {
+        let relocations = crate::relocation::pending(state)
+            .map_err(|e| format!("Cannot inspect relocation journals: {e}"))?;
+        let folder = crate::folder_move::pending(state)
+            .map_err(|e| format!("Cannot inspect folder-move journal: {e}"))?;
+        Ok::<_, String>((relocations.len(), folder.is_some()))
+    })();
+    match result {
+        Ok((count, folder)) => {
+            view.recovery_available = count > 0 || folder;
+            Some((count, folder))
+        }
+        Err(error) => {
+            view.message = Some(error);
+            None
+        }
     }
 }
 
@@ -1101,6 +1124,7 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             None,
         ),
     ];
+    entries.retain(|entry| entry.0 != Recover || view.recovery_available);
     if view.context() == 0 {
         entries.extend([
             (
@@ -2416,7 +2440,11 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         Command::Quit => return Action::Quit,
         Command::Relink => return Action::OpenRelink,
         Command::MoveFolder => return Action::OpenFolderMove,
-        Command::Recover => return Action::RecoverRelink,
+        Command::Recover => {
+            if view.recovery_available {
+                return Action::RecoverRelink;
+            }
+        }
         Command::Search => {
             view.editing = true;
             view.search_query.clear();
@@ -2542,27 +2570,13 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         .as_ref()
         .and_then(|p| p.parent())
         .map(|p| p.to_path_buf());
-    if let Some(state) = &relocation_state {
-        match crate::relocation::pending(state) {
-            Ok(journals) if !journals.is_empty() => {
-                view.message = Some(format!(
-                    "{} unfinished relocation(s). Press R to inspect/recover.",
-                    journals.len()
-                ))
-            }
-            Err(error) => {
-                view.message = Some(format!("Cannot inspect relocation journals: {error}"))
-            }
-            _ => {}
-        }
-    }
-    if let Some(state) = &relocation_state {
-        match crate::folder_move::pending(state) {
-            Ok(Some(_)) => {
-                view.message = Some("Unfinished folder move. Press R to inspect/recover.".into())
-            }
-            Err(e) => view.message = Some(format!("Cannot inspect folder-move journal: {e}")),
-            _ => {}
+    if let Some((count, folder)) = refresh_recovery(relocation_state.as_deref(), &mut view) {
+        if folder {
+            view.message = Some("Unfinished folder move. Press R to inspect/recover.".into());
+        } else if count > 0 {
+            view.message = Some(format!(
+                "{count} unfinished relocation(s). Press R to inspect/recover."
+            ));
         }
     }
     let mut relocated: Option<crate::relocation::Preview> = None;
@@ -2719,6 +2733,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                         browser.invalidate_git(); discovery.refresh(&mut browser);
                     }
                 }
+                refresh_recovery(relocation_state.as_deref(), &mut view);
             }
             if let Some(dialog)=view.error_dialog.as_mut(){dialog.tick().await;}
             if let Some(info)=view.info.as_mut(){info.refresh(&browser);info.dialog.tick().await;}
@@ -2743,6 +2758,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     },
                     Err(e)=>{show_relink_failure(&mut view,format!("Relocation stopped: {e}").into(),true);}
                 }
+                refresh_recovery(relocation_state.as_deref(), &mut view);
             }
             if let FolderFilter::Path(path) = &browser.folder {
                 last_folder = Some(path.clone());
@@ -2922,6 +2938,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             if let Some(session)=selected_session(&browser){let input=session.cwd.as_ref().map(|p|p.display().to_string()).unwrap_or_default();let picker=crate::path_picker::Picker::for_relink(launch_dir.clone(),session.cwd.clone());view.relink=Some(RelinkModal{session,input,picker:Some(picker),preview:None,recovery:false,busy:false,executing:false,error:None});}
                         }
                         Action::RecoverRelink => {
+                            refresh_recovery(relocation_state.as_deref(), &mut view);
+                            if !view.recovery_available { continue; }
                             let Some(state)=&relocation_state else{view.message=Some("No persistent state directory.".into());continue};
                             let folder=match crate::folder_move::pending(state){Ok(j)=>j,Err(e)=>{view.message=Some(e);continue;}};
                             let count=match crate::relocation::pending(state){Ok(j)=>j.len(),Err(e)=>{view.message=Some(e);continue;}};
@@ -2968,6 +2986,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                         Action::Quit => break,
                         Action::Refresh => {
                             view.message = None;
+                            refresh_recovery(relocation_state.as_deref(), &mut view);
                             browser.invalidate_git(); discovery.refresh(&mut browser);
                         }
                         Action::CancelResume => {
@@ -3082,6 +3101,68 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
 #[cfg(test)]
 mod cleanup_tests {
     use super::*;
+
+    #[test]
+    fn recovery_menu_and_shortcut_follow_availability() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View::default();
+        for available in [false, true, false] {
+            view.recovery_available = available;
+            for focus in [0, 1] {
+                view.focus = focus;
+                assert_eq!(
+                    menu_entries(&browser, &view)
+                        .iter()
+                        .any(|e| e.command == Command::Recover),
+                    available
+                );
+                assert_eq!(
+                    footer_shortcuts(240, &browser, &view)
+                        .0
+                        .contains("R Recover"),
+                    available
+                );
+                assert_eq!(
+                    matches!(
+                        handle_key(
+                            &mut browser,
+                            &mut view,
+                            KeyEvent::new(KeyCode::Char('R'), KeyModifiers::NONE)
+                        ),
+                        Action::RecoverRelink
+                    ),
+                    available
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn recovery_refresh_disables_missing_or_unreadable_state() {
+        let mut view = View {
+            recovery_available: true,
+            ..View::default()
+        };
+        assert_eq!(refresh_recovery(None, &mut view), None);
+        assert!(!view.recovery_available);
+        let state = tempfile::tempdir().unwrap();
+        assert_eq!(
+            refresh_recovery(Some(state.path()), &mut view),
+            Some((0, false))
+        );
+        assert!(!view.recovery_available);
+        std::fs::create_dir(state.path().join("folder-moves")).unwrap();
+        std::fs::write(state.path().join("folder-moves/current.json"), "invalid").unwrap();
+        view.recovery_available = true;
+        assert_eq!(refresh_recovery(Some(state.path()), &mut view), None);
+        assert!(!view.recovery_available);
+        assert!(
+            view.message
+                .as_deref()
+                .unwrap()
+                .contains("Cannot inspect folder-move journal")
+        );
+    }
 
     #[tokio::test]
     async fn git_context_collapse_and_focus_transitions() {

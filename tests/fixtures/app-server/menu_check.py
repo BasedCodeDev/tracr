@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-menu-') as tmp:
         t.expect('Task second')
         t.send(b'\x1b')
         t.wait(lambda: 'Search sessions' not in t.text())
-        t.send(b'?jjjjjjjjjj\r')  # Resume explicitly through menu.
+        t.send(b'?jjjjjjjjj\r')  # Resume explicitly through menu.
         t.wait(lambda: (home/'launch.json').exists())
         assert json.loads((home/'launch.json').read_text())['args'][-1] == 'first'
         return_mark=len(t.output)
