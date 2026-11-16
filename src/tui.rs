@@ -11,7 +11,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Scrollbar,
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
         ScrollbarState, Wrap,
     },
 };
@@ -153,6 +153,64 @@ fn show_folder_failure(view: &mut View, message: String, recovery: bool) {
         ));
     }
 }
+pub struct WorktreePicker {
+    repository: std::path::PathBuf,
+    oid: String,
+    matches: Vec<crate::git::Worktree>,
+    selected: usize,
+}
+
+fn matching_worktrees(
+    browser: &Browser,
+    repository: &std::path::Path,
+    oid: &str,
+) -> Result<Vec<crate::git::Worktree>, String> {
+    if browser.repository_errors.contains_key(repository) {
+        return Err("Worktree information is stale or refreshing. Try again after refresh.".into());
+    }
+    let repo = browser
+        .repositories
+        .get(repository)
+        .ok_or("Worktree information is unavailable. Refresh and try again.")?;
+    let mut matches: Vec<_> = repo
+        .worktrees
+        .iter()
+        .filter(|w| !w.bare && w.head.as_deref() == Some(oid))
+        .cloned()
+        .collect();
+    matches.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(matches)
+}
+
+fn select_git_worktree(browser: &mut Browser, view: &mut View, picker: &WorktreePicker) {
+    let Some(target) = picker.matches.get(picker.selected) else {
+        return;
+    };
+    match matching_worktrees(browser, &picker.repository, &picker.oid) {
+        Ok(matches) if matches.iter().any(|w| w.path == target.path) => {
+            // Linked worktrees are displayed beneath the main checkout, even when
+            // their filesystem paths live elsewhere.
+            if let Some(main) = browser
+                .repositories
+                .get(&picker.repository)
+                .and_then(|repo| repo.worktrees.first())
+            {
+                browser
+                    .expanded
+                    .extend(main.path.ancestors().map(std::path::PathBuf::from));
+            }
+            browser.open_folder(target.path.clone());
+            view.git_focus = false;
+            view.focus = 0;
+            view.message = None;
+        }
+        Ok(_) => {
+            view.message = Some("Worktree changed or was removed. Select the commit again.".into())
+        }
+        Err(message) => view.message = Some(message),
+    }
+}
+
 #[derive(Default)]
 pub struct View {
     pub terminal_recovery: Option<crate::terminal_recovery::Dialog>,
@@ -178,6 +236,7 @@ pub struct View {
     pub message: Option<String>,
     pub preparing: bool,
     pub source_picker: Option<usize>,
+    pub worktree_picker: Option<WorktreePicker>,
     pub relink: Option<RelinkModal>,
     pub folder_move: Option<crate::folder_move_ui::Modal>,
     pub worktree_create: Option<crate::worktree_create_ui::Modal>,
@@ -717,6 +776,41 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         &message,
         separate_message,
     );
+    if let Some(picker) = &view.worktree_picker {
+        let popup = Rect::new(
+            area.x + 1,
+            area.y + 1,
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2).min(16),
+        );
+        let items: Vec<_> = picker
+            .matches
+            .iter()
+            .map(|w| {
+                let branch = w
+                    .branch
+                    .as_deref()
+                    .map(|b| b.trim_start_matches("refs/heads/"))
+                    .unwrap_or("detached");
+                ListItem::new(vec![
+                    Line::from(safe_text(branch)),
+                    Line::from(safe_text(&w.path.display().to_string())),
+                ])
+            })
+            .collect();
+        frame.render_widget(Clear, popup);
+        frame.render_stateful_widget(
+            List::new(items)
+                .block(block(
+                    "Choose worktree — ↑/↓ · Enter selects · Esc cancels",
+                    true,
+                ))
+                .highlight_symbol("> ")
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
+            popup,
+            &mut ListState::default().with_selected(Some(picker.selected)),
+        );
+    }
     if view.help {
         draw_help(frame, browser, view);
     }
@@ -1121,6 +1215,7 @@ enum Command {
     GitHome,
     GitEnd,
     GitFollow,
+    GitSelectWorktree,
     Help,
     PreviousPane,
     NextPane,
@@ -1341,6 +1436,13 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             }),
         ));
         if !view.git_hidden && !view.git_size_limited {
+            entries.push((
+                GitSelectWorktree,
+                "Git",
+                "Enter",
+                "Select worktree folder",
+                Some(("Enter Folder", "Enter Folder")),
+            ));
             entries.push((
                 CreateWorktree,
                 "Git",
@@ -2284,6 +2386,22 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
+    if let Some(mut picker) = view.worktree_picker.take() {
+        match key.code {
+            KeyCode::Esc => return Action::Continue,
+            KeyCode::Up | KeyCode::Char('k') => picker.selected = picker.selected.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => {
+                picker.selected = (picker.selected + 1).min(picker.matches.len().saturating_sub(1))
+            }
+            KeyCode::Enter if key.kind != KeyEventKind::Repeat => {
+                select_git_worktree(browser, view, &picker);
+                return Action::Continue;
+            }
+            _ => {}
+        }
+        view.worktree_picker = Some(picker);
+        return Action::Continue;
+    }
     if let Some(modal) = view.worktree_create.as_mut() {
         if modal.key(key) {
             view.worktree_create = None;
@@ -2545,6 +2663,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 Command::Help
             }
             _ if view.git_hidden || view.git_size_limited => return Action::Continue,
+            KeyCode::Enter if key.kind != KeyEventKind::Repeat => Command::GitSelectWorktree,
             KeyCode::Char('w') => Command::CreateWorktree,
             KeyCode::Up | KeyCode::Char('k') => Command::GitUp,
             KeyCode::Down | KeyCode::Char('j') => Command::GitDown,
@@ -2600,6 +2719,42 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
 
 fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> Action {
     match command {
+        Command::GitSelectWorktree => {
+            if view.git_hidden || view.git_size_limited {
+                return Action::Continue;
+            }
+            let Some(repository) = view.history.repository() else {
+                return Action::Continue;
+            };
+            let Some(oid) = view
+                .history
+                .rows
+                .get(view.history.selected)
+                .and_then(|row| row.oid.clone())
+            else {
+                return Action::Continue;
+            };
+            match matching_worktrees(browser, &repository, &oid) {
+                Ok(matches) if matches.is_empty() => {
+                    view.message = Some("No worktree is checked out at this commit.".into())
+                }
+                Ok(matches) => {
+                    let picker = WorktreePicker {
+                        repository,
+                        oid,
+                        matches,
+                        selected: 0,
+                    };
+                    if picker.matches.len() == 1 {
+                        select_git_worktree(browser, view, &picker);
+                    } else {
+                        view.message = None;
+                        view.worktree_picker = Some(picker);
+                    }
+                }
+                Err(message) => view.message = Some(message),
+            }
+        }
         Command::CreateWorktree => {
             if worktree_unavailable(browser, view).is_some() {
                 return Action::Continue;
@@ -3406,6 +3561,175 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
 #[cfg(test)]
 mod cleanup_tests {
     use super::*;
+
+    fn press(browser: &mut Browser, view: &mut View, code: KeyCode) {
+        handle_key(browser, view, KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    async fn navigation_fixture(heads: &[&str]) -> (Browser, View) {
+        let mut browser = Browser::new(vec![]);
+        let repository = std::path::PathBuf::from("/project/.git");
+        browser.install_repository(crate::git::Repository {
+            common_dir: repository.clone(),
+            git_dir: repository.clone(),
+            worktrees: heads
+                .iter()
+                .enumerate()
+                .map(|(i, head)| crate::git::Worktree {
+                    path: if i == 0 {
+                        "/project".into()
+                    } else {
+                        format!("/elsewhere/worktree-{i}").into()
+                    },
+                    head: Some((*head).into()),
+                    branch: (i == 0).then(|| "refs/heads/main".into()),
+                    bare: false,
+                    locked: false,
+                    prunable: false,
+                })
+                .collect(),
+        });
+        browser.expanded.clear();
+        let mut view = View {
+            git_focus: true,
+            focus: 1,
+            ..View::default()
+        };
+        view.history.tick(Some(repository), 0, false, 10).await;
+        view.history.rows = vec![crate::git::GraphRow {
+            oid: Some("selected-oid".into()),
+            graph: String::new(),
+            graph_spans: vec![],
+            parents: vec![],
+            subject: "Selected commit".into(),
+        }];
+        (browser, view)
+    }
+
+    #[tokio::test]
+    async fn git_enter_reveals_linked_folder_and_focuses_folders() {
+        let (mut browser, mut view) = navigation_fixture(&["other", "selected-oid"]).await;
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert_eq!(
+            browser.folder,
+            FolderFilter::Path("/elsewhere/worktree-1".into())
+        );
+        assert!(
+            browser
+                .folder_rows()
+                .iter()
+                .any(|row| row.filter == browser.folder)
+        );
+        assert!(browser.expanded.contains(std::path::Path::new("/project")));
+        assert_eq!(view.context(), 0);
+        assert!(browser.visible().is_empty());
+        assert!(browser.selected.is_none());
+        assert_eq!(
+            view.history.rows[view.history.selected].oid.as_deref(),
+            Some("selected-oid")
+        );
+    }
+
+    #[tokio::test]
+    async fn git_enter_chooser_confirms_cancels_and_renders() {
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid", "selected-oid"]).await;
+        let original = browser.folder.clone();
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert_eq!(browser.folder, original);
+        assert!(view.worktree_picker.is_some());
+        for width in [40, 100] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, 24)).unwrap();
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            let rendered: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(rendered.contains("Choose worktree"));
+            assert!(rendered.contains("/elsewhere/worktree-1"));
+            assert!(rendered.contains("detached"));
+            assert!(rendered.contains("/project"));
+        }
+        press(&mut browser, &mut view, KeyCode::Esc);
+        assert!(view.worktree_picker.is_none());
+        assert_eq!(browser.folder, original);
+        assert!(view.git_focus);
+        press(&mut browser, &mut view, KeyCode::Enter);
+        press(&mut browser, &mut view, KeyCode::Char('j'));
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
+        assert_eq!(view.context(), 0);
+    }
+
+    #[tokio::test]
+    async fn git_enter_revalidates_chooser_and_rejects_stale_inventory() {
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid", "selected-oid"]).await;
+        let original = browser.folder.clone();
+        press(&mut browser, &mut view, KeyCode::Enter);
+        let repo = browser.repositories.values_mut().next().unwrap();
+        repo.worktrees[1].head = Some("changed".into());
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert_eq!(browser.folder, original);
+        assert!(view.git_focus);
+        assert!(view.message.as_ref().unwrap().contains("changed"));
+        browser
+            .repository_errors
+            .insert("/project/.git".into(), "refreshing".into());
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert_eq!(browser.folder, original);
+        assert!(view.message.as_ref().unwrap().contains("stale"));
+        browser.repository_errors.clear();
+        browser.repositories.clear();
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert!(view.message.as_ref().unwrap().contains("unavailable"));
+    }
+
+    #[tokio::test]
+    async fn git_enter_ignores_unmatched_bare_hidden_and_repeat_events() {
+        let (mut browser, mut view) = navigation_fixture(&["other"]).await;
+        let original = browser.folder.clone();
+        let mut unrelated = browser.repositories.values().next().unwrap().clone();
+        unrelated.common_dir = "/unrelated/.git".into();
+        unrelated.worktrees[0].head = Some("selected-oid".into());
+        browser.install_repository(unrelated);
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert!(view.message.as_ref().unwrap().contains("No worktree"));
+        let repo = browser
+            .repositories
+            .get_mut(std::path::Path::new("/project/.git"))
+            .unwrap();
+        repo.worktrees[0].head = Some("selected-oid".into());
+        repo.worktrees[0].bare = true;
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert_eq!(browser.folder, original);
+        browser
+            .repositories
+            .get_mut(std::path::Path::new("/project/.git"))
+            .unwrap()
+            .worktrees[0]
+            .bare = false;
+        view.message = None;
+        view.git_hidden = true;
+        press(&mut browser, &mut view, KeyCode::Enter);
+        view.git_hidden = false;
+        view.git_size_limited = true;
+        press(&mut browser, &mut view, KeyCode::Enter);
+        view.git_size_limited = false;
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Repeat),
+        );
+        assert_eq!(browser.folder, original);
+        assert!(view.git_focus);
+        assert!(view.message.is_none());
+        view.history.rows[0].oid = None;
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert_eq!(browser.folder, original);
+    }
 
     #[test]
     fn tree_navigation_follows_visible_hierarchy_with_arrow_and_vim_keys() {
