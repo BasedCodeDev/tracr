@@ -1057,6 +1057,7 @@ enum Command {
     PreviousPane,
     NextPane,
     CyclePane,
+    CyclePaneBack,
     PreviousItem,
     NextItem,
     FolderLeft,
@@ -1127,6 +1128,20 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             "u",
             "Inspect/recover relocation",
             Some(("u Recover", "u Recover")),
+        ),
+        (
+            CyclePane,
+            "Navigation",
+            "Tab",
+            "Next pane",
+            Some(("Tab Next pane", "Tab Next pane")),
+        ),
+        (
+            CyclePaneBack,
+            "Navigation",
+            "Shift-Tab",
+            "Previous pane",
+            Some(("Shift-Tab Previous pane", "Shift-Tab Previous pane")),
         ),
         (
             PreviousPane,
@@ -1240,7 +1255,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         ));
     }
     if view.context() == 2 {
-        entries.retain(|entry| matches!(entry.0, Help | Quit | Refresh));
+        entries
+            .retain(|entry| matches!(entry.0, Help | Quit | Refresh | CyclePane | CyclePaneBack));
         entries.push((
             GitToggle,
             "Git",
@@ -1290,8 +1306,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         entries.push((
             GitReturn,
             "Navigation",
-            "Tab / Shift-Tab / Esc",
-            "Return to browser",
+            "Esc",
+            "Return to previous upper pane",
             None,
         ));
     }
@@ -2421,12 +2437,14 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
-    if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && view.history.present() {
-        view.git_focus = !view.git_focus;
-        if view.git_focus {
-            view.git_hidden = false;
-        }
-        return Action::Continue;
+    if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+        let command = if key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT)
+        {
+            Command::CyclePaneBack
+        } else {
+            Command::CyclePane
+        };
+        return execute_command(command, browser, view);
     }
     if view.git_focus {
         let command = match key.code {
@@ -2473,11 +2491,6 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('w') if view.focus == 0 => Command::CreateWorktree,
         KeyCode::Char('u') => Command::Recover,
         KeyCode::Char('a') => Command::Archives,
-        KeyCode::Tab => Command::CyclePane,
-        KeyCode::BackTab => {
-            view.message = None;
-            Command::CyclePane
-        }
         KeyCode::Right | KeyCode::Char('l') if view.focus == 0 => Command::FolderRight,
         KeyCode::Left | KeyCode::Char('h') if view.focus == 0 => Command::FolderLeft,
         KeyCode::Left | KeyCode::Backspace if view.focus == 1 => Command::PreviousPane,
@@ -2564,7 +2577,30 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
         Command::Refresh => return Action::Refresh,
         Command::Archives => browser.include_archived = !browser.include_archived,
-        Command::CyclePane => view.focus = (view.focus + 1) % 2,
+        Command::CyclePane | Command::CyclePaneBack => {
+            let count = if view.history.present() { 3 } else { 2 };
+            let current = if view.git_focus && count == 3 {
+                2
+            } else {
+                view.focus
+            };
+            let step = if command == Command::CyclePaneBack {
+                count - 1
+            } else {
+                1
+            };
+            let next = (current + step) % count;
+            view.git_focus = next == 2;
+            if view.git_focus {
+                // Keep the entry pane for Escape; Tab follows the fixed cycle.
+                view.git_hidden = false;
+            } else {
+                view.focus = next;
+            }
+            if command == Command::CyclePaneBack {
+                view.message = None;
+            }
+        }
         Command::NextPane => view.focus = 1,
         Command::PreviousPane => {
             view.focus = 0;
@@ -3512,6 +3548,87 @@ mod cleanup_tests {
                 .unwrap()
                 .contains("Cannot inspect folder-move journal")
         );
+    }
+
+    #[tokio::test]
+    async fn tab_cycles_available_panes_in_both_directions() {
+        for has_git in [false, true] {
+            let mut browser = Browser::new(vec![]);
+            browser.open_folder("/synthetic/repo/child".into());
+            let mut view = View::default();
+            if has_git {
+                view.history
+                    .tick(Some("/synthetic/repo".into()), 0, false, 1)
+                    .await;
+            }
+            let count = if has_git { 3 } else { 2 };
+            let folder = browser.folder.clone();
+            let expanded = browser.expanded.clone();
+            for limited in [false, true] {
+                view.git_size_limited = limited;
+                for current in 0..count {
+                    for (event, backwards) in [
+                        (KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), false),
+                        (KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT), true),
+                        (KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT), true),
+                    ] {
+                        view.focus = current.min(1);
+                        view.git_focus = current == 2;
+                        view.git_hidden = true;
+                        let expected = (current + if backwards { count - 1 } else { 1 }) % count;
+                        assert_eq!(handle_key(&mut browser, &mut view, event), Action::Continue);
+                        assert_eq!(view.context(), expected);
+                        assert_eq!(view.git_hidden, expected != 2);
+                        assert_eq!(browser.folder, folder);
+                        assert_eq!(browser.expanded, expanded);
+                        if expected == 2 {
+                            handle_key(
+                                &mut browser,
+                                &mut view,
+                                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                            );
+                            assert_eq!(view.context(), current);
+                            assert!(!view.git_hidden);
+                        }
+                    }
+                }
+            }
+            // Search owns Tab and Backspace even with Git available.
+            view.git_focus = false;
+            view.focus = 1;
+            view.editing = true;
+            view.search_control = 0;
+            view.search_query = "ab".into();
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            );
+            assert_eq!(view.search_query, "a");
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            );
+            assert!(view.editing);
+            assert_eq!(view.context(), 1);
+            assert_eq!(view.search_control, 1);
+            view.editing = false;
+            // The action menu uses the same pane-cycle behavior as the key.
+            view.help = true;
+            view.help_control = 0;
+            view.help_selected = menu_entries(&browser, &view)
+                .iter()
+                .position(|entry| entry.command == Command::CyclePane)
+                .unwrap();
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            );
+            assert!(!view.help);
+            assert_eq!(view.context(), if has_git { 2 } else { 0 });
+        }
     }
 
     #[tokio::test]

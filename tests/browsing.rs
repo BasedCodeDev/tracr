@@ -798,7 +798,7 @@ async fn action_menu_navigates_cancels_and_dispatches_without_changing_context()
     assert_eq!(view.help_selected, 4);
     handle_key(&mut browser, &mut view, key(KeyCode::Down));
     assert_eq!(view.help_selected, 5);
-    view.help_selected = 9; // Resume is disabled for fixtures.
+    view.help_selected = 11; // Create is disabled for fixtures.
     assert_eq!(
         handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
         Action::Continue
@@ -811,11 +811,11 @@ async fn action_menu_navigates_cancels_and_dispatches_without_changing_context()
     assert_eq!(view.focus, 1);
     handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
     assert_eq!(view.help_selected, 0);
-    view.help_selected = 5;
+    view.help_selected = 7;
     handle_key(&mut browser, &mut view, key(KeyCode::Down));
     handle_key(&mut browser, &mut view, key(KeyCode::Enter));
     assert!(!view.help);
-    assert_eq!(view.focus, 1); // Select Sessions stays on Sessions.
+    assert_eq!(view.focus, 1); // Previous item keeps focus on Sessions.
     handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
     view.help_selected = 3;
     assert_eq!(
@@ -1060,7 +1060,7 @@ async fn information_modal_is_requested_pinned_scrollable_and_blocks_browser_act
         );
     }
     view.help = true;
-    view.help_selected = 10; // Session information; Recover is hidden.
+    view.help_selected = 12; // Session information; Recover is hidden.
     handle_key(&mut browser, &mut view, key(KeyCode::Enter));
     assert!(view.info.is_some());
     assert!(!view.help);

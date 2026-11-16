@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         t.resize(40, 140)
         t.expect('↪ feature/from-folder')
         t.expect('Second creation commit')
-        t.send(b'\t\x1b[B')
+        t.send(b'\x1b[Z\x1b[B')
         t.expect('> ● ' + first[:7])
         t.send(b'w')
         t.expect('Starting commit:')

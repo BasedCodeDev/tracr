@@ -216,17 +216,18 @@ Terminals narrower than 100 columns show the focused pane full-width.
   expands a folder or selects its first child; Left / `h` collapses it or selects
   its displayed parent. Enter focuses Sessions; Escape, Left Arrow, or Backspace
   returns to Folders. Right and `h/l` do nothing in Sessions.
-- With a Git panel present, Tab / Shift-Tab toggles between it and the last
-  focused upper pane, expanding collapsed history on entry.
+- Tab cycles Folders → Sessions → Git → Folders; Shift-Tab reverses the order.
+  Without a Git panel, both keys switch between Folders and Sessions. Entering
+  Git expands collapsed history, and leaving preserves its expansion state.
   Page Up / Page Down scroll through history when it is focused.
-  Without a Git repository, Tab / Shift-Tab switches upper panes.
 - In Git history, Home / End selects the first / last loaded commit; approaching
   the end loads more history. Left / Right or `h/l` scrolls horizontally. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
   root follows HEAD automatically. `g` collapses or expands history while Git has
   focus. Collapse leaves a focused
-  strip with an Expand action; Escape returns focus to the upper browser. Leaving
-  Git keeps its expanded/collapsed state, remembered across folders for this run.
+  strip with an Expand action; Escape returns focus to the upper pane from which
+  Git was entered. Leaving Git keeps its expanded/collapsed state, remembered
+  across folders for this run.
 - Enter in Sessions: resume a session, relink one whose folder is missing, or
   create a session when the selected folder has none and creation is available.
 - `n` in Sessions: create a new session in the selected folder.

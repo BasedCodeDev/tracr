@@ -417,7 +417,7 @@ impl History {
         } else if self.exhausted {
             "end of history"
         } else {
-            "Tab focus"
+            "Tab cycle panes"
         };
         let context = self
             .head
