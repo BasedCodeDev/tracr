@@ -210,7 +210,7 @@ Terminals narrower than 100 columns show the focused pane full-width.
   Git keeps its expanded/collapsed state, remembered across folders for this run.
 - Enter: expand or collapse the selected folder, resume a session, or relink a session whose folder is missing.
 - `n` in Sessions: create a new session in the selected folder.
-- `w` in Folders or expanded Git history: create a new worktree from checkout HEAD
+- `w` (shown and enabled only when the selection supports creation) in Folders or expanded Git history: create a new worktree from checkout HEAD
   or the selected commit, respectively.
 - `l` in Sessions: relink the selected session. Choose an existing destination,
   press Enter to preview, then Enter again to confirm. Escape cancels before execution.

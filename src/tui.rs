@@ -1252,6 +1252,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         ));
     }
     entries
+        .retain(|entry| entry.0 != CreateWorktree || worktree_unavailable(browser, view).is_none());
+    entries
         .into_iter()
         .map(|(command, section, shortcut, label, footer)| MenuEntry {
             command,
@@ -2391,8 +2393,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
 fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> Action {
     match command {
         Command::CreateWorktree => {
-            if let Some(reason) = worktree_unavailable(browser, view) {
-                view.message = Some(reason);
+            if worktree_unavailable(browser, view).is_some() {
                 return Action::Continue;
             }
             if let FolderFilter::Path(path) = &browser.folder {
@@ -3101,6 +3102,84 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
 #[cfg(test)]
 mod cleanup_tests {
     use super::*;
+
+    #[test]
+    fn worktree_action_tracks_selected_repository_availability() {
+        use crate::git_discovery::{Outcome, Ownership};
+        let path = std::path::PathBuf::from("/project");
+        let mut browser = Browser::new(vec![crate::browser::SourceSpec::Codex {
+            binary: "codex".into(),
+            source: crate::config::SourceConfig {
+                id: crate::domain::SourceId("test".into()),
+                home: "/codex".into(),
+            },
+        }]);
+        browser.folder = FolderFilter::Path(path.clone());
+        let repository = Outcome::Repository {
+            repository: crate::git::Directory {
+                common_dir: path.join(".git"),
+                git_dir: path.join(".git"),
+            },
+            root: Some(path.clone()),
+        };
+        let mut view = View::default();
+        for (outcome, stale, available) in [
+            (None, false, false),
+            (Some(Outcome::NotRepository), false, false),
+            (Some(Outcome::Unavailable("offline".into())), false, false),
+            (Some(repository.clone()), true, false),
+            (Some(repository.clone()), false, true),
+            (Some(Outcome::NotRepository), false, false),
+        ] {
+            browser.ownership.insert(
+                path.clone(),
+                Ownership {
+                    generation: browser.git_generation + u64::from(stale),
+                    outcome,
+                    previous: Some(repository.clone()),
+                },
+            );
+            assert_eq!(
+                menu_entries(&browser, &view)
+                    .iter()
+                    .any(|entry| entry.command == Command::CreateWorktree),
+                available
+            );
+            assert_eq!(
+                footer_shortcuts(240, &browser, &view)
+                    .1
+                    .contains("w Worktree"),
+                available
+            );
+            if !available {
+                view.message = Some("unchanged".into());
+                handle_key(
+                    &mut browser,
+                    &mut view,
+                    KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE),
+                );
+                assert!(view.worktree_create.is_none());
+                assert_eq!(view.message.as_deref(), Some("unchanged"));
+            }
+        }
+        browser.folder = FolderFilter::All;
+        assert!(worktree_unavailable(&browser, &view).is_some());
+        browser.folder = FolderFilter::Path(path.clone());
+        browser.ownership.get_mut(&path).unwrap().outcome = Some(repository);
+        view.git_focus = true;
+        assert!(
+            !menu_entries(&browser, &view)
+                .iter()
+                .any(|entry| entry.command == Command::CreateWorktree)
+        );
+        view.git_focus = false;
+        browser.specs.clear();
+        assert!(
+            !menu_entries(&browser, &view)
+                .iter()
+                .any(|entry| entry.command == Command::CreateWorktree)
+        );
+    }
 
     #[test]
     fn recovery_menu_and_shortcut_follow_availability() {
