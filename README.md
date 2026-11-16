@@ -220,7 +220,7 @@ Terminals narrower than 100 columns show the focused pane full-width.
   Without a Git panel, both keys switch between Folders and Sessions. Entering
   Git expands collapsed history, and leaving preserves its expansion state.
   Page Up / Page Down scroll through history when it is focused.
-- In Git history, Home / End selects the first / last loaded commit; approaching
+- In Git history, Home / End selects the first / last loaded commit or session; approaching
   the end loads more history. Left / Right or `h/l` scrolls horizontally. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
   root follows HEAD automatically. `g` collapses or expands history while Git has
@@ -228,8 +228,18 @@ Terminals narrower than 100 columns show the focused pane full-width.
   strip with an Expand action; Escape returns focus to the upper pane from which
   Git was entered. Leaving Git keeps its expanded/collapsed state, remembered
   across folders for this run.
-  The top-right `↑` border marker indicates commits above the preview; the
-  bottom-right `↓` indicates commits below it or more history available to load.
+  The top-right `↑` border marker indicates rows above the preview; the
+  bottom-right `↓` indicates rows below it or more history available to load.
+- Loaded sessions appear directly beneath their worktree's HEAD commit, including
+  sessions in the main project folder and subfolders. Rows show title, provider,
+  and live status; a worktree label appears when several worktrees share a commit.
+  Waiting sessions appear first, followed by errors, running, and idle sessions;
+  newer sessions come first within each status. Unloaded and unknown sessions are
+  omitted. Updates use the same live-status feed as Sessions, without reloading Git.
+- Enter on a Git session row selects its folder and session and focuses Sessions;
+  it does not resume the session. Enter on a commit selects its worktree folder,
+  offering a chooser when multiple worktrees match. Session rows appear as their
+  HEAD commits become available in loaded history.
 - Enter in Sessions: resume a session, relink one whose folder is missing, or
   create a session when the selected folder has none and creation is available.
 - `n` in Sessions: create a new session in the selected folder.

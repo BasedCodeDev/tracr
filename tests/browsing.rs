@@ -1350,7 +1350,7 @@ async fn linked_checkout_is_projected_under_repository_and_aggregates_sessions()
         .position(|r| r.filter == FolderFilter::Path("/scratch/feature".into()))
         .unwrap();
     assert_eq!(feature, group + 1);
-    assert!(rows[feature].label.starts_with("↪ "));
+    assert!(!rows[feature].label.contains("↪"));
     assert!(!rows.iter().any(|r| r.label.starts_with("Worktrees")));
     assert_eq!(rows[feature].depth, rows[group].depth + 1);
     assert_eq!(rows[feature].count, 1);
@@ -1509,7 +1509,7 @@ async fn inventory_failure_and_recovery_render_staleness_without_losing_worktree
             .map(|c| c.symbol())
             .collect();
         assert_eq!(text.contains("[stale]"), failed);
-        assert!(text.contains("↪ detached HEAD"));
+        assert!(text.contains("─ detached HEAD"));
         assert_eq!(browser.repositories[&id].worktrees.len(), 2);
     }
 }
@@ -1729,14 +1729,14 @@ async fn worktree_labels_and_scope_titles_use_repository_identity() {
             },
         );
     }
-    for (path, title) in [
-        ("/project", "checkout"),
-        ("/unimportant-name", "worktree"),
-        ("/unimportant-name/src", "folder"),
-        ("/detached-name", "worktree"),
+    for path in [
+        "/project",
+        "/unimportant-name",
+        "/unimportant-name/src",
+        "/detached-name",
     ] {
         browser.folder = FolderFilter::Path(path.into());
-        assert_eq!(browser.scope_label(), format!("Sessions — {title}"));
+        assert_eq!(browser.scope_label(), "Sessions");
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(140, 40)).unwrap();
         terminal
@@ -1749,7 +1749,7 @@ async fn worktree_labels_and_scope_titles_use_repository_identity() {
             .iter()
             .map(|cell| cell.symbol())
             .collect();
-        assert!(text.contains(&format!("Sessions — {title}")));
+        assert!(text.contains("Sessions"));
     }
     let rows = browser.folder_rows();
     assert_eq!(
@@ -1757,18 +1757,18 @@ async fn worktree_labels_and_scope_titles_use_repository_identity() {
             .find(|r| r.filter == FolderFilter::Path("/unimportant-name".into()))
             .unwrap()
             .label,
-        "↪ feature/login"
+        "feature/login"
     );
     assert_eq!(
         rows.iter()
             .find(|r| r.filter == FolderFilter::Path("/detached-name".into()))
             .unwrap()
             .label,
-        "↪ detached HEAD abcdef1"
+        "detached HEAD abcdef1"
     );
     browser.invalidate_git();
     browser.folder = FolderFilter::Path("/unimportant-name".into());
-    assert!(browser.scope_label().starts_with("Sessions — worktree"));
+    assert_eq!(browser.scope_label(), "Sessions");
 }
 
 #[tokio::test]

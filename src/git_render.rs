@@ -220,3 +220,17 @@ pub fn render_cancellable(layout: &Layout, cancelled: impl Fn() -> bool) -> Opti
         .unwrap_or(0);
     Some(result)
 }
+
+/// Vertical lanes immediately below a commit, before its parent routing rows.
+/// Annotation rows stretch these edges without adding nodes or new connections.
+pub fn annotation_continuation(row: &crate::git::GraphRow) -> Vec<GraphSpan> {
+    row.graph_spans
+        .iter()
+        .map(|span| GraphSpan {
+            text: span
+                .text
+                .replace('●', if row.parents.is_empty() { " " } else { "│" }),
+            color: span.color,
+        })
+        .collect()
+}

@@ -185,3 +185,37 @@ fn cancellation_interrupts_wide_routing_without_returning_partial_output() {
     assert!(result.is_none());
     assert_eq!(checks.get(), 41);
 }
+
+#[test]
+fn session_continuations_preserve_topology_across_every_fixture() {
+    for (name, commits) in fixtures::fixtures() {
+        let model = layout(&commits).unwrap();
+        let original = render(&model);
+        let mut graph = original.clone();
+        graph.rows.clear();
+        graph.positions.clear();
+        for row in original.rows {
+            if let Some(oid) = &row.oid {
+                graph.positions.insert(oid.clone(), graph.rows.len());
+            }
+            graph.rows.push(row.clone());
+            if let Some(oid) = &row.oid {
+                let commit = commits.iter().find(|c| c.oid == oid.as_ref()).unwrap();
+                let input = tracr::git::GraphRow {
+                    graph: row.text(),
+                    graph_spans: row.spans.clone(),
+                    oid: Some(oid.to_string()),
+                    parents: commit.parents.clone(),
+                    subject: String::new(),
+                };
+                for _ in 0..3 {
+                    graph.rows.push(tracr::git_render::RenderedRow {
+                        spans: tracr::git_render::annotation_continuation(&input),
+                        oid: None,
+                    });
+                }
+            }
+        }
+        oracle::check(&commits, &model, &graph).unwrap_or_else(|e| panic!("{name}: {e}"));
+    }
+}

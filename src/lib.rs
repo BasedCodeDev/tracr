@@ -34,6 +34,8 @@ pub mod git_discovery;
 
 pub mod git_history;
 
+pub mod git_sessions;
+
 pub mod git_watch;
 
 pub mod git_layout;

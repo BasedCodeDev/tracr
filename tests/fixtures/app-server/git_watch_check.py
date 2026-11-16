@@ -63,9 +63,9 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
         mark = len(read_calls())
         linked = root/'elsewhere'
         git('worktree', 'add', '-qb', 'watch-linked', str(linked))
-        t.expect('↪ watch-linked'); settle()
+        t.expect('─ watch-linked'); settle()
         assert not any(' log ' in ' '+line+' ' for line in read_calls()[mark:]), read_calls()[mark:]
-        git('worktree', 'remove', str(linked)); t.wait(lambda: '↪ watch-linked' not in t.text())
+        git('worktree', 'remove', str(linked)); t.wait(lambda: '─ watch-linked' not in t.text())
         commit('Watch hidden commit'); settle()
         t.send(b'g'); t.expect('Watch hidden commit'); settle()
         mark = len(read_calls()); before = len(t.output)

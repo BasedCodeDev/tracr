@@ -1,5 +1,6 @@
 """Git-specific Linux PTY acceptance using isolated repositories and owned processes."""
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -146,7 +147,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
             if operation:
                 terminal.wait(lambda: bool(list(home.glob('pending-*'))))
             else:
-                terminal.expect('↪ feature')
+                terminal.expect('─ feature')
                 terminal.expect('Lifecycle root')
                 terminal.send(b'\t')
                 terminal.expect('g Collapse')
@@ -171,7 +172,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.send(b'\t')
                 terminal.send(b'\x1b');terminal.expect('Enter Sessions')
                 terminal.send(b'\x1b[A')
-                terminal.wait(lambda: '> ▾ project' in terminal.text())
+                terminal.wait(lambda: re.search(r'> [│ ]*[├└]─ project', terminal.text()) is not None)
                 terminal.send(b'\x1b[B\r')
                 terminal.expect('Task first')
             pids = [int(p.name.split('-')[1]) for p in home.glob('pending-*')]
@@ -199,7 +200,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.wait(lambda: b'Sessions' in terminal.output[mark:])
                 terminal.expect('Task first')
                 if action == 'walkthrough':
-                    terminal.wait(lambda: '↪ feature' not in terminal.text())
+                    terminal.wait(lambda: '─ feature' not in terminal.text())
                 else:
                     terminal.wait(lambda: len(list(home.glob('pending-*'))) > len(pids))
                 terminal.send(b'q')

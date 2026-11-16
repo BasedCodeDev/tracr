@@ -415,30 +415,7 @@ impl Browser {
         }
     }
     pub fn scope_label(&self) -> String {
-        let FolderFilter::Path(path) = &self.folder else {
-            return "Sessions".into();
-        };
-        let linked = self.repositories.values().any(|repo| {
-            repo.worktrees
-                .iter()
-                .skip(1)
-                .any(|worktree| &worktree.path == path)
-        });
-        if !linked && self.checkout_root(path) != Some(path.as_path()) {
-            return "Sessions — folder".into();
-        }
-        let incomplete = self
-            .all()
-            .iter()
-            .filter_map(|s| s.cwd.as_ref())
-            .filter(|p| p.starts_with(path))
-            .any(|p| self.ownership.get(p).is_none_or(|r| r.stale()));
-        let kind = if linked { "worktree" } else { "checkout" };
-        if incomplete {
-            format!("Sessions — {kind} · scope incomplete/stale")
-        } else {
-            format!("Sessions — {kind}")
-        }
+        "Sessions".into()
     }
     fn subtree_matches(&self, session: &SessionSummary, filter: &FolderFilter) -> bool {
         let Some(cwd) = &session.cwd else {
@@ -713,7 +690,9 @@ impl Browser {
                 depth: path.components().count().saturating_sub(1),
                 label: format!(
                     "{}{status}",
-                    crate::path_picker::tree_label(&path, 0, self.expanded.contains(&path))
+                    path.file_name()
+                        .unwrap_or(path.as_os_str())
+                        .to_string_lossy()
                 ),
             });
             for repo in self.repositories.values().filter(|r| {
@@ -730,7 +709,7 @@ impl Browser {
                         filter,
                         depth,
                         label: format!(
-                            "↪ {}{}{}",
+                            "{}{}{}",
                             worktree
                                 .branch
                                 .as_deref()

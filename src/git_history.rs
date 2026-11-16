@@ -143,6 +143,7 @@ impl Drop for BuildTask {
 }
 
 pub struct History {
+    revision: u64,
     build: Option<BuildTask>,
     #[cfg(test)]
     builds_started: usize,
@@ -202,6 +203,7 @@ impl History {
             cancel_seek: false,
             head_task: None,
             rows: vec![],
+            revision: 0,
             references: crate::git::References::new(),
             reference_error: None,
             horizontal: Cell::new(0),
@@ -503,6 +505,45 @@ impl History {
             && !self.exhausted
             && commits.len() - commits.partition_point(|i| *i <= self.selected) < self.page.get();
     }
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Select a commit anchor while a presentation row may represent a session.
+    pub fn select_row(&mut self, index: usize) {
+        if self.following {
+            self.cancel_seek = self.head_task.is_some() || self.seeking();
+            self.following = false;
+        }
+        self.selected = index;
+        self.extend = self.error.is_none()
+            && !self.exhausted
+            && self.selectable.len() - self.selectable.partition_point(|i| *i <= index)
+                < self.page.get();
+    }
+
+    pub fn session_spans(&self, anchor: usize) -> Vec<ratatui::text::Span<'static>> {
+        let row = &self.rows[anchor];
+        let spans = crate::git_render::annotation_continuation(row);
+        let graph: String = spans.iter().map(|s| s.text.as_str()).collect();
+        let annotation = GraphRow {
+            graph: graph.clone(),
+            graph_spans: spans,
+            oid: None,
+            parents: vec![],
+            subject: String::new(),
+        };
+        let mut result = self.row_spans(&annotation);
+        result.push(ratatui::text::Span::raw(
+            " ".repeat(
+                self.graph_width
+                    .saturating_sub(unicode_width::UnicodeWidthStr::width(graph.as_str()))
+                    + 3,
+            ),
+        ));
+        result
+    }
+
     pub async fn shutdown(&mut self) {
         self.token += 1;
         if let Some(task) = self.head_task.take() {
@@ -580,6 +621,7 @@ impl History {
         self.selectable = selectable;
         self.graph_width = width;
         self.rows = rows;
+        self.revision = self.revision.wrapping_add(1);
         self.head_row = self
             .head
             .as_ref()

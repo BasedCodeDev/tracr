@@ -215,6 +215,7 @@ fn select_git_worktree(browser: &mut Browser, view: &mut View, picker: &Worktree
 pub struct View {
     pub terminal_recovery: Option<crate::terminal_recovery::Dialog>,
     pub history: crate::git_history::History,
+    pub git_sessions: std::cell::RefCell<crate::git_sessions::Presentation>,
     pub git_hidden: bool,
     pub git_size_limited: bool,
     pub git_watch_error: Option<String>,
@@ -646,6 +647,88 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
     (first, second, message, if separate_message { 3 } else { 2 })
 }
 
+fn selected_git_session(browser: &Browser, view: &View) -> Option<crate::git_sessions::Annotation> {
+    let mut presentation = view.git_sessions.borrow_mut();
+    presentation.sync(browser, &view.history);
+    presentation.session().cloned()
+}
+
+fn git_session_status(status: crate::domain::RuntimeStatus) -> &'static str {
+    use crate::domain::RuntimeStatus;
+    match status {
+        RuntimeStatus::Idle => "Idle",
+        RuntimeStatus::Running => "Running",
+        RuntimeStatus::Error => "Error",
+        RuntimeStatus::Waiting {
+            approval: true,
+            input: true,
+        } => "Waiting",
+        RuntimeStatus::Waiting { approval: true, .. } => "Approval",
+        RuntimeStatus::Waiting { input: true, .. } => "Input",
+        _ => "",
+    }
+}
+
+fn git_session_name_width(presentation: &crate::git_sessions::Presentation) -> usize {
+    presentation
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            crate::git_sessions::Row::Session { annotation, .. } => {
+                Some(unicode_width::UnicodeWidthStr::width(
+                    safe_text(&presentation.annotations[*annotation].session.title).as_str(),
+                ))
+            }
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn git_session_spans(
+    view: &View,
+    anchor: usize,
+    annotation: &crate::git_sessions::Annotation,
+    last: bool,
+    name_width: usize,
+) -> Vec<Span<'static>> {
+    let mut spans = view.history.session_spans(anchor);
+    // Reserve the longest status label even when no session currently uses it,
+    // so names stay aligned as live statuses change.
+    let status = git_session_status(annotation.status);
+    let status_width: usize = 8;
+    spans.push(Span::raw(" ".repeat(
+        status_width.saturating_sub(unicode_width::UnicodeWidthStr::width(status)),
+    )));
+    spans.push(Span::styled(
+        status.to_owned(),
+        activity_color(annotation.status)
+            .map_or(Style::default(), |color| Style::default().fg(color)),
+    ));
+    spans.push(Span::styled(
+        if last { " └─ " } else { " ├─ " },
+        Style::default().fg(Color::White),
+    ));
+    let title = safe_text(&annotation.session.title);
+    let padding = name_width.saturating_sub(unicode_width::UnicodeWidthStr::width(title.as_str()));
+    spans.push(Span::styled(
+        title,
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::raw(" ".repeat(padding)));
+    spans.push(Span::raw(format!(
+        " · {}",
+        safe_text(&annotation.session.key.provider.0)
+    )));
+    if let Some(label) = &annotation.label {
+        spans.push(Span::styled(
+            format!(" · {}", safe_text(label)),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    spans
+}
+
 pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     if let Some(dialog) = &view.terminal_recovery {
         dialog.draw(frame);
@@ -682,21 +765,64 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     let (content, git_area, expanded) = git_regions(layout[0], view, view.history.present());
     if let Some(git_area) = git_area {
         if expanded {
-            let range = view
-                .history
-                .visible_range(usize::from(git_area.height.saturating_sub(3)));
-            let (more_above, more_below) = view.history.scroll_availability(&range);
-            let selected = view.history.selected.saturating_sub(range.start);
+            let mut presentation = view.git_sessions.borrow_mut();
+            presentation.sync(browser, &view.history);
+            let range = presentation.range(usize::from(git_area.height.saturating_sub(3)));
+            let more_above = range.start > 0;
+            let more_below = range.end < presentation.rows.len()
+                || (!view.history.exhausted && !presentation.rows.is_empty());
+            let selected = presentation.selected.saturating_sub(range.start);
+            // Use all loaded rows, so scrolling does not shift the provider column.
+            let name_width = git_session_name_width(&presentation);
             let width = usize::from(git_area.width.saturating_sub(4));
+            // Preserve existing horizontal bounds, extending them for annotation text.
+            let requested = view.history.horizontal.get();
             view.history.clamp_horizontal(width);
-            let items: Vec<_> = view.history.rows[range]
+            let session_max = presentation
+                .rows
+                .iter()
+                .filter_map(|row| match row {
+                    crate::git_sessions::Row::Session { anchor, annotation } => Some(
+                        git_session_spans(
+                            view,
+                            *anchor,
+                            &presentation.annotations[*annotation],
+                            presentation.is_last_session(*annotation),
+                            name_width,
+                        )
+                        .iter()
+                        .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+                        .sum::<usize>()
+                        .saturating_sub(width),
+                    ),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0);
+            view.history.horizontal.set(
+                view.history
+                    .horizontal
+                    .get()
+                    .max(requested.min(session_max)),
+            );
+            let items: Vec<_> = presentation.rows[range]
                 .iter()
                 .map(|row| {
-                    ListItem::new(graph_viewport(
-                        view.history.row_spans(row),
-                        view.history.horizontal.get(),
-                        width,
-                    ))
+                    let spans = match row {
+                        crate::git_sessions::Row::Graph(i) => {
+                            view.history.row_spans(&view.history.rows[*i])
+                        }
+                        crate::git_sessions::Row::Session { anchor, annotation } => {
+                            git_session_spans(
+                                view,
+                                *anchor,
+                                &presentation.annotations[*annotation],
+                                presentation.is_last_session(*annotation),
+                                name_width,
+                            )
+                        }
+                    };
+                    ListItem::new(graph_viewport(spans, view.history.horizontal.get(), width))
                 })
                 .collect();
             let title = graph_viewport(
@@ -1440,8 +1566,16 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 GitSelectWorktree,
                 "Git",
                 "Enter",
-                "Select worktree folder",
-                Some(("Enter Folder", "Enter Folder")),
+                if selected_git_session(browser, view).is_some() {
+                    "Select session"
+                } else {
+                    "Select worktree folder"
+                },
+                Some(if selected_git_session(browser, view).is_some() {
+                    ("Enter Session", "Enter Session")
+                } else {
+                    ("Enter Folder", "Enter Folder")
+                }),
             ));
             entries.push((
                 CreateWorktree,
@@ -1455,10 +1589,10 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                     GitUp,
                     "Git",
                     "↑ / k",
-                    "Previous commit",
+                    "Previous commit/session",
                     Some(("↑/↓ Scroll", "↑/↓ Scroll")),
                 ),
-                (GitDown, "Git", "↓ / j", "Next commit", None),
+                (GitDown, "Git", "↓ / j", "Next commit/session", None),
                 (
                     GitLeft,
                     "Git",
@@ -1496,6 +1630,9 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
 }
 
 fn worktree_unavailable(browser: &Browser, view: &View) -> Option<String> {
+    if view.git_focus && selected_git_session(browser, view).is_some() {
+        return Some("Select a commit to create a worktree.".into());
+    }
     if creation_sources(browser).is_empty() {
         return Some("Fixture data is browse-only.".into());
     }
@@ -1865,27 +2002,64 @@ fn graph_viewport(spans: Vec<Span<'static>>, offset: usize, width: usize) -> Lin
     Line::from(clipped)
 }
 
-fn folder_viewport(text: &str, offset: usize, width: usize) -> String {
-    use unicode_segmentation::UnicodeSegmentation;
-    use unicode_width::UnicodeWidthStr;
-    let end = offset.saturating_add(width);
-    let mut column = 0;
-    let mut result = String::new();
-    for grapheme in text.graphemes(true) {
-        let next = column + grapheme.width();
-        if column >= end {
-            break;
+/// Draw connectors from the complete displayed hierarchy, including projected
+/// worktrees. Filesystem parents and viewport boundaries are not tree endings.
+fn folder_tree_labels(rows: &[crate::browser::FolderRow]) -> Vec<String> {
+    let mut later_sibling = vec![false; rows.len()];
+    let mut depths = Vec::new();
+    for (index, row) in rows.iter().enumerate().rev() {
+        while depths.last().is_some_and(|depth| *depth > row.depth) {
+            depths.pop();
         }
-        if next > offset {
-            if column >= offset && next <= end {
-                result.push_str(grapheme);
-            } else {
-                result.push_str(&" ".repeat(next.min(end).saturating_sub(column.max(offset))));
-            }
+        later_sibling[index] = depths.last() == Some(&row.depth);
+        if !later_sibling[index] {
+            depths.push(row.depth);
         }
-        column = next;
     }
-    result
+    let mut ancestors = Vec::new();
+    rows.iter()
+        .enumerate()
+        .map(|(index, row)| {
+            ancestors.resize(row.depth + 1, false);
+            ancestors[row.depth] = later_sibling[index];
+            let mut label = String::new();
+            if row.depth > 0 {
+                for &continues in ancestors.iter().take(row.depth.min(20)).skip(1) {
+                    label.push_str(if continues { "│  " } else { "   " });
+                }
+                label.push_str(if later_sibling[index] {
+                    "├─ "
+                } else {
+                    "└─ "
+                });
+            }
+            label.push_str(&safe_text(&row.label));
+            label.push_str(&format!(" ({})", row.count));
+            label
+        })
+        .collect()
+}
+
+fn folder_tree_line(
+    row: &crate::browser::FolderRow,
+    label: &str,
+    status: crate::domain::RuntimeStatus,
+    offset: usize,
+    width: usize,
+) -> Line<'static> {
+    let text = format!("{} ({})", safe_text(&row.label), row.count);
+    let prefix = &label[..label.len() - text.len()];
+    graph_viewport(
+        vec![
+            Span::styled(prefix.to_owned(), Style::default().fg(Color::White)),
+            Span::styled(
+                text,
+                activity_color(status).map_or(Style::default(), |color| Style::default().fg(color)),
+            ),
+        ],
+        offset,
+        width,
+    )
 }
 
 fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, view: &View) {
@@ -1893,17 +2067,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
         0 => {
             let folders = browser.folder_rows();
             let selected = folders.iter().position(|row| row.filter == browser.folder);
-            let labels: Vec<_> = folders
-                .iter()
-                .map(|row| {
-                    format!(
-                        "{}{} ({})",
-                        "  ".repeat(row.depth.min(20)),
-                        safe_text(&row.label),
-                        row.count
-                    )
-                })
-                .collect();
+            let labels = folder_tree_labels(&folders);
             // Borders and the fixed selection marker occupy four columns.
             let width = usize::from(area.width.saturating_sub(4));
             let offset = selected
@@ -1916,10 +2080,13 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 .iter()
                 .zip(&labels)
                 .map(|(row, label)| {
-                    ListItem::new(folder_viewport(label, offset, width)).style(
-                        activity_color(browser.folder_activity(&row.filter))
-                            .map_or(Style::default(), |color| Style::default().fg(color)),
-                    )
+                    ListItem::new(folder_tree_line(
+                        row,
+                        label,
+                        browser.folder_activity(&row.filter),
+                        offset,
+                        width,
+                    ))
                 })
                 .collect();
             let mut state = ListState::default().with_selected(selected);
@@ -2723,6 +2890,30 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             if view.git_hidden || view.git_size_limited {
                 return Action::Continue;
             }
+            if let Some(annotation) = selected_git_session(browser, view) {
+                let session = annotation.session;
+                if let Some(cwd) = session.cwd {
+                    if let Some(main) = view
+                        .history
+                        .repository()
+                        .as_ref()
+                        .and_then(|id| browser.repositories.get(id))
+                        .and_then(|r| r.worktrees.first())
+                    {
+                        browser
+                            .expanded
+                            .extend(main.path.ancestors().map(std::path::PathBuf::from));
+                    }
+                    browser.query.clear();
+                    browser.open_folder(cwd);
+                    browser.selected = Some(session.key);
+                    browser.reconcile(0);
+                    view.git_focus = false;
+                    view.focus = 1;
+                    view.message = None;
+                }
+                return Action::Continue;
+            }
             let Some(repository) = view.history.repository() else {
                 return Action::Continue;
             };
@@ -2777,7 +2968,10 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         Command::GitReturn => view.git_focus = false,
         Command::GitLeft => view.history.scroll_horizontal(false),
         Command::GitRight => view.history.scroll_horizontal(true),
-        Command::GitFollow => view.history.follow(),
+        Command::GitFollow => {
+            view.git_sessions.borrow_mut().follow();
+            view.history.follow();
+        }
         Command::GitUp
         | Command::GitDown
         | Command::GitPageUp
@@ -2785,14 +2979,19 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         | Command::GitHome
         | Command::GitEnd => {
             use crate::git_history::Movement;
-            view.history.navigate(match command {
-                Command::GitUp => Movement::Up,
-                Command::GitDown => Movement::Down,
-                Command::GitPageUp => Movement::PageUp,
-                Command::GitPageDown => Movement::PageDown,
-                Command::GitHome => Movement::Home,
-                _ => Movement::End,
-            });
+            let mut presentation = view.git_sessions.borrow_mut();
+            presentation.sync(browser, &view.history);
+            presentation.navigate(
+                match command {
+                    Command::GitUp => Movement::Up,
+                    Command::GitDown => Movement::Down,
+                    Command::GitPageUp => Movement::PageUp,
+                    Command::GitPageDown => Movement::PageDown,
+                    Command::GitHome => Movement::Home,
+                    _ => Movement::End,
+                },
+                &mut view.history,
+            );
         }
 
         Command::Help => {
@@ -3097,6 +3296,13 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             git_watch.context(target.clone(), browser.git_generation, graph_visible);
             view.history.tick(target, browser.git_generation, graph_visible, page).await;
             if !view.history.present() { view.git_focus = false; }
+            {
+                let mut presentation = view.git_sessions.borrow_mut();
+                presentation.sync(&browser, &view.history);
+                if presentation.session().is_some() {
+                    if let Some(anchor) = presentation.anchor() { view.history.selected = anchor; }
+                }
+            }
             // Finish the bounded operation and archive restoration before exiting.
             if (signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
                 || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed)) && relink_task.is_none() && folder_task.is_none() && !view.worktree_create.as_ref().is_some_and(|modal| modal.executing) {
@@ -3564,6 +3770,198 @@ mod cleanup_tests {
 
     fn press(browser: &mut Browser, view: &mut View, code: KeyCode) {
         handle_key(browser, view, KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    #[tokio::test]
+    async fn git_session_rows_render_and_enter_selects_without_resuming() {
+        use crate::git_sessions::tests::{add_session, fixture};
+        let (mut browser, history) = fixture().await;
+        let key = add_session(
+            &mut browser,
+            "Implement login 界",
+            "/worktree/src",
+            "/worktree",
+            "/repo/.git",
+            crate::domain::RuntimeStatus::Waiting {
+                approval: false,
+                input: true,
+            },
+            1,
+        );
+        let mut view = View {
+            history,
+            git_focus: true,
+            ..View::default()
+        };
+        browser.query = "blocking query".into();
+        browser.expanded.clear();
+        press(&mut browser, &mut view, KeyCode::Down);
+        assert!(selected_git_session(&browser, &view).is_some());
+        assert!(
+            !menu_entries(&browser, &view)
+                .iter()
+                .any(|e| e.command == Command::CreateWorktree)
+        );
+        assert!(
+            menu_entries(&browser, &view)
+                .iter()
+                .any(|e| e.label == "Select session")
+        );
+        let mut annotation = selected_git_session(&browser, &view).unwrap();
+        let mut name_column = None;
+        for status in [
+            crate::domain::RuntimeStatus::Idle,
+            crate::domain::RuntimeStatus::Running,
+            crate::domain::RuntimeStatus::Error,
+            crate::domain::RuntimeStatus::Waiting {
+                approval: true,
+                input: false,
+            },
+            crate::domain::RuntimeStatus::Waiting {
+                approval: false,
+                input: true,
+            },
+            crate::domain::RuntimeStatus::Waiting {
+                approval: true,
+                input: true,
+            },
+        ] {
+            annotation.status = status;
+            let spans = git_session_spans(&view, 0, &annotation, true, 0);
+            assert_eq!(
+                spans
+                    .iter()
+                    .find(|span| span.content.contains('└'))
+                    .unwrap()
+                    .style
+                    .fg,
+                Some(Color::White)
+            );
+            let line: String = spans.iter().map(|span| span.content.as_ref()).collect();
+            let title_start = line.find(&annotation.session.title).unwrap();
+            let column = unicode_width::UnicodeWidthStr::width(&line[..title_start]);
+            let expected = match status {
+                crate::domain::RuntimeStatus::Idle => "Idle",
+                crate::domain::RuntimeStatus::Running => "Running",
+                crate::domain::RuntimeStatus::Error => "Error",
+                crate::domain::RuntimeStatus::Waiting {
+                    approval: true,
+                    input: true,
+                } => "Waiting",
+                crate::domain::RuntimeStatus::Waiting { approval: true, .. } => "Approval",
+                _ => "Input",
+            };
+            assert!(line[..title_start].ends_with(&format!("{expected:>8} └─ ")));
+            let continuing: String = git_session_spans(&view, 0, &annotation, false, 0)
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+            assert_eq!(continuing, line.replace(" └─ ", " ├─ "));
+            let prefix: String = view
+                .history
+                .session_spans(0)
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+            assert_eq!(
+                column,
+                unicode_width::UnicodeWidthStr::width(prefix.as_str()) + 12
+            );
+            assert_eq!(*name_column.get_or_insert(column), column);
+        }
+        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 16), (12, 9)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            if width == 120 {
+                let text: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|c| c.symbol())
+                    .collect();
+                assert!(text.contains("Implement login 界"));
+                assert!(text.contains("codex · feature"));
+                assert!(text.contains("Input └─ Implement login 界"));
+            }
+        }
+        assert!(matches!(
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+            ),
+            Action::Continue
+        ));
+        assert_eq!(view.context(), 1);
+        assert_eq!(browser.folder, FolderFilter::Path("/worktree/src".into()));
+        assert_eq!(browser.selected, Some(key));
+        assert!(browser.query.is_empty());
+        assert!(browser.expanded.contains(std::path::Path::new("/repo")));
+        assert!(
+            browser
+                .folder_rows()
+                .iter()
+                .any(|r| r.filter == browser.folder)
+        );
+    }
+
+    #[tokio::test]
+    async fn git_session_provider_column_aligns_unicode_names_across_commits_and_scroll() {
+        use crate::git_sessions::tests::{add_session, fixture};
+        let (mut browser, history) = fixture().await;
+        for (title, root) in [
+            ("Short", "/repo"),
+            ("Longer 界界 name", "/worktree"),
+            ("e\u{301} task", "/repo"),
+        ] {
+            add_session(
+                &mut browser,
+                title,
+                root,
+                root,
+                "/repo/.git",
+                crate::domain::RuntimeStatus::Running,
+                1,
+            );
+        }
+        browser
+            .repositories
+            .get_mut(std::path::Path::new("/repo/.git"))
+            .unwrap()
+            .worktrees[1]
+            .head = Some("older".into());
+        let view = View {
+            history,
+            ..View::default()
+        };
+        let mut presentation = view.git_sessions.borrow_mut();
+        presentation.sync(&browser, &view.history);
+        let width = git_session_name_width(&presentation);
+        assert_eq!(
+            width,
+            unicode_width::UnicodeWidthStr::width("Longer 界界 name")
+        );
+        let mut provider_column = None;
+        for row in &presentation.rows {
+            if let crate::git_sessions::Row::Session { anchor, annotation } = row {
+                let spans = git_session_spans(
+                    &view,
+                    *anchor,
+                    &presentation.annotations[*annotation],
+                    presentation.is_last_session(*annotation),
+                    width,
+                );
+                let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+                let column =
+                    unicode_width::UnicodeWidthStr::width(&text[..text.find("codex").unwrap()]);
+                assert_eq!(*provider_column.get_or_insert(column), column);
+            }
+        }
+        presentation.selected = presentation.rows.len() - 1;
+        presentation.range(1);
+        assert_eq!(git_session_name_width(&presentation), width);
     }
 
     async fn navigation_fixture(heads: &[&str]) -> (Browser, View) {
@@ -4327,7 +4725,88 @@ mod cleanup_tests {
 
 #[cfg(test)]
 mod folder_viewport_tests {
-    use super::folder_viewport;
+    fn folder_viewport(text: &str, offset: usize, width: usize) -> String {
+        super::graph_viewport(
+            vec![ratatui::text::Span::raw(text.to_owned())],
+            offset,
+            width,
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn folder_connectors_stay_white_while_text_keeps_activity_color() {
+        use crate::{
+            browser::{FolderFilter, FolderRow},
+            domain::RuntimeStatus,
+        };
+        use ratatui::style::Color;
+        let row = FolderRow {
+            filter: FolderFilter::Path("/project".into()),
+            label: "project".into(),
+            depth: 2,
+            count: 1,
+        };
+        for status in [
+            RuntimeStatus::Running,
+            RuntimeStatus::Idle,
+            RuntimeStatus::Waiting {
+                approval: true,
+                input: false,
+            },
+        ] {
+            for offset in [0, 1, 3, 4, 6] {
+                let line = super::folder_tree_line(&row, "│  └─ project (1)", status, offset, 40);
+                for span in line.spans {
+                    if span.content.contains(['│', '└', '─']) {
+                        assert_eq!(span.style.fg, Some(Color::White));
+                    } else if span.content.chars().any(char::is_alphabetic) {
+                        assert_eq!(span.style.fg, super::activity_color(status));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn folder_branches_follow_displayed_hierarchy_and_collapsed_siblings() {
+        use crate::browser::{FolderFilter, FolderRow};
+        let row = |label: &str, depth| FolderRow {
+            label: label.into(),
+            depth,
+            count: 0,
+            filter: FolderFilter::Path(std::path::PathBuf::from(label)),
+        };
+        // The linked worktree's filesystem path is irrelevant to this hierarchy.
+        let mut rows = vec![
+            row("/", 0),
+            row("project", 1),
+            row("feature", 2),
+            row("src", 3),
+            row("other", 1),
+            row("child", 2),
+        ];
+        let labels = super::folder_tree_labels(&rows);
+        assert_eq!(
+            labels,
+            [
+                "/ (0)",
+                "├─ project (0)",
+                "│  └─ feature (0)",
+                "│     └─ src (0)",
+                "└─ other (0)",
+                "   └─ child (0)"
+            ]
+        );
+        // Clipping before the later sibling must not turn project into a corner.
+        assert_eq!(&labels[1..3], ["├─ project (0)", "│  └─ feature (0)"]);
+        rows.drain(2..4);
+        assert_eq!(
+            super::folder_tree_labels(&rows),
+            ["/ (0)", "├─ project (0)", "└─ other (0)", "   └─ child (0)"]
+        );
+    }
+
     #[test]
     fn clips_columns_without_splitting_graphemes() {
         assert_eq!(folder_viewport("ab界cd", 3, 3), " cd");
