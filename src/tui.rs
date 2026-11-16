@@ -226,6 +226,7 @@ pub struct View {
     pub search_selected: Option<crate::domain::SessionKey>,
     pub help: bool,
     pub help_selected: usize,
+    pub help_entries: Option<Vec<MenuEntry>>,
     pub help_control: usize,
     pub search_control: usize,
     pub source_control: usize,
@@ -1366,14 +1367,28 @@ enum Command {
     Refresh,
     Quit,
 }
-struct MenuEntry {
+#[derive(Clone)]
+pub struct MenuEntry {
     command: Command,
     section: &'static str,
     shortcut: &'static str,
     label: &'static str,
     footer: Option<(&'static str, &'static str)>,
 }
+fn open_help(browser: &Browser, view: &mut View) {
+    view.help = false;
+    view.help_entries = Some(menu_entries(browser, view));
+    view.help = true;
+    view.help_control = 0;
+}
 fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
+    // Keep action identities stable while a menu is open. Availability is still
+    // checked on every render and activation, so a refresh cannot redirect Enter.
+    if view.help {
+        if let Some(entries) = &view.help_entries {
+            return entries.clone();
+        }
+    }
     use Command::*;
     let mut entries = vec![
         (
@@ -2971,8 +2986,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
     }
     let command = match key.code {
         KeyCode::Char('?') => {
-            view.help = true;
-            view.help_control = 0;
+            open_help(browser, view);
             view.help_selected = menu_entries(browser, view)
                 .iter()
                 .position(|entry| unavailable(entry.command, browser, view).is_none())
@@ -3120,8 +3134,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
 
         Command::Help => {
-            view.help = true;
-            view.help_control = 0;
+            open_help(browser, view);
         }
         Command::Info => {
             if view.focus == 0 {
@@ -4548,6 +4561,25 @@ mod cleanup_tests {
                 assert_eq!(view.message.as_deref(), Some("unchanged"));
             }
         }
+        browser.ownership.get_mut(&path).unwrap().outcome = Some(repository.clone());
+        open_help(&browser, &mut view);
+        press(&mut browser, &mut view, KeyCode::End);
+        assert_eq!(
+            menu_entries(&browser, &view)[view.help_selected].command,
+            Command::CreateWorktree
+        );
+        browser.git_generation += 1;
+        assert_eq!(
+            menu_entries(&browser, &view)[view.help_selected].command,
+            Command::CreateWorktree
+        );
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert!(view.help);
+        assert!(view.error_dialog.is_none());
+        assert!(view.worktree_create.is_none());
+        browser.ownership.get_mut(&path).unwrap().generation = browser.git_generation;
+        assert!(worktree_unavailable(&browser, &view).is_none());
+        press(&mut browser, &mut view, KeyCode::Esc);
         browser.folder = FolderFilter::All;
         assert!(worktree_unavailable(&browser, &view).is_some());
         browser.folder = FolderFilter::Path(path.clone());

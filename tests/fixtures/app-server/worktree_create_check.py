@@ -12,14 +12,10 @@ binary = str(Path(sys.argv[1]).resolve())
 def select_worktree_action(terminal):
     terminal.send(b'?')
     terminal.expect('Actions & shortcuts')
-    def selected():
-        if '> w Create worktree' in terminal.text():
-            return True
-        # Git discovery can add/remove the final action while the menu is open.
-        # Navigate until that action is visibly selected before activating it.
-        terminal.send(b'\x1b[F')
-        return False
-    terminal.wait(selected)
+    terminal.send(b'\x1b[F')
+    terminal.expect('> w Create worktree')
+    terminal.wait(lambda: 'Wait for Git discovery' not in terminal.text())
+
 
 with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     home = Path(directory)

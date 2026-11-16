@@ -5,6 +5,7 @@
 - See live sessions in Git history, linked worktrees marked with `◇`, and live uncommitted changes.
 - Navigate all panes consistently with Tab, Shift-Tab, directional Alt-arrow keys, and folder tree shortcuts. Right expands folders before focusing their sessions.
 - Use clearer modal controls, Git history scroll indicators, and explicit recovery for blocked session relinks.
+- Keep the selected menu action stable while background Git discovery refreshes.
 - Development launches watch for changes and reload gracefully by default.
 
 Install or update:
