@@ -9,6 +9,18 @@ import tempfile
 from pty_support import Terminal
 
 binary = str(Path(sys.argv[1]).resolve())
+def select_worktree_action(terminal):
+    terminal.send(b'?')
+    terminal.expect('Actions & shortcuts')
+    def selected():
+        if '> w Create worktree' in terminal.text():
+            return True
+        # Git discovery can add/remove the final action while the menu is open.
+        # Navigate until that action is visibly selected before activating it.
+        terminal.send(b'\x1b[F')
+        return False
+    terminal.wait(selected)
+
 with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     home = Path(directory)
     project = home / 'project'
@@ -29,7 +41,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     try:
         t.expect('Second creation commit')
         # Folders menu and keyboard use the same action; escape before execution is inert.
-        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');t.send(b'?');t.expect('Actions & shortcuts');t.send(b'\x1b[F')
+        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');select_worktree_action(t)
         t.expect('Create worktree')
         t.send(b'\r')
         t.expect('Starting commit:')
@@ -75,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         # Wait for refreshed ownership before opening the next operation.
         t.expect('[HEAD] [◇ from-history]')
         # Existing branch rejection retains the editable input.
-        t.expect('w Worktree');t.send(b'?');t.expect('Actions & shortcuts');t.send(b'\x1b[F')
+        t.expect('w Worktree');select_worktree_action(t)
         t.wait(lambda: 'Wait for Git discovery to finish.' not in t.text())
         t.send(b'\r')
         t.expect('Starting commit:')

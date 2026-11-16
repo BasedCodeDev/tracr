@@ -26,7 +26,9 @@ for mode in ['stop','refresh','unknown','attached','cancel']:
                 assert '/terminate' not in calls()
             else:
                 t.expect('sleep 300');t.expect('Stop listed commands and retry move')
-                t.resize(24,50);t.expect('[Cancel]');t.send(b'\x1b[6~');t.resize(80,240)
+                t.resize(24,50);t.expect('[Cancel]')
+                before_scroll=t.text();t.send(b'\x1b[6~');t.wait(lambda:t.text()!=before_scroll)
+                t.resize(80,240);t.expect('[Cancel]')
                 if mode=='refresh':
                     state['terminals']=[];native.write_text(json.dumps(state));t.send(b'\t');t.expect('[Refresh]');t.send(b'\r')
                     t.expect('No background commands remain');t.expect('[Cancel]')

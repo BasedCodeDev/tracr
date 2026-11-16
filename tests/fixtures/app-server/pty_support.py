@@ -30,9 +30,10 @@ class Terminal:
         if hasattr(self, 'child') and changed:
             self.child.send_signal(signal.SIGWINCH)
             # Ratatui clears the screen when adopting new dimensions. Wait for
-            # that redraw before sending keys: old screen text can otherwise
+            # the completed redraw (cursor visibility follows the frame), not just
+            # its initial clear, before sending keys. Old screen text can otherwise
             # satisfy expect() while SIGWINCH is still being processed.
-            self.wait(lambda: b'\x1b[2J' in self.output[offset:])
+            self.wait(lambda: re.search(rb'\x1b\[2J.*\x1b\[\?25[lh]', bytes(self.output[offset:]), re.S) is not None)
     def text(self):
         # Reconstruct cursor-addressed updates; stripping ANSI loses unchanged
         # characters when Ratatui redraws only differences.
