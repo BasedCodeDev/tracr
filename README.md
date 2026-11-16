@@ -210,6 +210,8 @@ Terminals narrower than 100 columns show the focused pane full-width.
   Git keeps its expanded/collapsed state, remembered across folders for this run.
 - Enter: expand or collapse the selected folder, resume a session, or relink a session whose folder is missing.
 - `n` in Sessions: create a new session in the selected folder.
+- `w` in Folders or expanded Git history: create a new worktree from checkout HEAD
+  or the selected commit, respectively.
 - `l` in Sessions: relink the selected session. Choose an existing destination,
   press Enter to preview, then Enter again to confirm. Escape cancels before execution.
 - `R`: inspect/recover an unfinished relocation. Recovery never recreates the old folder.
@@ -415,6 +417,54 @@ Run `./scripts/check.sh --offline` for cached-dependency checks, or
 The verifier reports passed, failed, and blocked stages and retains logs. See
 [validation status](docs/validation.md) for current blockers and coverage.
 
+
+## Create a Git worktree
+
+In **Folders**, press **w** or choose **Create worktree** from `?` to start from
+that checkout's HEAD. In expanded **Git history**, use **w** or **Create worktree
+from selected commit** to start from the highlighted commit. Both actions open
+the same dialog and show the source checkout and exact starting commit.
+
+Enter a new branch name and review the destination. By default, tracr suggests
+`<main checkout>/.worktrees/<branch>` even when creating from another worktree.
+For example, `feature/login` creates `.worktrees/feature/login` under the main
+checkout. The suggestion follows the branch name until you edit the destination.
+Custom paths may be absolute, `~/…`, or relative to the source checkout root.
+Tab/Shift-Tab switches controls; Ctrl-U clears a field. Enter opens the preview;
+Enter again creates the worktree. Escape returns from preview to editing, then
+cancels. Creation itself cannot be cancelled through the dialog.
+
+The preview fixes the starting commit: later HEAD changes do not silently alter
+it. The new checkout contains committed content; uncommitted changes remain in
+the source checkout. After success, tracr selects the new worktree in Folders.
+Switch to Sessions and use the existing New session action when ready.
+
+Git 2.48 or newer with relative-worktree support is required for creation.
+Relative links enable Git's `extensions.relativeWorktrees` repository extension;
+older Git versions and incompatible Git tools cannot open that repository.
+Ordinary browsing remains available without this creation capability.
+
+The default container is ignored locally using `/.worktrees/` in the repository's
+`info/exclude`, without editing tracked `.gitignore` files, making commits, or
+changing global Git settings. Existing effective exclusions are reused. A custom
+path inside another checkout of the same repository receives an exact subtree
+exclusion. Outside paths need no exclusion and do not travel with the project.
+Conflicting tracked ignore rules, tracked container content, and exclusion-write
+failures stop creation and leave the inputs available for correction.
+
+The main checkout must contain its ordinary `.git` directory. Bare repositories,
+external Git directories, submodule checkouts, repositories containing submodules,
+symlink destinations/parents, existing destinations, existing branch names, and
+custom destinations inside unrelated repositories are not supported in this slice.
+tracr does not force creation, reset branches, copy dirty files, or automatically
+delete branches or directories after failure. Errors report observed partial state;
+local exclusions or Git compatibility settings may remain after a failed attempt.
+
+Moving the entire main checkout with its nested worktrees preserves the new Git
+links. This does not update Codex session paths after a move outside tracr. Use
+**Move folder** below to update supported descendant sessions along with the files,
+or relink affected sessions after an external move. Existing absolute-linked
+worktrees are not converted or repaired by creating a new one.
 
 ## Move a folder and its sessions
 

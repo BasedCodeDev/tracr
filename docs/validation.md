@@ -31,6 +31,9 @@ blocked (2) runs.
 - Relinking, permission provenance, same-filesystem folder moves, idle release,
   journal compatibility and guarded recovery have Rust and synthetic terminal
   coverage. See [relocation compatibility](codex-relocation-compatibility.md).
+- Worktree creation checks cover local exclusions, relative links, reviewed commits,
+  collision/race rejection, partial failures, both terminal entry points, and moving
+  a project with worktree sessions through the existing folder-move flow.
 - Git inventory, graph topology, watchers, progressive loading, HEAD following,
   cancellation and idle behavior have independent regression coverage. See
   [Git validation](git-worktree-browsing-validation.md).

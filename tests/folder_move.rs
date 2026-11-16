@@ -352,3 +352,74 @@ fn destination_input_distinguishes_nesting_from_rename() {
         std::fs::canonicalize(home).unwrap().join("项目 old")
     );
 }
+
+#[tokio::test]
+async fn moves_relative_worktrees_and_their_descendant_sessions() {
+    use std::process::Command;
+    let temp = tempfile::tempdir().unwrap();
+    let old = temp.path().join("project");
+    fs::create_dir(&old).unwrap();
+    let git = |path: &Path, args: &[&str]| {
+        let result = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout).unwrap()
+    };
+    git(&old, &["init", "-q"]);
+    git(
+        &old,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "Initial",
+        ],
+    );
+    let context = tracr::worktree_create::context(&old, None).await.unwrap();
+    let path = tracr::worktree_create::suggested(&context, "feature");
+    let plan = tracr::worktree_create::prepare(context, "feature".into(), path.clone())
+        .await
+        .unwrap();
+    tracr::worktree_create::execute(plan).await.unwrap();
+    let sources = vec![
+        source(temp.path(), 0, &old, false),
+        source(temp.path(), 1, &path, true),
+    ];
+    let target = temp.path().join("moved");
+    let state = temp.path().join("state");
+    let plan = folder_move::preview(sources.clone(), old, target.clone(), &state)
+        .await
+        .unwrap();
+    assert_eq!(plan.entries.len(), 2);
+    let outcome = execute(plan, &state, false).await;
+    assert!(matches!(outcome, Outcome::Complete(_)), "{outcome:?}");
+    assert_eq!(read(&sources[0])["cwd"], target.to_str().unwrap());
+    assert_eq!(
+        read(&sources[1])["cwd"],
+        target.join(".worktrees/feature").to_str().unwrap()
+    );
+    assert_eq!(read(&sources[1])["archived"], true);
+    assert_eq!(
+        git(
+            &target.join(".worktrees/feature"),
+            &["branch", "--show-current"]
+        )
+        .trim(),
+        "feature"
+    );
+    let listing = git(&target, &["worktree", "list", "--porcelain"]);
+    assert!(!listing.contains("prunable"));
+    assert!(listing.contains(target.join(".worktrees/feature").to_str().unwrap()));
+}

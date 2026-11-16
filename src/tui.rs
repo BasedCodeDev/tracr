@@ -135,6 +135,7 @@ pub struct View {
     pub source_picker: Option<usize>,
     pub relink: Option<RelinkModal>,
     pub folder_move: Option<crate::folder_move_ui::Modal>,
+    pub worktree_create: Option<crate::worktree_create_ui::Modal>,
     pub recovery_index: usize,
     pub error_dialog: Option<crate::error_dialog::ErrorDialog>,
 }
@@ -521,6 +522,10 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
 pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     if let Some(dialog) = &view.error_dialog {
         dialog.draw(frame);
+        return;
+    }
+    if let Some(modal) = &view.worktree_create {
+        modal.draw(frame);
         return;
     }
     if let Some(modal) = &view.folder_move {
@@ -981,6 +986,7 @@ pub(crate) fn render_picker(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Command {
+    CreateWorktree,
     GitToggle,
     GitReturn,
     GitUp,
@@ -1156,6 +1162,15 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             ),
         ]);
     }
+    if view.context() == 0 {
+        entries.push((
+            CreateWorktree,
+            "Folders",
+            "w",
+            "Create worktree",
+            Some(("w Worktree", "w Worktree")),
+        ));
+    }
     if view.context() == 2 {
         entries.retain(|entry| matches!(entry.0, Help | Quit | Refresh));
         entries.push((
@@ -1174,6 +1189,13 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             }),
         ));
         if !view.git_hidden && !view.git_size_limited {
+            entries.push((
+                CreateWorktree,
+                "Git",
+                "w",
+                "Create worktree from selected commit",
+                Some(("w Worktree", "w Worktree")),
+            ));
             entries.extend([
                 (
                     GitUp,
@@ -1217,8 +1239,49 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         .collect()
 }
 
-fn unavailable(command: Command, browser: &Browser) -> Option<String> {
+fn worktree_unavailable(browser: &Browser, view: &View) -> Option<String> {
+    if creation_sources(browser).is_empty() {
+        return Some("Fixture data is browse-only.".into());
+    }
+    let FolderFilter::Path(path) = &browser.folder else {
+        return Some("Select a Git checkout first.".into());
+    };
+    let Some(owner) = browser.ownership.get(path) else {
+        return Some("Wait for Git discovery to finish.".into());
+    };
+    if owner.generation != browser.git_generation {
+        return Some("Wait for Git discovery to finish.".into());
+    }
+    match &owner.outcome {
+        Some(crate::git_discovery::Outcome::Repository { repository, .. }) => {
+            if view.git_focus && view.history.repository().as_ref() != Some(&repository.common_dir)
+            {
+                return Some("Wait for history of the selected repository to load.".into());
+            }
+        }
+        Some(crate::git_discovery::Outcome::NotRepository) => {
+            return Some("The selected folder is not a Git checkout.".into());
+        }
+        _ => return Some("Git repository information is unavailable or still loading.".into()),
+    }
+    if view.git_focus
+        && (view.git_hidden
+            || view.git_size_limited
+            || view
+                .history
+                .rows
+                .get(view.history.selected)
+                .and_then(|row| row.oid.as_ref())
+                .is_none())
+    {
+        return Some("Select a visible Git commit first.".into());
+    }
+    None
+}
+
+fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<String> {
     match command {
+        Command::CreateWorktree => worktree_unavailable(browser, view),
         Command::ToggleFolder if !matches!(browser.folder, FolderFilter::Path(_)) => {
             Some("Select a concrete folder first.".into())
         }
@@ -1313,7 +1376,7 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         if i == selected {
             selected_row = items.len();
         }
-        let disabled = unavailable(entry.command, browser).is_some();
+        let disabled = unavailable(entry.command, browser, view).is_some();
         let style = if disabled {
             Style::default().fg(Color::DarkGray)
         } else {
@@ -1377,7 +1440,7 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 .viewport_content_length(usize::from(body.height)),
         );
     }
-    if let Some(reason) = unavailable(entries[selected].command, browser) {
+    if let Some(reason) = unavailable(entries[selected].command, browser, view) {
         frame.render_widget(
             Paragraph::new(reason).wrap(Wrap { trim: false }),
             sections[1],
@@ -2062,6 +2125,12 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
+    if let Some(modal) = view.worktree_create.as_mut() {
+        if modal.key(key) {
+            view.worktree_create = None;
+        }
+        return Action::Continue;
+    }
     if let Some(info) = view.info.as_mut() {
         match info.dialog.key(key) {
             crate::error_dialog::Event::Copy => return Action::CopyInformation,
@@ -2162,7 +2231,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             KeyCode::End => view.help_selected = entries.len() - 1,
             KeyCode::Enter if key.kind != KeyEventKind::Repeat => {
                 let command = entries[view.help_selected].command;
-                if unavailable(command, browser).is_none() {
+                if unavailable(command, browser, view).is_none() {
                     view.help = false;
                     return execute_command(command, browser, view);
                 }
@@ -2241,6 +2310,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 Command::Help
             }
             _ if view.git_hidden || view.git_size_limited => return Action::Continue,
+            KeyCode::Char('w') => Command::CreateWorktree,
             KeyCode::Up | KeyCode::Char('k') => Command::GitUp,
             KeyCode::Down | KeyCode::Char('j') => Command::GitDown,
             KeyCode::Left => Command::GitLeft,
@@ -2259,7 +2329,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             view.help = true;
             view.help_selected = menu_entries(browser, view)
                 .iter()
-                .position(|entry| unavailable(entry.command, browser).is_none())
+                .position(|entry| unavailable(entry.command, browser, view).is_none())
                 .unwrap_or(0);
             return Action::Continue;
         }
@@ -2270,6 +2340,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('n') if view.focus == 1 => Command::Create,
         KeyCode::Char('l') if view.focus == 1 => Command::Relink,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
+        KeyCode::Char('w') if view.focus == 0 => Command::CreateWorktree,
         KeyCode::Char('R') => Command::Recover,
         KeyCode::Char('a') => Command::Archives,
         KeyCode::Tab => Command::CyclePane,
@@ -2295,6 +2366,25 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
 
 fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> Action {
     match command {
+        Command::CreateWorktree => {
+            if let Some(reason) = worktree_unavailable(browser, view) {
+                view.message = Some(reason);
+                return Action::Continue;
+            }
+            if let FolderFilter::Path(path) = &browser.folder {
+                let commit = if view.git_focus {
+                    view.history
+                        .rows
+                        .get(view.history.selected)
+                        .and_then(|row| row.oid.clone())
+                } else {
+                    None
+                };
+                view.worktree_create =
+                    Some(crate::worktree_create_ui::Modal::new(path.clone(), commit));
+            }
+        }
+
         Command::GitToggle => view.git_hidden = !view.git_hidden,
         Command::GitReturn => view.git_focus = false,
         Command::GitLeft => view.history.scroll_horizontal(false),
@@ -2372,7 +2462,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
         }
         Command::Create => {
-            if let Some(reason) = unavailable(Command::Create, browser) {
+            if let Some(reason) = unavailable(Command::Create, browser, view) {
                 view.message = Some(reason);
                 return Action::Continue;
             }
@@ -2522,7 +2612,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let modal_timer = view.folder_move.is_some() && now >= modal_deadline;
             if modal_timer { modal_deadline = now + Duration::from_millis(100); }
             let resized = signals.resize.swap(false, std::sync::atomic::Ordering::Relaxed);
-            let activity = resized || candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll() || copy_ready || picker_ready || modal_timer
+            let activity = view.worktree_create.as_ref().is_some_and(|modal| modal.ready()) || resized || candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll() || copy_ready || picker_ready || modal_timer
                 || pending.as_ref().is_some_and(|p| p.task.is_finished())
                 || relink_task.as_ref().is_some_and(|task| task.is_finished()) || folder_task.as_ref().is_some_and(|task| task.is_finished())
                 || !relink_rx.is_empty() || !folder_rx.is_empty()
@@ -2575,8 +2665,29 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if !view.history.present() { view.git_focus = false; }
             // Finish the bounded operation and archive restoration before exiting.
             if (signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
-                || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed)) && relink_task.is_none() && folder_task.is_none() {
+                || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed)) && relink_task.is_none() && folder_task.is_none() && !view.worktree_create.as_ref().is_some_and(|modal| modal.executing) {
                 break;
+            }
+            let worktree_ready = view.worktree_create.as_ref().is_some_and(|modal| modal.ready());
+            let worktree_result = if let Some(modal) = view.worktree_create.as_mut() { modal.tick().await } else { None };
+            if worktree_ready {
+                // Queued Enter repeats must not accept a newly displayed preview.
+                while event::poll(Duration::ZERO)? { let _ = event::read()?; }
+            }
+            if let Some(result) = worktree_result {
+                browser.invalidate_git();
+                candidates_dirty = true;
+                match result {
+                    Ok(path) => {
+                        browser.open_folder(path);
+                        view.worktree_create = None;
+                        view.git_focus = false;
+                        view.focus = 0;
+                        view.message = Some("Worktree created. Select Sessions to start a new session.".into());
+                        discovery.refresh(&mut browser);
+                    }
+                    Err(error) => view.error_dialog = Some(crate::error_dialog::ErrorDialog::new("Couldn't create worktree", "Inspect creation state before retrying", error)),
+                }
             }
             while let Ok(message)=relink_rx.try_recv() {
                 if let Some(modal)=view.relink.as_mut(){modal.error=Some(message);}
@@ -2729,7 +2840,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             idle.deadline = next_age_update(&browser, &view, size.height);
             }
             let busy = browser.loading() || git_discovery.pending() || view.history.loading() || pending.is_some() || relink_task.is_some() || folder_task.is_some()
-                || view.relink.is_some() || view.folder_move.is_some()
+                || view.relink.is_some() || view.folder_move.is_some() || view.worktree_create.is_some()
                 || view.error_dialog.as_ref().is_some_and(|dialog| dialog.copy_task.is_some())
                 || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.is_some());
             let mut wait = Duration::from_millis(if busy { 40 } else { 250 });
@@ -2741,6 +2852,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 idle.wake();
                 let incoming=event::read()?;
                 if let Event::Paste(text)=&incoming {
+                    if let Some(modal)=view.worktree_create.as_mut(){modal.paste(text);}
                     if let Some(modal)=view.folder_move.as_mut(){modal.paste(text);}
                     if let Some(modal)=view.relink.as_mut(){if !modal.busy && modal.preview.is_none(){if let Some(picker)=modal.picker.as_mut(){picker.paste(&mut modal.input,text);}}}
                 }
