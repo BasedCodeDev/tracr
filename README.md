@@ -236,7 +236,10 @@ collapsed: its two-column strip sits beside Sessions. Git appears below the brow
 - Up / Down or `k/j`: select the previous / next item. In Folders, Right / `l`
   expands a collapsed folder without changing selection; when already expanded,
   it focuses Sessions for that folder. Left / `h` collapses the folder or selects
-  its displayed parent. Enter focuses Sessions directly; Escape or Backspace
+  its displayed parent. Enter opens the only session full-screen, or creates one
+  full-screen when the folder has none. With multiple sessions, it focuses the
+  session list. While discovery is incomplete, it only focuses Sessions.
+  Escape or Backspace
   returns to Folders. Left / Right and `h/l` do nothing in Sessions.
 - `b` in Folders collapses the entire pane to a two-column strip with a vertical line and no label,
   giving Sessions the remaining width. Focus stays on the line; `b` expands it.
@@ -272,7 +275,8 @@ collapsed: its two-column strip sits beside Sessions. Git appears below the brow
   omitted. Updates use the same live-status feed as Sessions, without reloading Git.
 - Enter on a Git session row selects its folder and resumes the session,
   or offers relinking if its folder is missing. Enter on a commit selects its worktree folder,
-  offering a chooser when multiple worktrees match. Session rows appear as their
+  offering a chooser when multiple worktrees match, then applies the same
+  zero/one/many-session behavior as Enter in Folders. Session rows appear as their
   HEAD commits become available in loaded history.
 - Enter in Sessions: resume a session, relink one whose folder is missing, or
   create a session when the selected folder has none and creation is available.

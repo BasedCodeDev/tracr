@@ -182,9 +182,9 @@ fn matching_worktrees(
     Ok(matches)
 }
 
-fn select_git_worktree(browser: &mut Browser, view: &mut View, picker: &WorktreePicker) {
+fn select_git_worktree(browser: &mut Browser, view: &mut View, picker: &WorktreePicker) -> Action {
     let Some(target) = picker.matches.get(picker.selected) else {
-        return;
+        return Action::Continue;
     };
     match matching_worktrees(browser, &picker.repository, &picker.oid) {
         Ok(matches) if matches.iter().any(|w| w.path == target.path) => {
@@ -204,12 +204,14 @@ fn select_git_worktree(browser: &mut Browser, view: &mut View, picker: &Worktree
             view.focus = 0;
             view.folders_hidden = false;
             view.message = None;
+            return enter_folder(browser, view);
         }
         Ok(_) => {
             view.message = Some("Worktree changed or was removed. Select the commit again.".into())
         }
         Err(message) => view.message = Some(message),
     }
+    Action::Continue
 }
 
 #[derive(Default)]
@@ -241,6 +243,7 @@ pub struct View {
     pub message: Option<String>,
     pub preparing: bool,
     pub source_picker: Option<usize>,
+    pub source_fullscreen: bool,
     pub worktree_picker: Option<WorktreePicker>,
     pub relink: Option<RelinkModal>,
     pub folder_move: Option<crate::folder_move_ui::Modal>,
@@ -1495,7 +1498,7 @@ enum Command {
     GitSelectWorktree,
     Help,
     PreviousPane,
-    NextPane,
+    EnterFolder,
     CyclePane,
     CyclePaneBack,
     PaneUp,
@@ -1515,6 +1518,7 @@ enum Command {
     MoveFolder,
     Recover,
     Create,
+    CreateFullscreen,
     Archives,
     Search,
     Refresh,
@@ -1535,7 +1539,7 @@ fn available_when_folders_hidden(command: Command) -> bool {
             | Command::PaneDown
             | Command::PaneLeft
             | Command::PaneRight
-            | Command::NextPane
+            | Command::EnterFolder
             | Command::PreviousPane
     )
 }
@@ -1636,10 +1640,10 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             None,
         ),
         (
-            NextPane,
+            EnterFolder,
             "Folders",
             "Enter",
-            "Select Sessions",
+            "Open session or select Sessions",
             Some(("Enter Sessions", "Enter Sessions")),
         ),
         (
@@ -1659,7 +1663,7 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     ];
     entries.retain(|entry| {
         (entry.0 != Recover || view.recovery_available)
-            && (entry.0 != NextPane || view.context() == 0)
+            && (entry.0 != EnterFolder || view.context() == 0)
             && (entry.0 != PreviousPane || view.context() == 1)
     });
     if view.context() == 0 {
@@ -2037,7 +2041,7 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
         }
         Command::Relink => relink_unavailable(browser),
         Command::MoveFolder => crate::folder_move_ui::unavailable(browser),
-        Command::Create => {
+        Command::Create | Command::CreateFullscreen => {
             if browser.loading() {
                 Some("Wait for discovery to finish.".into())
             } else if creation_sources(browser).is_empty() {
@@ -2908,6 +2912,7 @@ pub enum Action {
     ResumeSelectedFullscreen,
     CancelResume,
     CreateNew(usize),
+    CreateNewFullscreen(usize),
 }
 
 fn selected_session(browser: &Browser) -> Option<crate::domain::SessionSummary> {
@@ -2969,6 +2974,37 @@ fn creation_sources(browser: &Browser) -> Vec<usize> {
         .filter_map(|(i, spec)| spec.creation_source_id().map(|_| i))
         .collect()
 }
+fn creation_action(source: usize, fullscreen: bool) -> Action {
+    if fullscreen {
+        Action::CreateNewFullscreen(source)
+    } else {
+        Action::CreateNew(source)
+    }
+}
+
+/// Enter only a known directory inventory, never a transient search result.
+fn enter_folder(browser: &mut Browser, view: &mut View) -> Action {
+    view.focus = 1;
+    view.git_focus = false;
+    if !matches!(browser.folder, FolderFilter::Path(_)) {
+        return Action::Continue;
+    }
+    browser.query.clear();
+    browser.reconcile(0);
+    if browser.loading() || browser.diagnostics().iter().any(|source| !source.complete) {
+        return Action::Continue;
+    }
+    let sessions = browser.visible();
+    match sessions.as_slice() {
+        [] => execute_command(Command::CreateFullscreen, browser, view),
+        [session] => {
+            browser.selected = Some(session.key.clone());
+            execute_command(Command::Resume, browser, view)
+        }
+        _ => Action::Continue,
+    }
+}
+
 fn can_create(browser: &Browser) -> bool {
     !browser.loading()
         && matches!(browser.folder, FolderFilter::Path(_))
@@ -3060,8 +3096,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 picker.selected = (picker.selected + 1).min(picker.matches.len().saturating_sub(1))
             }
             KeyCode::Enter if key.kind != KeyEventKind::Repeat => {
-                select_git_worktree(browser, view, &picker);
-                return Action::Continue;
+                return select_git_worktree(browser, view, &picker);
             }
             _ => {}
         }
@@ -3180,6 +3215,9 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         };
     }
     if let Some(selected) = view.source_picker.as_mut() {
+        if key.kind == KeyEventKind::Repeat && key.code == KeyCode::Enter {
+            return Action::Continue;
+        }
         let sources = creation_sources(browser);
         match key.code {
             KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
@@ -3194,7 +3232,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 let source = sources.get(*selected).copied();
                 view.source_picker = None;
                 if let Some(source) = source {
-                    return Action::CreateNew(source);
+                    return creation_action(source, view.source_fullscreen);
                 }
             }
             KeyCode::Esc => view.source_picker = None,
@@ -3204,7 +3242,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 let source = sources.get(*selected).copied();
                 view.source_picker = None;
                 if let Some(source) = source {
-                    return Action::CreateNew(source);
+                    return creation_action(source, view.source_fullscreen);
                 }
             }
             _ => {}
@@ -3375,7 +3413,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
         KeyCode::Enter if key.kind == KeyEventKind::Repeat => return Action::Continue,
-        KeyCode::Enter if view.focus == 0 => Command::NextPane,
+        KeyCode::Enter if view.focus == 0 => Command::EnterFolder,
         KeyCode::Enter
             if view.focus == 1 && can_create(browser) && browser.visible().is_empty() =>
         {
@@ -3478,7 +3516,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                         selected: 0,
                     };
                     if picker.matches.len() == 1 {
-                        select_git_worktree(browser, view, &picker);
+                        return select_git_worktree(browser, view, &picker);
                     } else {
                         view.message = None;
                         view.worktree_picker = Some(picker);
@@ -3620,7 +3658,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 view.message = None;
             }
         }
-        Command::NextPane => view.focus = 1,
+        Command::EnterFolder => return enter_folder(browser, view),
         Command::PreviousPane => {
             view.focus = 0;
             view.message = None;
@@ -3673,15 +3711,16 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 }
             }
         }
-        Command::Create => {
+        Command::Create | Command::CreateFullscreen => {
             if let Some(reason) = unavailable(Command::Create, browser, view) {
                 view.message = Some(reason);
                 return Action::Continue;
             }
             view.focus = 1;
+            view.source_fullscreen = command == Command::CreateFullscreen;
             let sources = creation_sources(browser);
             if sources.len() == 1 {
-                return Action::CreateNew(sources[0]);
+                return creation_action(sources[0], view.source_fullscreen);
             }
             view.source_picker = Some(0);
             view.source_control = 0;
@@ -4298,7 +4337,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             // Cancellation may interrupt an RPC frame. Reconnect rather than reuse it.
                             browser.invalidate_git(); discovery.refresh(&mut browser);
                         }
-                        Action::CreateNew(index) => {
+                        Action::CreateNew(index) | Action::CreateNewFullscreen(index) => {
+                            let fullscreen = matches!(action, Action::CreateNewFullscreen(_));
                             if !can_create(&browser) {
                                 continue;
                             }
@@ -4318,7 +4358,10 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             let result = view.terminals.borrow_mut().launch(&command, None, title);
                             view.focus = 1;
                             view.git_focus = false;
-                            if let Err(error) = result { view.message = Some(format!("Could not start session: {error}")); }
+                            match result {
+                                Ok(()) => view.terminals.borrow_mut().fullscreen = fullscreen,
+                                Err(error) => view.message = Some(format!("Could not start session: {error}")),
+                            }
                         }
                         Action::ResumeSelected | Action::ResumeSelectedFullscreen => {
                             let fullscreen = action == Action::ResumeSelectedFullscreen;
@@ -4398,6 +4441,203 @@ mod cleanup_tests {
 
     fn press(browser: &mut Browser, view: &mut View, code: KeyCode) {
         handle_key(browser, view, KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn entry_fixture(count: usize, sources: usize) -> Browser {
+        use crate::browser::{SourceSpec, Update};
+        let mut browser = Browser::new(
+            (0..sources)
+                .map(|i| SourceSpec::Codex {
+                    binary: "codex".into(),
+                    source: crate::config::SourceConfig {
+                        id: crate::domain::SourceId(format!("source-{i}")),
+                        home: "/tmp".into(),
+                    },
+                })
+                .collect(),
+        );
+        browser.begin_refresh();
+        for source in 0..sources {
+            let sessions = if source == 0 {
+                (0..count).map(|i| serde_json::from_value(serde_json::json!({
+                    "key": {"provider":"codex","source_id":"source-0","native_id":format!("session-{i}")},
+                    "title":format!("Session {i}"), "cwd":"/tmp",
+                    "created_at":1,"updated_at":2,"archived":false,"source_kind":null,"git":null
+                })).unwrap()).collect()
+            } else {
+                vec![]
+            };
+            browser.apply(Update::Page {
+                generation: 1,
+                source,
+                sessions,
+                warnings: vec![],
+            });
+            browser.apply(Update::Finished {
+                generation: 1,
+                source,
+                error: None,
+            });
+        }
+        browser.open_folder("/tmp".into());
+        browser
+    }
+
+    fn enter(browser: &mut Browser, view: &mut View) -> Action {
+        handle_key(
+            browser,
+            view,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        )
+    }
+
+    #[test]
+    fn folder_entry_dispatches_by_count_and_clears_search() {
+        for count in 0..=2 {
+            let mut browser = entry_fixture(count, 1);
+            browser.query = "does not match".into();
+            let mut view = View::default();
+            let action = enter(&mut browser, &mut view);
+            assert_eq!(
+                action,
+                match count {
+                    0 => Action::CreateNewFullscreen(0),
+                    1 => Action::ResumeSelectedFullscreen,
+                    _ => Action::Continue,
+                }
+            );
+            assert_eq!(view.focus, 1);
+            assert!(browser.query.is_empty());
+            if count == 1 {
+                assert_eq!(browser.selected, Some(browser.visible()[0].key.clone()));
+            }
+        }
+    }
+
+    #[test]
+    fn folder_entry_waits_for_complete_inventory() {
+        for count in 0..=1 {
+            for mode in 0..3 {
+                let mut browser = entry_fixture(count, 1);
+                match mode {
+                    0 => browser.sources[0].loading = true,
+                    1 => browser.sources[0].error = Some("offline".into()),
+                    _ => browser.sources[0].warnings.push("incomplete".into()),
+                }
+                let mut view = View::default();
+                assert_eq!(enter(&mut browser, &mut view), Action::Continue);
+                assert_eq!(view.focus, 1);
+                assert!(view.source_picker.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn folder_entry_preserves_creation_intent_through_source_picker() {
+        let mut browser = entry_fixture(0, 2);
+        let mut view = View::default();
+        assert_eq!(enter(&mut browser, &mut view), Action::Continue);
+        assert_eq!(view.source_picker, Some(0));
+        press(&mut browser, &mut view, KeyCode::Down);
+        assert_eq!(
+            enter(&mut browser, &mut view),
+            Action::CreateNewFullscreen(1)
+        );
+
+        view.focus = 0;
+        enter(&mut browser, &mut view);
+        press(&mut browser, &mut view, KeyCode::Esc);
+        assert!(view.source_picker.is_none());
+        assert_eq!(
+            execute_command(Command::Create, &mut browser, &mut view),
+            Action::Continue
+        );
+        assert_eq!(enter(&mut browser, &mut view), Action::CreateNew(0));
+        let mut browser = entry_fixture(0, 1);
+        assert_eq!(
+            execute_command(Command::Create, &mut browser, &mut view),
+            Action::CreateNew(0)
+        );
+    }
+
+    #[test]
+    fn folder_entry_respects_archives_aggregate_rows_and_repeat() {
+        let mut browser = entry_fixture(1, 1);
+        let mut session = browser.all().remove(0);
+        session.archived = true;
+        browser.begin_refresh();
+        browser.apply(crate::browser::Update::Page {
+            generation: 2,
+            source: 0,
+            sessions: vec![session],
+            warnings: vec![],
+        });
+        browser.apply(crate::browser::Update::Finished {
+            generation: 2,
+            source: 0,
+            error: None,
+        });
+        let mut view = View::default();
+        assert_eq!(
+            enter(&mut browser, &mut view),
+            Action::CreateNewFullscreen(0)
+        );
+        browser.include_archived = true;
+        view.focus = 0;
+        assert_eq!(
+            enter(&mut browser, &mut view),
+            Action::ResumeSelectedFullscreen
+        );
+        browser.folder = FolderFilter::All;
+        view.focus = 0;
+        assert_eq!(enter(&mut browser, &mut view), Action::Continue);
+        browser.open_folder("/tmp".into());
+        view.focus = 0;
+        assert_eq!(
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Repeat)
+            ),
+            Action::Continue
+        );
+        assert_eq!(view.focus, 0);
+    }
+
+    #[tokio::test]
+    async fn git_worktree_entry_propagates_session_actions() {
+        for picker in [false, true] {
+            for count in 0..=2 {
+                let (navigation, mut view) = navigation_fixture(if picker {
+                    &["selected-oid", "selected-oid"]
+                } else {
+                    &["selected-oid"]
+                })
+                .await;
+                let mut browser = entry_fixture(count, 1);
+                for mut repository in navigation.repositories.into_values() {
+                    for worktree in &mut repository.worktrees {
+                        worktree.path = "/tmp".into();
+                    }
+                    browser.install_repository(repository);
+                }
+                let mut action = enter(&mut browser, &mut view);
+                if picker {
+                    assert_eq!(action, Action::Continue);
+                    assert!(view.worktree_picker.is_some());
+                    action = enter(&mut browser, &mut view);
+                }
+                assert_eq!(
+                    action,
+                    match count {
+                        0 => Action::CreateNewFullscreen(0),
+                        1 => Action::ResumeSelectedFullscreen,
+                        _ => Action::Continue,
+                    }
+                );
+                assert_eq!(view.context(), 1);
+            }
+        }
     }
 
     #[tokio::test]
@@ -4713,7 +4953,7 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn git_enter_reveals_linked_folder_and_focuses_folders() {
+    async fn git_enter_reveals_linked_folder_and_enters_sessions() {
         let (mut browser, mut view) = navigation_fixture(&["other", "selected-oid"]).await;
         press(&mut browser, &mut view, KeyCode::Enter);
         assert_eq!(
@@ -4727,7 +4967,7 @@ mod cleanup_tests {
                 .any(|row| row.filter == browser.folder)
         );
         assert!(browser.expanded.contains(std::path::Path::new("/project")));
-        assert_eq!(view.context(), 0);
+        assert_eq!(view.context(), 1);
         assert!(browser.visible().is_empty());
         assert!(browser.selected.is_none());
         assert_eq!(
@@ -4767,7 +5007,7 @@ mod cleanup_tests {
         press(&mut browser, &mut view, KeyCode::Char('j'));
         press(&mut browser, &mut view, KeyCode::Enter);
         assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
-        assert_eq!(view.context(), 0);
+        assert_eq!(view.context(), 1);
     }
 
     #[tokio::test]

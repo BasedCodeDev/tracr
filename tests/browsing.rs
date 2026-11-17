@@ -538,7 +538,7 @@ async fn enter_and_escape_navigate_panes_outside_search() {
             handle_key(&mut browser, &mut view, key(KeyCode::BackTab));
             assert_eq!(view.focus, expected);
         }
-        assert_eq!(browser.query, "codex");
+        assert!(browser.query.is_empty());
     }
 }
 
