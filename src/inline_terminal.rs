@@ -800,7 +800,7 @@ impl Manager {
                     {
                         if let Some(s) = self.sessions.get(self.selected) {
                             self.activate(s.id);
-                            self.fullscreen = key.code == KeyCode::Enter;
+                            self.fullscreen = key.code != KeyCode::Enter;
                             self.picker = false;
                         }
                     }
@@ -1090,7 +1090,7 @@ impl Manager {
         if inner.height > 0 {
             frame.render_widget(
                 Paragraph::new(
-                    "↑/↓ j/k Select · Enter Full-screen · Alt+F Embedded · x Close · g/Esc Back",
+                    "↑/↓ j/k Select · Enter Embedded · Alt+F Full-screen · x Close · g/Esc Back",
                 )
                 .style(Style::default().fg(Color::DarkGray)),
                 Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
@@ -1680,8 +1680,8 @@ time.sleep(60)
         let id = manager.active;
         let pid = manager.sessions[0].pid;
         for (code, mods, fullscreen) in [
-            (KeyCode::Enter, KeyModifiers::NONE, true),
-            (KeyCode::Char('f'), KeyModifiers::ALT, false),
+            (KeyCode::Enter, KeyModifiers::NONE, false),
+            (KeyCode::Char('f'), KeyModifiers::ALT, true),
         ] {
             manager.active = None;
             manager.picker = true;

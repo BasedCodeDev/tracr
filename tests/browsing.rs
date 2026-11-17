@@ -369,7 +369,7 @@ async fn enter_respects_focus_search_and_pending_preparation() {
     view.focus = 1;
     assert_eq!(
         handle_key(&mut browser, &mut view, enter),
-        Action::ResumeSelectedFullscreen
+        Action::ResumeSelected
     );
     view.editing = true;
     assert_eq!(handle_key(&mut browser, &mut view, enter), Action::Continue);
@@ -782,7 +782,7 @@ fn empty_folder_creation_picker_and_validation() {
     browser.begin_refresh();
     assert_eq!(
         handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
-        Action::ResumeSelectedFullscreen
+        Action::ResumeSelected
     );
 }
 
@@ -803,7 +803,7 @@ async fn action_menu_navigates_cancels_and_dispatches_without_changing_context()
     assert_eq!(view.help_selected, 4);
     handle_key(&mut browser, &mut view, key(KeyCode::Down));
     assert_eq!(view.help_selected, 5);
-    view.help_selected = 12; // Create is disabled for fixtures.
+    view.help_selected = 13; // Create is disabled for fixtures.
     assert_eq!(
         handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
         Action::Continue
@@ -816,7 +816,7 @@ async fn action_menu_navigates_cancels_and_dispatches_without_changing_context()
     assert_eq!(view.focus, 1);
     handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
     assert_eq!(view.help_selected, 0);
-    view.help_selected = 8;
+    view.help_selected = 9;
     handle_key(&mut browser, &mut view, key(KeyCode::Down));
     handle_key(&mut browser, &mut view, key(KeyCode::Enter));
     assert!(!view.help);
@@ -845,7 +845,7 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let mut view = View {
             help: true,
-            help_selected: 14,
+            help_selected: if width >= 160 { 14 } else { 15 },
             ..View::default()
         };
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
@@ -949,13 +949,20 @@ async fn unlinked_rows_use_explicit_undimmed_labels_and_footer_preserves_primary
                 let upper = (21..24)
                     .find(|&row| line(row).contains(if width < 15 { "? · q" } else { "? Help" }))
                     .unwrap();
-                assert!(line(upper + 1).contains("Enter Full"), "{width}: {footer}");
+                assert!(
+                    line(upper + 1).contains(if width >= 80 {
+                        "Enter Embedded"
+                    } else {
+                        "Enter Open"
+                    }),
+                    "{width}: {footer}"
+                );
                 assert!(line(upper + 1).ends_with(if width >= 36 {
                     "m Move"
                 } else if width >= 24 {
                     "n New"
                 } else {
-                    "Enter Full"
+                    "Enter Open"
                 }));
                 assert!(footer.contains("Test message"));
                 let mut labels = 0;
@@ -1060,7 +1067,7 @@ async fn information_modal_is_requested_pinned_scrollable_and_blocks_browser_act
         );
     }
     view.help = true;
-    view.help_selected = 13; // Session information; Recover is hidden.
+    view.help_selected = 14; // Session information; Recover is hidden.
     handle_key(&mut browser, &mut view, key(KeyCode::Enter));
     assert!(view.info.is_some());
     assert!(!view.help);
@@ -1195,7 +1202,7 @@ async fn idle_color_is_shared_by_sessions_search_info_and_folder_ancestors() {
         focus: 1,
         ..View::default()
     };
-    let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
     let pale = Color::Rgb(255, 255, 170);
     for surface in 0..3 {
         if surface == 1 {
@@ -1548,7 +1555,7 @@ async fn inventory_failure_and_recovery_render_staleness_without_losing_worktree
     };
     browser.install_repository(repo.clone());
     browser.open_folder("/projects/app".into());
-    let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
     for failed in [true, false] {
         let result = if failed {
             Err("inventory unavailable".into())
@@ -1841,11 +1848,11 @@ async fn folder_pane_scrolls_whole_tree_and_resets_for_short_selection_and_resiz
         focus: 0,
         ..View::default()
     };
-    for width in [100u16, 140, 240, 80] {
+    for width in [100u16, 140, 160, 240, 80] {
         browser.folder = FolderFilter::Path(path.clone());
         let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-        let pane_width = if width >= 100 {
+        let pane_width = if width >= 160 {
             let divider = (0..width)
                 .find(|x| terminal.backend().buffer()[(*x, 0)].symbol() == "┓")
                 .unwrap()
@@ -1868,7 +1875,7 @@ async fn folder_pane_scrolls_whole_tree_and_resets_for_short_selection_and_resiz
             terminal.backend().buffer()[(pane_width - 1, 0)].symbol(),
             "┓"
         );
-        if width >= 100 {
+        if width >= 160 {
             assert_eq!(terminal.backend().buffer()[(pane_width, 0)].symbol(), "┌");
         }
         let before = lines(&terminal);
@@ -1879,7 +1886,7 @@ async fn folder_pane_scrolls_whole_tree_and_resets_for_short_selection_and_resiz
         assert!(selected.contains("界"), "{selected}");
         assert!(selected.contains("(0)"), "{selected}");
         assert!(before[0].contains("Folders"));
-        if width == 100 {
+        if width == 160 {
             // The same offset clips short ancestor rows completely.
             assert!(!before.iter().any(|line| line.contains("long-parent")));
         }

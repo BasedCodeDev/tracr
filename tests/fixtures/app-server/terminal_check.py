@@ -27,7 +27,7 @@ for action in ('q', 'ctrl-c', 'sigterm', 'reload'):
     try:
         output = b''
         deadline = time.monotonic() + 10
-        while b'Folders' not in output:
+        while b'Sessions' not in output:
             if child.poll() is not None or time.monotonic() > deadline:
                 raise AssertionError(f'TUI did not start: {output!r}')
             if select.select([master], [], [], 0.1)[0]:

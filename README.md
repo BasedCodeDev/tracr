@@ -227,32 +227,29 @@ Stash rows are read-only: Enter describes the stash, and worktree creation is
 unavailable. Creating or removing stashes refreshes the history automatically.
 
 The folder and session panes show partial results while loading.
-Terminals shorter than 24 rows show only the focused pane above the footer,
-regardless of width. Tab cycles through Folders, Sessions, and Git (when available);
-Shift+Tab cycles backwards. At 24 rows or taller, terminals narrower than 100
-columns show the focused browser pane full-width, except when Folders is
-collapsed: its two-column strip sits beside Sessions. Git appears below the browser.
+Sessions starts focused, with both available side panels expanded. At 160 columns
+and 12 rows or larger, Folders sits on the left, Sessions in the center, and Git
+Worktrees on the right. Otherwise, terminals at least 80 columns by 48 rows stack
+Folders above Sessions above Git. Smaller terminals show only the focused panel.
+Tab cycles through Folders, Sessions, and Git (when available); Shift+Tab reverses it.
 
 - Up / Down or `k/j`: select the previous / next item. In Folders, Right / `l`
   expands a collapsed folder without changing selection; when already expanded,
   it focuses Sessions for that folder. Left / `h` collapses the folder or selects
-  its displayed parent. Enter opens the only session full-screen, or creates one
-  full-screen when the folder has none. With multiple sessions, it focuses the
+  its displayed parent. Enter opens the only session embedded, or creates one
+  embedded when the folder has none. With multiple sessions, it focuses the
   session list. While discovery is incomplete, it only focuses Sessions.
   Escape or Backspace
   returns to Folders. Left / Right and `h/l` do nothing in Sessions.
-- `b` in Folders collapses the entire pane to a two-column strip with a vertical line and no label,
-  giving Sessions the remaining width. Focus stays on the line; `b` expands it.
-  Folder selection and expanded tree nodes are preserved. Hidden folder actions
-  are disabled; pane navigation, help, refresh, and quit remain available.
-  Leaving preserves the collapsed state; returning through pane navigation
-  expands Folders, except Alt+Up from Git favors Sessions while Folders is collapsed.
-  This state lasts for the current run.
-- Alt+Left focuses Folders; Alt+Right focuses Sessions, including from the bottom
-  Git Worktrees pane. Alt+Down focuses Git Worktrees and expands it if collapsed;
-  Alt+Up returns to the last focused upper pane, or to Sessions if Folders is
-  collapsed, leaving Folders collapsed. Directions do not wrap. These shortcuts do nothing during dialogs,
-  search, or resume preparation; Alt+Down also does nothing without a Git pane.
+- `b` in Folders or Git collapses that panel and returns focus to Sessions.
+  Collapsed panels leave a two-column rail in the wide layout or a one-row strip
+  in the stacked layout. Navigating to a collapsed panel reopens it. Selection,
+  expanded folders, and Git scroll positions are preserved. Collapse choices last
+  for the current run; resizing does not reset them.
+- Alt+Left/Right moves between adjacent panels in the wide layout; Alt+Up/Down
+  does so in the stacked layout. Both pairs work in single-panel mode. Directions
+  do not wrap; unused directions do nothing. These shortcuts do nothing during
+  dialogs, search, or resume preparation.
 - Tab cycles Folders → Sessions → Git → Folders; Shift-Tab reverses the order.
   Without a Git panel, both keys switch between Folders and Sessions. Entering
   Git expands collapsed history, and leaving preserves its expansion state.
@@ -260,10 +257,8 @@ collapsed: its two-column strip sits beside Sessions. Git appears below the brow
 - In Git history, Home / End selects the first / last loaded commit or session; approaching
   the end loads more history. Left / Right or `h/l` scrolls horizontally. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
-  root follows HEAD automatically. `b` collapses or expands history while Git has
-  focus. Collapse leaves a focused
-  strip with an Expand action; Escape returns focus to the upper pane from which
-  Git was entered. Leaving Git keeps its expanded/collapsed state, remembered
+  root follows HEAD automatically. `b` collapses Git and focuses Sessions;
+  Escape also returns to Sessions. Leaving Git preserves its expansion state
   across folders for this run.
   The top-right `↑` border marker indicates rows above the preview; the
   bottom-right `↓` indicates rows below it or more history available to load.
@@ -344,11 +339,10 @@ visibility affects folder counts and search.
 
 Refresh retains old results while new pages load; failed sources remain visibly
 incomplete. A successful refresh removes records no longer listed by that source.
-The upper browser has two panes: Folders and Sessions. Git history has its own
+Folders, Sessions, and Git history each have their own
 action context: only the focused pane is highlighted, and its footer and `?` menu
 show the applicable actions. Git offers Collapse/Expand and, when expanded,
-commit navigation and horizontal scrolling. Short terminals show a compact Git
-strip until there is enough room for the graph. The footer and `?` action menu
+commit navigation and horizontal scrolling. Small terminals show only the focused panel. The footer and `?` action menu
 follow the selected pane: folder expansion and moving belong to Folders; resume,
 Info, and relinking belong to Sessions. Shared controls stay in the same order,
 with Help and Quit first. Both action rows are right-aligned. Feedback shares
@@ -389,9 +383,10 @@ If the destination changed since it was displayed, review it and press Enter aga
 Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
-Enter opens the selected session full-screen. **Alt+F** on a highlighted session
-opens it embedded inside the Sessions pane instead, keeping the other panels visible.
-The open-terminals picker uses the same shortcuts when reattaching a running terminal.
+Enter opens the selected session embedded in the Sessions workspace, keeping
+other panels visible when space permits. **Alt+F** on a highlighted session opens
+it full-screen. The open-terminals picker uses the same shortcuts when reattaching
+a running terminal.
 Once a terminal is displayed, **Alt+F** toggles between embedded and full-screen
 from Sessions, Folders, or Git history, focusing it without restarting the process.
 The action menu also offers full-screen and embedded opening.
@@ -414,10 +409,14 @@ current directory for plain `tracr`). A new explicit launch path starts focused
 on that folder; a new plain-launch context restores the last visited folder with
 the full tree. Clearing focus is remembered too.
 
-At 100 columns and above, Folders fits the expanded tree up to 40% of the
-window width; Sessions uses the remaining space. Narrower windows show the
-focused panel unless Folders is collapsed, when its two-column strip remains
-beside Sessions. Scrolling or changing selection does not move the divider.
+Sidebar sizes depend on the window dimensions, so tree expansion, selection,
+and scrolling do not move the dividers. In the wide layout, Folders uses 24–32
+columns and Git uses 36–48; Sessions receives the remaining width. In the stacked
+layout, Folders uses 20% of the available height (up to 12 rows), and Git uses
+twice that height (up to 24 rows). Both shrink proportionally in shorter windows,
+leaving at least 40% for Sessions.
+Collapsing either panel gives its space to Sessions. Git is omitted outside a
+repository. Resizing changes the existing terminal dimensions without restarting Codex.
 The mouse wheel over a visible terminal scrolls its output history, even when
 Folders has keyboard focus. Up to 2,000 lines are kept per terminal. New output
 keeps your reading position; typing or pasting returns to the live screen. An

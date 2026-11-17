@@ -74,7 +74,7 @@ os.execv(os.environ['PROBE_GIT'], [os.environ['PROBE_GIT'], *sys.argv[1:]])
                 term.expect('[HEAD]')
             if case == 'hidden':
                 term.send(b'\tb')
-                term.expect('b Expand')
+                term.expect('Enter Embedded')
             pause(3)
             start_calls = len(calls())
             before = cpu()

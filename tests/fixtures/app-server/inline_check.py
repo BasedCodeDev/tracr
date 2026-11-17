@@ -24,9 +24,6 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.send(b'\r')
         terminal.wait(lambda: (home/'launch.json').exists())
         first = json.loads((home/'launch.json').read_text())
-        terminal.wait(lambda: (home/'terminal-size.json').exists() and json.loads((home/'terminal-size.json').read_text())['columns'] == 240)
-        terminal.wait(lambda: 'Folders' not in terminal.text())
-        terminal.send(b'\x1bf')
         terminal.expect('Ctrl+B background')
         assert 'Folders' in terminal.text()
         assert os.tcgetpgrp(terminal.master) == terminal.child.pid
@@ -37,7 +34,18 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         assert initial_columns > 240 // 2, size()
         terminal.resize(40, 160)
         terminal.wait(lambda: size()['columns'] < initial_columns)
-        assert size()['columns'] >= 160 - 160 * 40 // 100 - 2, size()
+        assert size()['columns'] == 160 - 26 - 2, size()
+        assert size()['pid'] == first['pid']
+        # Collapsing Folders gives its width to the same running PTY.
+        terminal.send(b'\x1b[1;3Db')
+        terminal.wait(lambda: size()['columns'] == 156)
+        assert size()['pid'] == first['pid']
+        terminal.send(b'\x1b[1;3D\t')
+        terminal.wait(lambda: size()['columns'] == 132)
+        # Tall layout stacks the side panels; small layout shows Sessions alone.
+        terminal.resize(60, 100)
+        terminal.wait(lambda: size()['columns'] == 98 and size()['rows'] < 58)
+        assert 'Folders' in terminal.text()
         assert size()['pid'] == first['pid']
         terminal.resize(40, 99)
         terminal.wait(lambda: size()['columns'] == 97)
@@ -77,11 +85,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.expect('Open here')
         os.kill(first['pid'], 0)
         terminal.send(b'\r')
-        terminal.wait(lambda: size()['columns'] == 240 and 'Folders' not in terminal.text())
+        terminal.wait(lambda: size()['columns'] == initial_columns and 'Folders' in terminal.text())
         assert size()['pid'] == first['pid']
         terminal.send(b'\x02')
         terminal.expect('Open here')
-        terminal.send(b'\x1bf')
+        terminal.send(b'\r')
         terminal.expect('Ctrl+B background')
         assert json.loads((home/'launch.json').read_text())['pid'] == first['pid']
         terminal.send(b'\x1b[1;3D\x1bf')
@@ -105,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.send(b'\x02')
         terminal.expect('Open here')
         terminal.resize(80, 240)
-        terminal.send(b'\x1bf')
+        terminal.send(b'\r')
         terminal.expect('Ctrl+B background')
         assert json.loads((home/'launch.json').read_text())['pid'] == first['pid']
         terminal.send(b'\x02')
@@ -124,8 +132,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.send(b'\r')
         terminal.wait(lambda: json.loads((home/'launch.json').read_text())['pid'] != first['pid'])
         second = json.loads((home/'launch.json').read_text())
-        terminal.wait(lambda: size()['pid'] == second['pid'] and size()['columns'] == 240 and size()['rows'] == 80)
-        terminal.wait(lambda: 'Folders' not in terminal.text())
+        terminal.wait(lambda: size()['pid'] == second['pid'] and size()['columns'] == initial_columns)
+        terminal.wait(lambda: 'Folders' in terminal.text())
         terminal.send(b'\x02')
         terminal.expect('Open here')
         terminal.send(b'g')
@@ -133,11 +141,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.expect('#1 Task')
         terminal.expect('#2 Task')
         terminal.send(b'\r')
-        terminal.wait(lambda: 'Open terminals' not in terminal.text() and 'Folders' not in terminal.text())
+        terminal.wait(lambda: 'Open terminals' not in terminal.text() and 'Folders' in terminal.text())
         terminal.send(b'\x02g')
         terminal.expect('Open terminals')
         terminal.send(b'\x1bf')
-        terminal.expect('Ctrl+B background')
+        terminal.wait(lambda: 'Folders' not in terminal.text())
         terminal.send(b'\x02')
         terminal.expect('Open here')
         terminal.send(b'q')

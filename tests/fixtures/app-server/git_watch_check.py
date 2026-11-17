@@ -46,9 +46,11 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
     # Status checks are independent of graph/metadata discovery reads.
     def read_calls(): return [line for line in calls.read_text().splitlines() if ' status ' not in ' '+line+' ']
     try:
+        t.expect('Sessions')
+        t.resize(80, 139)  # Full-width graph in the stacked layout.
         t.expect('Watch second'); t.expect('[HEAD]'); settle()
         # Cross-repository search below intentionally uses the global scope.
-        t.send(b'\x1b[1;3D\x1bz\x1b[1;3C')
+        t.send(b'\x1b[Z\x1bz\t')
         t.wait(lambda: 'Folders · Focused' not in t.text())
         commit('Watch external'); t.expect('Watch external'); t.expect('[HEAD]')
         git('tag', 'watch-tag'); t.expect('tag: watch-tag')
@@ -63,7 +65,7 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
         t.send(b'f'); t.expect('[HEAD]')
         git('checkout', '--detach', '-q'); settle(); t.expect('[HEAD]')
         git('checkout', '-q', 'main'); t.expect('[HEAD]')
-        t.send(b'b'); t.expect('b Expand'); settle()
+        t.send(b'b'); t.expect('Enter Embedded'); settle()
         mark = len(read_calls())
         linked = root/'elsewhere'
         git('worktree', 'add', '-qb', 'watch-linked', str(linked))
@@ -71,7 +73,7 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
         assert not any(' log ' in ' '+line+' ' for line in read_calls()[mark:]), read_calls()[mark:]
         git('worktree', 'remove', str(linked)); t.wait(lambda: '─ ◇ watch-linked' not in t.text())
         commit('Watch hidden commit'); settle()
-        t.send(b'b'); t.expect('Watch hidden commit'); settle()
+        t.send(b'\t'); t.expect('Watch hidden commit'); settle()
         mark = len(read_calls()); before = len(t.output)
         (project/'ordinary.txt').write_text('Source change is not metadata\n')
         t.expect('[main *]'); settle()

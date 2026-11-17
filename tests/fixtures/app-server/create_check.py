@@ -43,8 +43,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         assert launch['args'] == ['--cd', str(project)], launch
         assert launch['cwd'] == str(project) and launch['home'] == str(homes[1]) and launch['foreground'], launch
         assert not (homes[0]/'launch.json').exists()
-        t.wait(lambda: 'Folders' not in t.text())
-        t.wait(lambda: (homes[1]/'terminal-size.json').exists() and json.loads((homes[1]/'terminal-size.json').read_text())['columns'] == 240)
+        t.wait(lambda: 'Folders' in t.text())
+        t.wait(lambda: (homes[1]/'terminal-size.json').exists() and json.loads((homes[1]/'terminal-size.json').read_text())['columns'] == 206)
         saved = state/'tracr/browser-state.json'
         assert json.loads(saved.read_text())['folder'] == str(project)
         t.send(b'x')
@@ -72,14 +72,14 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         assert launch['args']==['--cd',str(project)] and launch['cwd']==str(project)
         assert 'Choose harness' not in t.text()
         t.send(b'x');t.wait(lambda:'exited: Success' in t.text() and 'Folders' in t.text())
-        # Folder Return resumes the sole session directly, full-screen.
+        # Folder Return resumes the sole session directly, embedded.
         (homes[1]/'launch.json').unlink()
         t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'\r')
         t.wait(lambda:(homes[1]/'launch.json').exists())
         resumed=json.loads((homes[1]/'launch.json').read_text())
         assert 'resume' in resumed['args'], resumed
-        t.wait(lambda:'Folders' not in t.text())
-        t.wait(lambda:json.loads((homes[1]/'terminal-size.json').read_text())['columns']==240)
+        t.wait(lambda:'Folders' in t.text())
+        t.wait(lambda:json.loads((homes[1]/'terminal-size.json').read_text())['columns']==206)
         t.send(b'x');t.wait(lambda:'exited: Success' in t.text() and 'Folders' in t.text())
 
         t.finish()

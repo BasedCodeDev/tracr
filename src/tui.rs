@@ -216,6 +216,7 @@ fn select_git_worktree(browser: &mut Browser, view: &mut View, picker: &Worktree
 
 #[derive(Default)]
 pub struct View {
+    pub layout_mode: std::cell::Cell<LayoutMode>,
     pub terminals: std::cell::RefCell<crate::inline_terminal::Manager>,
     pub terminal_recovery: Option<crate::terminal_recovery::Dialog>,
     pub history: crate::git_history::History,
@@ -306,39 +307,107 @@ fn selection_style(focused: bool) -> Style {
     })
 }
 
-const SINGLE_PANE_HEIGHT: u16 = 24;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayoutMode {
+    Columns,
+    Stacked,
+    #[default]
+    Single,
+}
 
-// Shared by rendering and history scheduling. Use total terminal height so a
-// footer message cannot change the layout mode.
-fn git_regions(
-    area: Rect,
-    terminal_height: u16,
-    view: &View,
-    present: bool,
-) -> (Rect, Option<Rect>, bool) {
-    if !present || area.width < 12 || area.height < 2 {
-        return (area, None, false);
-    }
-    if terminal_height < SINGLE_PANE_HEIGHT {
-        if view.context() != 2 {
-            return (area, None, false);
-        }
-        let expanded = !view.git_hidden && area.height >= 4;
-        let git_area = if expanded {
-            area
+impl LayoutMode {
+    fn for_size(width: u16, height: u16) -> Self {
+        if width >= 160 && height >= 12 {
+            Self::Columns
+        } else if width >= 80 && height >= 48 {
+            Self::Stacked
         } else {
-            Rect::new(area.x, area.y, area.width, 1)
-        };
-        return (Rect::default(), Some(git_area), expanded);
+            Self::Single
+        }
     }
-    let expanded = !view.git_hidden && area.height >= 9;
-    let constraints = if expanded {
-        [Constraint::Percentage(67), Constraint::Percentage(33)]
-    } else {
-        [Constraint::Min(1), Constraint::Length(1)]
+}
+
+#[derive(Debug)]
+struct PanelLayout {
+    mode: LayoutMode,
+    folders: Option<Rect>,
+    sessions: Option<Rect>,
+    git: Option<Rect>,
+    graph_visible: bool,
+}
+
+// Shared by drawing, input navigation, Git scheduling, and terminal sizing.
+// Total dimensions choose the mode so footer messages cannot change it.
+fn panel_layout(area: Rect, terminal_height: u16, view: &View, present: bool) -> PanelLayout {
+    let mode = LayoutMode::for_size(area.width, terminal_height);
+    view.layout_mode.set(mode);
+    let mut result = PanelLayout {
+        mode,
+        folders: None,
+        sessions: None,
+        git: None,
+        graph_visible: false,
     };
-    let regions = Layout::vertical(constraints).split(area);
-    (regions[0], Some(regions[1]), expanded)
+    if mode == LayoutMode::Single {
+        match view.context() {
+            0 => result.folders = Some(area),
+            2 if present => result.git = Some(area),
+            _ => result.sessions = Some(area),
+        }
+    } else {
+        let stacked = mode == LayoutMode::Stacked;
+        let rail = if stacked { 1 } else { 2 };
+        // Keep a 1:2 sidebar ratio while reserving at least 40% for Sessions.
+        let stacked_folder_height = (area.height / 5).min(12);
+        let folder_size = if view.folders_hidden {
+            rail
+        } else if stacked {
+            stacked_folder_height
+        } else {
+            (area.width / 6).clamp(24, 32)
+        };
+        let git_size = if !present {
+            0
+        } else if view.git_hidden {
+            rail
+        } else if stacked {
+            stacked_folder_height * 2
+        } else {
+            (area.width / 4).clamp(36, 48)
+        };
+        let regions = Layout::default()
+            .direction(if stacked {
+                Direction::Vertical
+            } else {
+                Direction::Horizontal
+            })
+            .constraints([
+                Constraint::Length(folder_size),
+                Constraint::Min(0),
+                Constraint::Length(git_size),
+            ])
+            .split(area);
+        result.folders = Some(regions[0]);
+        result.sessions = Some(regions[1]);
+        result.git = present.then_some(regions[2]);
+    }
+    result.graph_visible =
+        !view.git_hidden && result.git.is_some_and(|r| r.height >= 4 && r.width >= 12);
+    result
+}
+
+fn draw_rail(frame: &mut Frame<'_>, area: Rect, mode: LayoutMode, title: &str) {
+    let mut rail = Block::default()
+        .borders(if mode == LayoutMode::Columns {
+            Borders::LEFT
+        } else {
+            Borders::TOP
+        })
+        .style(Style::default().fg(Color::DarkGray));
+    if mode != LayoutMode::Columns {
+        rail = rail.title(title);
+    }
+    frame.render_widget(rail, area);
 }
 
 static ENHANCED_INPUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -866,6 +935,8 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         return;
     }
     let area = frame.area();
+    view.layout_mode
+        .set(LayoutMode::for_size(area.width, area.height));
     if view.terminals.borrow().fullscreen
         && view.terminals.borrow().active.is_some()
         && !view.modal_open()
@@ -883,8 +954,9 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(footer_height)])
         .split(area);
-    let (content, git_area, expanded) =
-        git_regions(layout[0], area.height, view, view.history.present());
+    let panels = panel_layout(layout[0], area.height, view, view.history.present());
+    let git_area = panels.git;
+    let expanded = panels.graph_visible;
     if let Some(git_area) = git_area {
         if expanded {
             let mut presentation = view.git_sessions.borrow_mut();
@@ -979,71 +1051,18 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 }
             }
         } else {
-            frame.render_widget(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_type(if view.context() == 2 {
-                        BorderType::Thick
-                    } else {
-                        BorderType::Plain
-                    })
-                    .title(" Git Worktrees ")
-                    .style(if view.context() == 2 {
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::DarkGray)
-                    }),
-                git_area,
-            );
+            draw_rail(frame, git_area, panels.mode, " Git Worktrees ");
         }
     }
-    let single_pane = area.height < SINGLE_PANE_HEIGHT;
-    if single_pane && view.context() == 2 {
-        // Git already occupies the content area.
-    } else if view.folders_hidden && (!single_pane || view.context() == 0) {
-        let panes = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(2), Constraint::Min(0)])
-            .split(content);
-        let focused = view.context() == 0;
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_type(if focused {
-                    BorderType::Thick
-                } else {
-                    BorderType::Plain
-                })
-                .style(if focused {
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                }),
-            panes[0],
-        );
-        if !single_pane {
-            draw_pane(frame, panes[1], 1, browser, view);
+    if let Some(area) = panels.folders {
+        if view.folders_hidden {
+            draw_rail(frame, area, panels.mode, " Folders ");
+        } else {
+            draw_pane(frame, area, 0, browser, view);
         }
-    } else if !single_pane && area.width >= 100 {
-        let panes = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(
-                    folder_pane_width(content.width, &folder_tree_labels(&browser.folder_rows()))
-                        .max(if browser.focus_root.is_some() { 19 } else { 0 }),
-                ),
-                Constraint::Min(0),
-            ])
-            .split(content);
-        for (index, pane) in panes.iter().enumerate() {
-            draw_pane(frame, *pane, index, browser, view);
-        }
-    } else {
-        draw_pane(frame, content, view.focus, browser, view);
+    }
+    if let Some(area) = panels.sessions {
+        draw_pane(frame, area, 1, browser, view);
     }
     draw_footer(
         frame,
@@ -1511,7 +1530,7 @@ enum Command {
     FolderLeft,
     FolderRight,
     Resume,
-    ResumeInline,
+    ResumeFullscreen,
     ToggleTerminalFullscreen,
     Info,
     Relink,
@@ -1723,8 +1742,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 Resume,
                 "Sessions",
                 "Enter",
-                "Open session full-screen",
-                Some(("Enter Full-screen", "Enter Full")),
+                "Open session embedded",
+                Some(("Enter Embedded", "Enter Open")),
             )
         });
         if !browser.visible().is_empty() || !can_create(browser) {
@@ -1849,55 +1868,41 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 (GitEnd, "Git", "End", "Last loaded commit", None),
             ]);
         }
-        entries.push((
-            GitReturn,
-            "Navigation",
-            "Esc",
-            "Return to previous upper pane",
-            None,
-        ));
+        entries.push((GitReturn, "Navigation", "Esc", "Return to Sessions", None));
     }
     let navigation_index = entries
         .iter()
         .position(|entry| entry.1 == "Navigation")
         .unwrap_or(entries.len());
-    let directional = match view.context() {
-        0 => (PaneRight, "Navigation", "Alt+Right", "Focus Sessions", None),
-        1 => (PaneLeft, "Navigation", "Alt+Left", "Focus Folders", None),
-        _ => (
-            PaneUp,
-            "Navigation",
-            "Alt+Up",
-            if view.folders_hidden {
-                "Focus Sessions"
-            } else {
-                "Focus previous upper pane"
-            },
-            None,
-        ),
+    let mode = view.layout_mode.get();
+    let previous = match view.context() {
+        1 => "Focus Folders",
+        _ => "Focus Sessions",
     };
-    entries.insert(navigation_index, directional);
-    if view.context() == 2 {
-        entries.insert(
-            navigation_index + 1,
-            (PaneLeft, "Navigation", "Alt+Left", "Focus Folders", None),
-        );
-        entries.insert(
-            navigation_index + 2,
-            (PaneRight, "Navigation", "Alt+Right", "Focus Sessions", None),
-        );
-    }
-    if view.context() != 2 && view.history.present() {
-        entries.insert(
-            navigation_index + 1,
-            (
-                PaneDown,
-                "Navigation",
-                "Alt+Down",
-                "Focus Git Worktrees",
-                None,
-            ),
-        );
+    let next = match view.context() {
+        0 => "Focus Sessions",
+        _ => "Focus Git Worktrees",
+    };
+    let last = if view.history.present() { 2 } else { 1 };
+    for (back, forward, back_key, forward_key) in [
+        (PaneLeft, PaneRight, "Alt+Left", "Alt+Right"),
+        (PaneUp, PaneDown, "Alt+Up", "Alt+Down"),
+    ] {
+        let horizontal = back == PaneLeft;
+        if mode == LayoutMode::Single || horizontal == (mode == LayoutMode::Columns) {
+            if view.context() > 0 {
+                entries.insert(
+                    navigation_index,
+                    (back, "Navigation", back_key, previous, None),
+                );
+            }
+            if view.context() < last {
+                entries.insert(
+                    navigation_index,
+                    (forward, "Navigation", forward_key, next, None),
+                );
+            }
+        }
     }
     entries
         .retain(|entry| entry.0 != CreateWorktree || worktree_unavailable(browser, view).is_none());
@@ -1925,11 +1930,11 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             ));
         } else if view.context() == 1 {
             entries.push((
-                ResumeInline,
+                ResumeFullscreen,
                 "Sessions",
                 "Alt+F",
-                "Open session embedded",
-                Some(("Alt+F Embedded", "Alt+F Embed")),
+                "Open session full-screen",
+                Some(("Alt+F Full-screen", "Alt+F Full")),
             ));
         }
     }
@@ -2052,7 +2057,7 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
                 None
             }
         }
-        Command::Resume | Command::ResumeInline => {
+        Command::Resume | Command::ResumeFullscreen => {
             let session = browser
                 .visible()
                 .into_iter()
@@ -2379,16 +2384,6 @@ fn graph_viewport(spans: Vec<Span<'static>>, offset: usize, width: usize) -> Lin
     Line::from(clipped)
 }
 
-/// Fit the expanded tree while reserving at least 60% for Sessions.
-fn folder_pane_width(available: u16, labels: &[String]) -> u16 {
-    use unicode_width::UnicodeWidthStr;
-    // Measure every expanded row, not just the viewport or selected row.
-    let content = labels.iter().map(|label| label.width()).max().unwrap_or(0);
-    let desired = content.saturating_add(4).max("Folders".width() + 2);
-    let cap = usize::from(available) * 40 / 100;
-    desired.min(cap) as u16
-}
-
 /// Draw connectors from the complete displayed hierarchy, including projected
 /// worktrees. Filesystem parents and viewport boundaries are not tree endings.
 fn folder_tree_labels(rows: &[crate::browser::FolderRow]) -> Vec<String> {
@@ -2554,7 +2549,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                             area.width.saturating_sub(4 + right_padding),
                         ),
                         if view.terminals.borrow().owns(&s.key) {
-                            Line::from("Open here · Enter Full-screen · Alt+F Embedded · x Close terminal")
+                            Line::from("Open here · Enter Embedded · Alt+F Full-screen · x Close terminal")
                         } else if browser.specs.iter().any(|spec| matches!(spec, crate::browser::SourceSpec::Codex { source, .. } if source.id == s.key.source_id && crate::inline_terminal::open_elsewhere(&source.home, &s.key))) {
                             Line::from("Open in another tracr")
                         } else {
@@ -2996,7 +2991,7 @@ fn enter_folder(browser: &mut Browser, view: &mut View) -> Action {
     }
     let sessions = browser.visible();
     match sessions.as_slice() {
-        [] => execute_command(Command::CreateFullscreen, browser, view),
+        [] => execute_command(Command::Create, browser, view),
         [session] => {
             browser.selected = Some(session.key.clone());
             execute_command(Command::Resume, browser, view)
@@ -3031,7 +3026,7 @@ fn resume_hint(browser: &Browser, session: &crate::domain::SessionSummary) -> St
         return relink_unavailable(browser)
             .unwrap_or_else(|| "Folder missing — Enter or m to move session.".into());
     }
-    "Enter opens full-screen · Alt+F opens embedded; the destination is checked again before launch.".into()
+    "Enter opens embedded · Alt+F opens full-screen; the destination is checked again before launch.".into()
 }
 
 pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Action {
@@ -3442,7 +3437,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 && view.context() == 1
                 && selected_session(browser).is_some()
             {
-                return execute_command(Command::ResumeInline, browser, view);
+                return execute_command(Command::ResumeFullscreen, browser, view);
             }
             let mut terminals = view.terminals.borrow_mut();
             if terminals.active.is_some() {
@@ -3543,9 +3538,24 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
         }
 
-        Command::FolderToggle => view.folders_hidden = !view.folders_hidden,
-        Command::GitToggle => view.git_hidden = !view.git_hidden,
-        Command::GitReturn => view.git_focus = false,
+        Command::FolderToggle => {
+            view.folders_hidden = !view.folders_hidden;
+            if view.folders_hidden {
+                view.focus = 1;
+                view.git_focus = false;
+            }
+        }
+        Command::GitToggle => {
+            view.git_hidden = !view.git_hidden;
+            if view.git_hidden {
+                view.focus = 1;
+                view.git_focus = false;
+            }
+        }
+        Command::GitReturn => {
+            view.git_focus = false;
+            view.focus = 1;
+        }
         Command::GitLeft => view.history.scroll_horizontal(false),
         Command::GitRight => view.history.scroll_horizontal(true),
         Command::GitFollow => {
@@ -3614,25 +3624,26 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
         Command::Refresh => return Action::Refresh,
         Command::Archives => browser.include_archived = !browser.include_archived,
-        Command::PaneUp => {
-            if view.git_focus && view.folders_hidden {
-                view.focus = 1;
+        Command::PaneUp | Command::PaneDown | Command::PaneLeft | Command::PaneRight => {
+            let horizontal = matches!(command, Command::PaneLeft | Command::PaneRight);
+            let mode = view.layout_mode.get();
+            if mode == LayoutMode::Single || horizontal == (mode == LayoutMode::Columns) {
+                let last = if view.history.present() { 2 } else { 1 };
+                let current = view.context();
+                let next = if matches!(command, Command::PaneLeft | Command::PaneUp) {
+                    current.saturating_sub(1)
+                } else {
+                    (current + 1).min(last)
+                };
+                if next != current {
+                    view.git_focus = next == 2;
+                    if next == 2 {
+                        view.git_hidden = false;
+                    } else {
+                        view.focus = next;
+                    }
+                }
             }
-            view.git_focus = false;
-        }
-        Command::PaneDown => {
-            if !view.git_focus && view.history.present() {
-                view.git_focus = true;
-                view.git_hidden = false;
-            }
-        }
-        Command::PaneLeft => {
-            view.git_focus = false;
-            view.focus = 0;
-        }
-        Command::PaneRight => {
-            view.git_focus = false;
-            view.focus = 1;
         }
         Command::CyclePane | Command::CyclePaneBack => {
             let count = if view.history.present() { 3 } else { 2 };
@@ -3725,14 +3736,14 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             view.source_picker = Some(0);
             view.source_control = 0;
         }
-        Command::Resume | Command::ResumeInline => {
+        Command::Resume | Command::ResumeFullscreen => {
             if selected_session(browser).is_some_and(|s| {
                 crate::domain::classify_folder(s.cwd.as_deref())
                     == crate::domain::FolderStatus::Unlinked
             }) {
                 return Action::OpenRelink;
             }
-            return if command == Command::ResumeInline {
+            return if command != Command::ResumeFullscreen {
                 Action::ResumeSelected
             } else {
                 Action::ResumeSelectedFullscreen
@@ -3798,7 +3809,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     browser.invalidate_git();
     discovery.refresh(&mut browser);
     let mut view = View {
-        focus: usize::from(browser.initial_folder.is_some()),
+        focus: 1,
         message: browser.state_warning.take(),
         ..View::default()
     };
@@ -3934,11 +3945,13 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let target = if pending_context { view.history.repository() } else { target };
             let size = terminal.size()?;
             let area = Rect::new(0, 0, size.width, size.height);
+            view.layout_mode.set(LayoutMode::for_size(size.width, size.height));
             let (_, _, _, footer_height) = browser_footer(area, &browser, &view);
             let content_height = size.height.saturating_sub(footer_height);
-            view.git_size_limited = content_height < if size.height < SINGLE_PANE_HEIGHT { 4 } else { 9 } || size.width < 12;
-            let (_, git_area, graph_visible) = git_regions(Rect::new(0, 0, size.width, content_height), size.height, &view, target.is_some());
-            let page = usize::from(git_area.map_or(0, |area| area.height.saturating_sub(3))).max(1);
+            let panels = panel_layout(Rect::new(0, 0, size.width, content_height), size.height, &view, target.is_some());
+            view.git_size_limited = panels.git.is_none_or(|area| area.height < 4 || area.width < 12);
+            let graph_visible = panels.graph_visible;
+            let page = usize::from(panels.git.map_or(0, |area| area.height.saturating_sub(3))).max(1);
             git_watch.context(target.clone(), browser.git_generation, graph_visible);
             view.history.tick(target, browser.git_generation, graph_visible, page).await;
             if let Some(repository) = view.history.repository().filter(|_| !view.history.rows.is_empty()) {
@@ -3947,7 +3960,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let displayed_repository = view.history.repository();
             view.history.set_worktrees(displayed_repository.as_ref().and_then(|id| browser.repositories.get(id)));
             view.history.set_status(displayed_repository.as_ref().and_then(|id| browser.repositories.get(id)), &browser.worktree_status);
-            if !view.history.present() { view.git_focus = false; }
+            if !view.history.present() && view.git_focus { view.git_focus = false; view.focus = 1; }
             {
                 let mut presentation = view.git_sessions.borrow_mut();
                 presentation.sync(&browser, &view.history);
@@ -4501,8 +4514,8 @@ mod cleanup_tests {
             assert_eq!(
                 action,
                 match count {
-                    0 => Action::CreateNewFullscreen(0),
-                    1 => Action::ResumeSelectedFullscreen,
+                    0 => Action::CreateNew(0),
+                    1 => Action::ResumeSelected,
                     _ => Action::Continue,
                 }
             );
@@ -4539,10 +4552,7 @@ mod cleanup_tests {
         assert_eq!(enter(&mut browser, &mut view), Action::Continue);
         assert_eq!(view.source_picker, Some(0));
         press(&mut browser, &mut view, KeyCode::Down);
-        assert_eq!(
-            enter(&mut browser, &mut view),
-            Action::CreateNewFullscreen(1)
-        );
+        assert_eq!(enter(&mut browser, &mut view), Action::CreateNew(1));
 
         view.focus = 0;
         enter(&mut browser, &mut view);
@@ -4578,16 +4588,10 @@ mod cleanup_tests {
             error: None,
         });
         let mut view = View::default();
-        assert_eq!(
-            enter(&mut browser, &mut view),
-            Action::CreateNewFullscreen(0)
-        );
+        assert_eq!(enter(&mut browser, &mut view), Action::CreateNew(0));
         browser.include_archived = true;
         view.focus = 0;
-        assert_eq!(
-            enter(&mut browser, &mut view),
-            Action::ResumeSelectedFullscreen
-        );
+        assert_eq!(enter(&mut browser, &mut view), Action::ResumeSelected);
         browser.folder = FolderFilter::All;
         view.focus = 0;
         assert_eq!(enter(&mut browser, &mut view), Action::Continue);
@@ -4630,8 +4634,8 @@ mod cleanup_tests {
                 assert_eq!(
                     action,
                     match count {
-                        0 => Action::CreateNewFullscreen(0),
-                        1 => Action::ResumeSelectedFullscreen,
+                        0 => Action::CreateNew(0),
+                        1 => Action::ResumeSelected,
                         _ => Action::Continue,
                     }
                 );
@@ -4809,7 +4813,7 @@ mod cleanup_tests {
                     &mut view,
                     KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
                 ),
-                Action::ResumeSelectedFullscreen
+                Action::ResumeSelected
             ));
             assert_eq!(browser.selected, Some(key));
             assert_eq!(browser.folder, FolderFilter::Path(cwd.path().into()));
@@ -5417,8 +5421,8 @@ mod cleanup_tests {
             ..View::default()
         };
         for (code, modifiers, fullscreen) in [
-            (KeyCode::Enter, KeyModifiers::NONE, true),
-            (KeyCode::Char('f'), KeyModifiers::ALT, false),
+            (KeyCode::Enter, KeyModifiers::NONE, false),
+            (KeyCode::Char('f'), KeyModifiers::ALT, true),
         ] {
             let key = KeyEvent::new(code, modifiers);
             let action = handle_key(&mut browser, &mut view, key);
@@ -5443,11 +5447,11 @@ mod cleanup_tests {
         }
         assert!(matches!(
             execute_command(Command::Resume, &mut browser, &mut view),
-            Action::ResumeSelectedFullscreen
+            Action::ResumeSelected
         ));
         assert!(matches!(
-            execute_command(Command::ResumeInline, &mut browser, &mut view),
-            Action::ResumeSelected
+            execute_command(Command::ResumeFullscreen, &mut browser, &mut view),
+            Action::ResumeSelectedFullscreen
         ));
     }
 
@@ -5499,59 +5503,7 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn git_pane_up_preserves_collapsed_folders() {
-        let mut browser = Browser::new(vec![]);
-        browser.open_folder("/synthetic/repo/child".into());
-        let folder = browser.folder.clone();
-        let selected = browser.selected.clone();
-        let expanded = browser.expanded.clone();
-        for folders_hidden in [false, true] {
-            for upper in [0, 1] {
-                for git_hidden in [false, true] {
-                    for via_menu in [false, true] {
-                        let mut view = View {
-                            focus: upper,
-                            git_focus: true,
-                            folders_hidden,
-                            git_hidden,
-                            ..View::default()
-                        };
-                        view.history
-                            .tick(Some("/synthetic/repo".into()), 0, false, 1)
-                            .await;
-                        if via_menu {
-                            open_help(&browser, &mut view);
-                            let entries = menu_entries(&browser, &view);
-                            view.help_selected = entries
-                                .iter()
-                                .position(|e| e.command == Command::PaneUp)
-                                .unwrap();
-                            if folders_hidden {
-                                assert_eq!(entries[view.help_selected].label, "Focus Sessions");
-                            }
-                            press(&mut browser, &mut view, KeyCode::Enter);
-                        } else {
-                            handle_key(
-                                &mut browser,
-                                &mut view,
-                                KeyEvent::new(KeyCode::Up, KeyModifiers::ALT),
-                            );
-                        }
-                        assert_eq!(view.context(), if folders_hidden { 1 } else { upper });
-                        assert_eq!(view.folders_hidden, folders_hidden);
-                        assert_eq!(view.git_hidden, git_hidden);
-                        assert_eq!(browser.folder, folder);
-                        assert_eq!(browser.selected, selected);
-                        assert_eq!(browser.expanded, expanded);
-                        assert!(!view.help);
-                    }
-                }
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn alt_arrows_follow_layout_without_changing_selection_or_scrolling() {
+    async fn responsive_navigation_preserves_selection_and_scroll() {
         for has_git in [false, true] {
             let mut browser = Browser::new(vec![]);
             browser.open_folder("/synthetic/repo/child".into());
@@ -5564,87 +5516,105 @@ mod cleanup_tests {
             view.history.selected = 7;
             view.history.top.set(3);
             view.history.horizontal.set(4);
-            view.history.following = true;
             let folder = browser.folder.clone();
-            let expanded = browser.expanded.clone();
             let selected = browser.selected.clone();
-            for (limited, hidden) in [(false, false), (false, true), (true, false), (true, true)] {
-                view.git_size_limited = limited;
-                for upper in [0, 1] {
-                    for in_git in [false, true].into_iter().filter(|g| !g || has_git) {
-                        for key in [KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right] {
-                            view.focus = upper;
-                            view.git_focus = in_git;
-                            view.git_hidden = hidden;
-                            handle_key(
-                                &mut browser,
-                                &mut view,
-                                KeyEvent::new(key, KeyModifiers::ALT),
-                            );
-                            let expected = match (in_git, key) {
-                                (_, KeyCode::Left) => 0,
-                                (_, KeyCode::Right) => 1,
-                                (true, KeyCode::Up) => upper,
-                                (true, _) => 2,
-                                (false, KeyCode::Down) if has_git => 2,
-                                _ => upper,
-                            };
-                            assert_eq!(view.context(), expected);
-                            if !in_git && key == KeyCode::Down && has_git {
-                                assert!(!view.git_hidden);
-                            } else {
-                                assert_eq!(view.git_hidden, hidden);
-                            }
-                            assert_eq!(browser.folder, folder);
-                            assert_eq!(browser.selected, selected);
-                            assert_eq!(browser.expanded, expanded);
-                            assert_eq!(view.history.selected, 7);
-                            assert_eq!(view.history.top.get(), 3);
-                            assert_eq!(view.history.horizontal.get(), 4);
-                            assert!(view.history.following);
+            let expanded = browser.expanded.clone();
+            for mode in [LayoutMode::Columns, LayoutMode::Stacked, LayoutMode::Single] {
+                view.layout_mode.set(mode);
+                for current in 0..if has_git { 3 } else { 2 } {
+                    for (key, forward, horizontal) in [
+                        (KeyCode::Left, false, true),
+                        (KeyCode::Right, true, true),
+                        (KeyCode::Up, false, false),
+                        (KeyCode::Down, true, false),
+                    ] {
+                        view.focus = current.min(1);
+                        view.git_focus = current == 2;
+                        view.folders_hidden = current != 0;
+                        view.git_hidden = current != 2;
+                        let active = mode == LayoutMode::Single
+                            || horizontal == (mode == LayoutMode::Columns);
+                        let expected = if !active {
+                            current
+                        } else if forward {
+                            (current + 1).min(if has_git { 2 } else { 1 })
+                        } else {
+                            current.saturating_sub(1)
+                        };
+                        handle_key(
+                            &mut browser,
+                            &mut view,
+                            KeyEvent::new(key, KeyModifiers::ALT),
+                        );
+                        assert_eq!(view.context(), expected);
+                        if expected == 0 {
+                            assert!(!view.folders_hidden);
                         }
+                        if expected == 2 {
+                            assert!(!view.git_hidden);
+                        }
+                        assert_eq!(browser.folder, folder);
+                        assert_eq!(browser.selected, selected);
+                        assert_eq!(browser.expanded, expanded);
+                        assert_eq!(
+                            (
+                                view.history.selected,
+                                view.history.top.get(),
+                                view.history.horizontal.get()
+                            ),
+                            (7, 3, 4)
+                        );
                     }
-                }
-            }
-            if has_git {
-                for (command, focus) in [(Command::PaneLeft, 0), (Command::PaneRight, 1)] {
-                    view.git_focus = true;
-                    view.help = true;
-                    view.help_control = 0;
-                    view.help_selected = menu_entries(&browser, &view)
-                        .iter()
-                        .position(|entry| entry.command == command)
-                        .unwrap();
-                    handle_key(
-                        &mut browser,
-                        &mut view,
-                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                    );
-                    assert!(!view.help);
-                    assert_eq!(view.context(), focus);
                 }
             }
             view.focus = 1;
             view.git_focus = false;
-            for mode in 0..4 {
-                view.help = mode == 0;
-                view.editing = mode == 1;
-                view.preparing = mode == 2;
-                view.source_picker = (mode == 3).then_some(1);
-                view.help_selected = 2;
-                view.search_query = "unchanged".into();
-                for key in [KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right] {
+            for modal in 0..4 {
+                view.help = modal == 0;
+                view.editing = modal == 1;
+                view.preparing = modal == 2;
+                view.source_picker = (modal == 3).then_some(0);
+                for key in [KeyCode::Left, KeyCode::Right, KeyCode::Up, KeyCode::Down] {
                     handle_key(
                         &mut browser,
                         &mut view,
                         KeyEvent::new(key, KeyModifiers::ALT),
                     );
                     assert_eq!(view.context(), 1);
-                    assert_eq!(view.help_selected, 2);
-                    assert_eq!(view.search_query, "unchanged");
-                    assert_eq!(view.source_picker, (mode == 3).then_some(1));
                 }
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn directional_menu_matches_layout_and_returns_to_sessions() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View {
+            git_focus: true,
+            folders_hidden: true,
+            ..View::default()
+        };
+        view.history
+            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+            .await;
+        for (mode, command) in [
+            (LayoutMode::Columns, Command::PaneLeft),
+            (LayoutMode::Stacked, Command::PaneUp),
+        ] {
+            view.layout_mode.set(mode);
+            view.git_focus = true;
+            open_help(&browser, &mut view);
+            view.help_selected = menu_entries(&browser, &view)
+                .iter()
+                .position(|e| e.command == command)
+                .unwrap();
+            press(&mut browser, &mut view, KeyCode::Enter);
+            assert_eq!(view.context(), 1);
+            assert!(view.folders_hidden);
+            assert!(!view.help);
+            view.git_focus = true;
+            press(&mut browser, &mut view, KeyCode::Esc);
+            assert_eq!(view.context(), 1);
         }
     }
 
@@ -5685,7 +5655,7 @@ mod cleanup_tests {
                                 &mut view,
                                 KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
                             );
-                            assert_eq!(view.context(), current);
+                            assert_eq!(view.context(), 1);
                             assert!(!view.git_hidden);
                         }
                     }
@@ -5748,90 +5718,7 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn git_context_collapse_and_focus_transitions() {
-        let mut browser = Browser::new(vec![]);
-        let mut view = View {
-            focus: 1,
-            ..View::default()
-        };
-        // An inactive tick establishes repository presence without spawning Git.
-        view.history
-            .tick(Some("/synthetic/repo".into()), 0, false, 1)
-            .await;
-        let press = |browser: &mut Browser, view: &mut View, code| {
-            handle_key(browser, view, KeyEvent::new(code, KeyModifiers::NONE));
-        };
-        press(&mut browser, &mut view, KeyCode::Char('b'));
-        assert!(!view.git_hidden);
-        press(&mut browser, &mut view, KeyCode::Tab);
-        assert_eq!(view.context(), 2);
-        let entries = menu_entries(&browser, &view);
-        assert!(entries.iter().any(|e| e.command == Command::GitToggle));
-        assert!(!entries.iter().any(|e| matches!(
-            e.command,
-            Command::Resume
-                | Command::Relink
-                | Command::MoveFolder
-                | Command::Search
-                | Command::Archives
-                | Command::Recover
-        )));
-        view.history.selected = 7;
-        view.history.horizontal.set(3);
-        press(&mut browser, &mut view, KeyCode::Char('b'));
-        assert!(view.git_hidden);
-        assert_eq!(view.context(), 2);
-        assert!(
-            footer_shortcuts(100, &browser, &view)
-                .1
-                .contains("b Expand")
-        );
-        assert!(
-            !menu_entries(&browser, &view)
-                .iter()
-                .any(|e| e.command == Command::GitDown)
-        );
-        press(&mut browser, &mut view, KeyCode::Down);
-        assert_eq!(view.history.selected, 7);
-        press(&mut browser, &mut view, KeyCode::Char('?'));
-        let entries = menu_entries(&browser, &view);
-        view.help_selected = entries
-            .iter()
-            .position(|e| e.command == Command::GitToggle)
-            .unwrap();
-        press(&mut browser, &mut view, KeyCode::Enter);
-        assert!(!view.help && !view.git_hidden);
-        assert_eq!(view.history.selected, 7);
-        assert_eq!(view.history.horizontal.get(), 3);
-        press(&mut browser, &mut view, KeyCode::Char('l'));
-        assert_eq!(view.history.horizontal.get(), 7);
-        press(&mut browser, &mut view, KeyCode::Char('h'));
-        assert_eq!(view.history.horizontal.get(), 3);
-        view.git_size_limited = true;
-        press(&mut browser, &mut view, KeyCode::Char('l'));
-        press(&mut browser, &mut view, KeyCode::Char('h'));
-        press(&mut browser, &mut view, KeyCode::Left);
-        assert_eq!(view.history.horizontal.get(), 3);
-        assert!(
-            !menu_entries(&browser, &view)
-                .iter()
-                .any(|e| e.command == Command::GitLeft)
-        );
-        view.git_size_limited = false;
-        press(&mut browser, &mut view, KeyCode::Char('b'));
-        press(&mut browser, &mut view, KeyCode::BackTab);
-        assert_eq!(view.context(), 1);
-        assert!(view.git_hidden);
-        press(&mut browser, &mut view, KeyCode::Tab);
-        assert_eq!(view.context(), 2);
-        assert!(!view.git_hidden);
-        press(&mut browser, &mut view, KeyCode::Esc);
-        assert_eq!(view.context(), 1);
-        assert!(!view.git_hidden);
-    }
-
-    #[tokio::test]
-    async fn folder_collapse_preserves_state_and_restores_on_navigation() {
+    async fn sidebars_collapse_to_sessions_and_navigation_reopens_them() {
         let mut browser = Browser::new(vec![]);
         browser.open_folder("/parent/child".into());
         let mut view = View::default();
@@ -5840,118 +5727,89 @@ mod cleanup_tests {
             .await;
         let folder = browser.folder.clone();
         let expanded = browser.expanded.clone();
-        let selected = browser.selected.clone();
-        press(&mut browser, &mut view, KeyCode::Char('b'));
-        assert!(view.folders_hidden);
-        assert!(!view.git_hidden);
-        assert_eq!(view.context(), 0);
-        assert!(
-            footer_shortcuts(100, &browser, &view)
-                .1
-                .contains("b Expand")
-        );
-        for code in [
-            KeyCode::Char('h'),
-            KeyCode::Char('j'),
-            KeyCode::Char('k'),
-            KeyCode::Char('l'),
-            KeyCode::Char('m'),
-            KeyCode::Char('w'),
-            KeyCode::Char('i'),
-            KeyCode::Char('/'),
-            KeyCode::Down,
-        ] {
-            press(&mut browser, &mut view, code);
-            assert_eq!(view.context(), 0);
-            assert!(!view.modal_open());
+        view.history.selected = 7;
+        view.history.horizontal.set(3);
+        for mode in [LayoutMode::Columns, LayoutMode::Stacked, LayoutMode::Single] {
+            view.layout_mode.set(mode);
+            for side in [0, 2] {
+                view.focus = side.min(1);
+                view.git_focus = side == 2;
+                view.folders_hidden = false;
+                view.git_hidden = false;
+                press(&mut browser, &mut view, KeyCode::Char('b'));
+                assert_eq!(view.context(), 1);
+                assert_eq!(view.folders_hidden, side == 0);
+                assert_eq!(view.git_hidden, side == 2);
+                press(
+                    &mut browser,
+                    &mut view,
+                    if side == 0 {
+                        KeyCode::BackTab
+                    } else {
+                        KeyCode::Tab
+                    },
+                );
+                assert_eq!(view.context(), side);
+                assert!(!view.folders_hidden && !view.git_hidden);
+                assert_eq!(browser.folder, folder);
+                assert_eq!(browser.expanded, expanded);
+                assert_eq!(
+                    (view.history.selected, view.history.horizontal.get()),
+                    (7, 3)
+                );
+            }
         }
-        assert_eq!(browser.folder, folder);
-        assert_eq!(browser.expanded, expanded);
-        assert_eq!(browser.selected, selected);
-        assert!(
-            menu_entries(&browser, &view)
-                .iter()
-                .all(|entry| available_when_folders_hidden(entry.command))
-        );
-        press(&mut browser, &mut view, KeyCode::Char('?'));
-        view.help_selected = menu_entries(&browser, &view)
-            .iter()
-            .position(|entry| entry.command == Command::FolderToggle)
-            .unwrap();
-        press(&mut browser, &mut view, KeyCode::Enter);
-        assert!(!view.folders_hidden && !view.help);
-        press(&mut browser, &mut view, KeyCode::Char('b'));
-        press(&mut browser, &mut view, KeyCode::Tab);
-        assert!(view.folders_hidden);
-        press(&mut browser, &mut view, KeyCode::Char('b'));
-        assert!(view.folders_hidden && !view.git_hidden);
-        press(&mut browser, &mut view, KeyCode::Tab);
-        press(&mut browser, &mut view, KeyCode::Char('b'));
-        assert!(view.folders_hidden && view.git_hidden);
-        press(&mut browser, &mut view, KeyCode::Tab);
-        assert_eq!(view.context(), 0);
-        assert!(!view.folders_hidden && view.git_hidden);
-        for command in [
-            Command::PreviousPane,
-            Command::PaneLeft,
-            Command::CyclePaneBack,
-        ] {
-            press(&mut browser, &mut view, KeyCode::Char('b'));
-            execute_command(Command::PaneRight, &mut browser, &mut view);
-            execute_command(command, &mut browser, &mut view);
-            assert_eq!(view.context(), 0);
-            assert!(!view.folders_hidden);
-        }
-        press(&mut browser, &mut view, KeyCode::Char('b'));
-        execute_command(Command::PaneDown, &mut browser, &mut view);
-        execute_command(Command::GitReturn, &mut browser, &mut view);
-        assert!(!view.folders_hidden);
+        press(&mut browser, &mut view, KeyCode::Char('l'));
+        assert_eq!(view.history.horizontal.get(), 7);
+        press(&mut browser, &mut view, KeyCode::Char('h'));
+        assert_eq!(view.history.horizontal.get(), 3);
+        view.git_size_limited = true;
+        press(&mut browser, &mut view, KeyCode::Char('l'));
+        assert_eq!(view.history.horizontal.get(), 3);
     }
 
     #[tokio::test]
-    async fn collapsed_folder_rail_renders_at_all_widths() {
-        let browser = Browser::new(vec![]);
+    async fn responsive_layout_renders_panels_and_collapsed_rails() {
+        let mut browser = Browser::new(vec![]);
+        browser.open_folder("/project/界é-long-folder-name".into());
         let mut view = View {
-            folders_hidden: true,
-            git_hidden: true,
+            focus: 1,
             ..View::default()
         };
         view.history
             .tick(Some("/synthetic/repo".into()), 0, false, 1)
             .await;
-        for width in [120, 80, 12, 100] {
-            for focus in [0, 1] {
-                view.focus = focus;
-                let mut terminal =
-                    Terminal::new(ratatui::backend::TestBackend::new(width, 24)).unwrap();
-                terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-                let buffer = terminal.backend().buffer();
-                let (_, _, _, footer) = browser_footer(Rect::new(0, 0, width, 24), &browser, &view);
-                for y in 0..24 - footer - 1 {
-                    assert_eq!(buffer[(0, y)].symbol(), if focus == 0 { "┃" } else { "│" });
+        for (width, height) in [(160, 40), (100, 60), (80, 24)] {
+            for folders_hidden in [false, true] {
+                for git_hidden in [false, true] {
+                    view.folders_hidden = folders_hidden;
+                    view.git_hidden = git_hidden;
+                    let mut terminal =
+                        Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+                    let (_, _, _, footer) =
+                        browser_footer(Rect::new(0, 0, width, height), &browser, &view);
+                    let panels =
+                        panel_layout(Rect::new(0, 0, width, height - footer), height, &view, true);
+                    let sessions = panels.sessions.unwrap();
                     assert_eq!(
-                        buffer[(0, y)].fg,
-                        if focus == 0 {
-                            Color::Cyan
-                        } else {
-                            Color::DarkGray
-                        }
+                        terminal.backend().buffer()[(sessions.x, sessions.y)].symbol(),
+                        "┏"
                     );
-                }
-                for y in 0..24 - footer - 1 {
-                    assert_eq!(buffer[(1, y)].symbol(), " ");
-                }
-                assert_eq!(buffer[(2, 0)].symbol(), if focus == 1 { "┏" } else { "┌" });
-                if width >= 80 {
-                    assert_eq!(buffer[(width - 1, 24 - footer - 1)].symbol(), "─");
+                    for (area, hidden) in
+                        [(panels.folders, folders_hidden), (panels.git, git_hidden)]
+                    {
+                        if let Some(area) = area {
+                            let cell = &terminal.backend().buffer()[(area.x, area.y)];
+                            assert_eq!(cell.fg, Color::DarkGray);
+                            if !hidden {
+                                assert_eq!(cell.symbol(), "┌");
+                            }
+                        }
+                    }
                 }
             }
         }
-        view.folders_hidden = false;
-        view.focus = 0;
-        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-        assert_eq!(terminal.backend().buffer()[(79, 0)].symbol(), "┓");
     }
 
     #[tokio::test]
@@ -5984,8 +5842,8 @@ mod cleanup_tests {
                         .take(usize::from(width * (height - footer)))
                         .map(|cell| cell.symbol())
                         .collect();
-                    assert_eq!(text.contains("Git Worktrees"), height >= 24 || context == 2);
-                    if height < 24 {
+                    assert_eq!(text.contains("Git Worktrees"), context == 2);
+                    if width < 160 {
                         assert_eq!(text.contains("Folders"), context == 0);
                         assert_eq!(text.contains("Sessions"), context == 1);
                         assert_eq!(terminal.backend().buffer()[(width - 1, 0)].symbol(), "┓");
@@ -6024,32 +5882,123 @@ mod cleanup_tests {
         assert_eq!(view.context(), 0);
         press(&mut browser, &mut view, KeyCode::Char('b'));
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-        let (_, _, _, footer) = browser_footer(Rect::new(0, 0, 120, 22), &browser, &view);
-        for y in 0..22 - footer {
-            assert_eq!(terminal.backend().buffer()[(0, y)].symbol(), "┃");
-            for x in 1..120 {
-                assert_eq!(terminal.backend().buffer()[(x, y)].symbol(), " ");
-            }
-        }
+        assert_eq!(view.context(), 1);
+        assert!(view.folders_hidden);
+        assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "┏");
     }
 
     #[test]
-    fn short_git_geometry_matches_visibility_and_page_capacity() {
-        let mut view = View::default();
-        let area = Rect::new(0, 0, 80, 20);
-        assert_eq!(git_regions(area, 23, &view, true), (area, None, false));
-        view.git_focus = true;
-        assert_eq!(
-            git_regions(area, 23, &view, true),
-            (Rect::default(), Some(area), true)
+    fn responsive_geometry_boundaries_and_visibility() {
+        for (width, height, mode) in [
+            (160, 12, LayoutMode::Columns),
+            (159, 47, LayoutMode::Single),
+            (160, 11, LayoutMode::Single),
+            (80, 48, LayoutMode::Stacked),
+            (79, 60, LayoutMode::Single),
+            (159, 48, LayoutMode::Stacked),
+            (160, 48, LayoutMode::Columns),
+            (140, 60, LayoutMode::Stacked),
+        ] {
+            let view = View {
+                focus: 1,
+                ..View::default()
+            };
+            for footer in [1, 2, 3] {
+                assert_eq!(
+                    panel_layout(Rect::new(0, 0, width, height - footer), height, &view, true).mode,
+                    mode
+                );
+            }
+        }
+        for (width, height) in [
+            (160, 24),
+            (160, 40),
+            (240, 60),
+            (100, 100),
+            (100, 60),
+            (80, 48),
+        ] {
+            for present in [false, true] {
+                for folders_hidden in [false, true] {
+                    for git_hidden in [false, true] {
+                        let view = View {
+                            focus: 1,
+                            folders_hidden,
+                            git_hidden,
+                            ..View::default()
+                        };
+                        let area = Rect::new(0, 0, width, height - 3);
+                        let p = panel_layout(area, height, &view, present);
+                        let f = p.folders.unwrap();
+                        let s = p.sessions.unwrap();
+                        assert_eq!(p.git.is_some(), present);
+                        assert_eq!(p.graph_visible, present && !git_hidden);
+                        if p.mode == LayoutMode::Columns {
+                            assert_eq!(f.right(), s.x);
+                            assert!(s.width >= 80);
+                            assert_eq!(
+                                f.width,
+                                if folders_hidden {
+                                    2
+                                } else {
+                                    (width / 6).clamp(24, 32)
+                                }
+                            );
+                            assert_eq!(
+                                p.git.map_or(s.right(), |g| {
+                                    assert_eq!(s.right(), g.x);
+                                    g.right()
+                                }),
+                                area.right()
+                            );
+                        } else {
+                            assert_eq!(f.bottom(), s.y);
+                            assert!(s.height > f.height);
+                            assert!(s.height >= area.height * 2 / 5);
+                            assert_eq!(
+                                f.height,
+                                if folders_hidden {
+                                    1
+                                } else {
+                                    (area.height / 5).min(12)
+                                }
+                            );
+                            if let Some(g) = p.git {
+                                assert_eq!(
+                                    g.height,
+                                    if git_hidden {
+                                        1
+                                    } else {
+                                        (area.height / 5).min(12) * 2
+                                    }
+                                );
+                                if !folders_hidden && !git_hidden {
+                                    assert_eq!(g.height, f.height * 2);
+                                }
+                            }
+                            assert_eq!(
+                                p.git.map_or(s.bottom(), |g| {
+                                    assert_eq!(s.bottom(), g.y);
+                                    g.bottom()
+                                }),
+                                area.bottom()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let view = View {
+            git_focus: true,
+            ..View::default()
+        };
+        assert!(panel_layout(Rect::new(0, 0, 80, 4), 6, &view, true).graph_visible);
+        assert!(!panel_layout(Rect::new(0, 0, 80, 3), 5, &view, true).graph_visible);
+        assert!(
+            panel_layout(Rect::new(0, 0, 80, 20), 24, &view, false)
+                .sessions
+                .is_some()
         );
-        assert!(git_regions(Rect::new(0, 0, 80, 4), 6, &view, true).2);
-        assert!(!git_regions(Rect::new(0, 0, 80, 3), 5, &view, true).2);
-        view.git_hidden = true;
-        let (_, git, visible) = git_regions(area, 23, &view, true);
-        assert_eq!(git.unwrap().height, 1);
-        assert!(!visible);
-        assert!(git_regions(area, 23, &view, false).1.is_none());
     }
 
     #[test]
@@ -6136,20 +6085,7 @@ mod cleanup_tests {
     }
 
     #[test]
-    fn folder_width_fits_display_columns_and_caps_long_labels() {
-        assert_eq!(folder_pane_width(160, &[]), 9);
-        assert_eq!(folder_pane_width(160, &["project (2)".into()]), 15);
-        assert_eq!(folder_pane_width(160, &["├─ 界e\u{301} (12)".into()]), 15);
-        assert_eq!(folder_pane_width(160, &["◇ project * (2)".into()]), 19);
-        assert_eq!(folder_pane_width(101, &["x".repeat(100)]), 40);
-        let labels = vec!["short".into(), "x".repeat(80)];
-        assert_eq!(folder_pane_width(160, &labels), 64);
-        assert_eq!(folder_pane_width(240, &labels), 84);
-        assert_eq!(folder_pane_width(240, &labels[..1]), 9);
-    }
-
-    #[test]
-    fn folder_layout_reacts_to_expansion_but_not_selection_or_viewport() {
+    fn folder_layout_stays_stable_across_expansion_selection_and_viewport() {
         let mut browser = Browser::new(vec![]);
         let path = std::path::PathBuf::from(format!("/parent/{}", "long-folder-".repeat(8)));
         browser.open_folder(path.clone());
@@ -6167,77 +6103,19 @@ mod cleanup_tests {
                 + 1
         };
         assert_eq!(divider(&browser, &view, 99, 24), 99);
-        assert_eq!(divider(&browser, &view, 100, 24), 40);
-        assert_eq!(divider(&browser, &view, 160, 24), 64);
+        assert_eq!(divider(&browser, &view, 100, 24), 100);
+        assert_eq!(divider(&browser, &view, 160, 24), 26);
         browser.folder = FolderFilter::Unlinked;
         assert_eq!(divider(&browser, &view, 160, 6), 160);
         browser.expanded.remove(std::path::Path::new("/parent"));
         let collapsed = divider(&browser, &view, 160, 24);
-        assert!(collapsed < 64);
+        assert_eq!(collapsed, 26);
         browser.expanded.insert("/parent".into());
-        assert_eq!(divider(&browser, &view, 160, 24), 64);
+        assert_eq!(divider(&browser, &view, 160, 24), 26);
         view.focus = 1;
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(99, 20)).unwrap();
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
         assert_eq!(terminal.backend().buffer()[(98, 0)].symbol(), "┓");
-    }
-
-    #[tokio::test]
-    async fn git_strip_layout_and_focus_rendering() {
-        let browser = Browser::new(vec![]);
-        let mut view = View {
-            git_focus: true,
-            git_hidden: true,
-            ..View::default()
-        };
-        view.history
-            .tick(Some("/synthetic/repo".into()), 0, false, 1)
-            .await;
-        for width in [80, 120] {
-            let mut terminal =
-                Terminal::new(ratatui::backend::TestBackend::new(width, 24)).unwrap();
-            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-            let buffer = terminal.backend().buffer();
-            assert_eq!(buffer[(0, 0)].fg, Color::DarkGray);
-            if width >= 100 {
-                let divider = folder_pane_width(width, &folder_tree_labels(&browser.folder_rows()));
-                assert_eq!(buffer[(divider, 0)].fg, Color::DarkGray);
-            }
-            let text = buffer
-                .content
-                .iter()
-                .map(|cell| cell.symbol())
-                .collect::<String>();
-            assert!(text.contains("Git Worktrees"));
-            assert!(!text.contains("Git history"));
-            assert!(text.contains("b Expand"));
-            let divider = buffer
-                .content
-                .iter()
-                .find(|cell| cell.symbol() == "━")
-                .unwrap();
-            assert_eq!(divider.fg, Color::Cyan);
-            assert!(divider.modifier.contains(Modifier::BOLD));
-            view.git_focus = false;
-            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-            let buffer = terminal.backend().buffer();
-            let (_, _, _, footer_height) =
-                browser_footer(Rect::new(0, 0, width, 24), &browser, &view);
-            let divider = &buffer[(width - 1, 24 - footer_height - 1)];
-            assert_eq!(divider.symbol(), "─");
-            assert_eq!(divider.fg, Color::DarkGray);
-            assert!(!divider.modifier.contains(Modifier::BOLD));
-            view.git_focus = true;
-        }
-        let area = Rect::new(0, 0, 80, 20);
-        assert_eq!(git_regions(area, 24, &view, true).1.unwrap().height, 1);
-        assert!(!git_regions(area, 24, &view, true).2);
-        view.git_hidden = false;
-        assert!(git_regions(area, 24, &view, true).2);
-        assert!(!git_regions(Rect::new(0, 0, 80, 5), 24, &view, true).2);
-        assert!(!view.git_hidden);
-        assert!(git_regions(area, 24, &view, false).1.is_none());
-        assert!(selection_style(false).add_modifier.contains(Modifier::DIM));
     }
 
     #[test]

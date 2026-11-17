@@ -2085,8 +2085,8 @@ mod tests {
             branch: Some("界long-branch".repeat(40)),
         });
         view.history.following = true;
-        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-        for (width, height, focused) in [(140, 40, false), (100, 18, true), (40, 18, false)] {
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        for (width, height, focused) in [(160, 40, false), (100, 18, true), (40, 18, false)] {
             terminal.backend_mut().resize(width, height);
             terminal.resize(Rect::new(0, 0, width, height)).unwrap();
             view.git_focus = focused;

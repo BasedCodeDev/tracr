@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-menu-') as tmp:
         t.expect('Actions & shortcuts')
         t.expect('Enter activate')
         t.send(b'\x1b[F')  # The last entry is a session action, with no folder actions.
-        t.expect('Open session embedded')
+        t.expect('Open session full-screen')
         assert not (home/'launch.json').exists()
         t.send(b'\x1b')
         t.wait(lambda: 'Actions & shortcuts' not in t.text())
@@ -32,10 +32,10 @@ with tempfile.TemporaryDirectory(prefix='tracr-menu-') as tmp:
         t.expect('Actions & shortcuts')
         t.resize(15, 36)
         t.send(b'\x1b[F')
-        t.expect('Open session embedded')
+        t.expect('Open session full-screen')
         t.send(b'\x1b[H')
         t.expect('Help / actions')
-        t.resize(40, 140)
+        t.resize(40, 160)
         t.send(b'jj\r\r')  # Search: queued Enter must not select a result.
         t.expect('Search within folder')
         t.send(b'second')

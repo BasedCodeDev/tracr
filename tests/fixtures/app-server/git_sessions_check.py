@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
     t = Terminal([binary, '--codex-home', tmp, '--codex-bin', str(fake), str(linked)], env)
     try:
         t.expect('Running └─ Task first · codex · feature')
-        t.send(b'\x1b[1;3B')  # Alt+Down focuses Git from either upper pane.
+        t.send(b'\x1b[1;3C')  # Alt+Right focuses Git from Sessions.
         t.expect('Enter Folder')
         t.send(b'\x1b[B')  # First session beneath the commit.
         t.expect('Enter Resume')
@@ -56,8 +56,6 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         launch = json.loads((home/'launch.json').read_text())
         assert launch['args'] == ['resume', '--cd', str(linked), '--', 'first'], launch
         assert launch['cwd'] == str(linked) and launch['foreground'], launch
-        t.wait(lambda: 'Folders' not in t.text())
-        t.send(b'\x1bf')
         t.expect('Ctrl+B background')
         t.expect('Folders')
         t.send(b'\t')  # Embedded Sessions -> Git.

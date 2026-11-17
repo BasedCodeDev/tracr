@@ -62,6 +62,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     (home / 'fake.json').write_text(json.dumps({'read_cwd': str(project)}))
     t = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(fake), str(project)], env)
     try:
+        t.expect('Sessions')
+        t.resize(80, 139)  # Full-width graph keeps commit subjects visible.
         t.expect('Second creation commit')
         # Folders menu and keyboard use the same action; escape before execution is inert.
         t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, menu=True)
@@ -85,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         assert git(project, 'status', '--porcelain') == ''
         assert not (project / '.gitignore').exists()
         # New worktree is selected in Folders, and its HEAD is followed.
-        t.resize(40, 140)
+        t.resize(60, 100)
         t.expect('─ ◇ feature/from-folder')
         t.expect('Second creation commit')
         t.send(b'\x1b[Z\x1b[B')
@@ -120,6 +122,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     old_env = {**env, 'PATH': str(bindir) + os.pathsep + env['PATH']}
     t = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(fake), str(project)], old_env)
     try:
+        t.expect('Sessions')
+        t.resize(80, 139)  # Full-width graph keeps commit subjects visible.
         t.expect('Second creation commit')
         t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, expected='requires Git 2.48 or newer')
         t.send(b'\x1b')

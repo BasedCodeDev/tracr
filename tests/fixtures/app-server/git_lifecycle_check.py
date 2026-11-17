@@ -87,6 +87,8 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
             # This walkthrough exercises navigation across the complete tree.
             terminal.send(b'\x1b[1;3D\x1bz\x1b[1;3C')
             terminal.wait(lambda: 'Folders · Focused' not in terminal.text())
+            if action in ('presentation', 'follow', 'progressive', 'expansion-quit'):
+                terminal.resize(80, 139)
             if action == 'presentation':
                 terminal.expect('[remote: origin/main]')
                 terminal.expect('[tag: light] [tag: release]')
@@ -115,7 +117,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.send(b'f')
                 terminal.expect('[HEAD]')
                 terminal.wait(lambda: '> ● ' + subprocess.check_output([real_git, '-C', str(project), 'rev-parse', 'HEAD~200'], env=env).decode().strip()[:7] in terminal.text())
-                terminal.send(b'\x1b[Z');terminal.expect('Enter Full-screen')
+                terminal.send(b'\x1b[Z');terminal.expect('Enter Embedded')
                 terminal.send(b'\x1b');terminal.expect('Enter Sessions')
                 terminal.send(b'\x1b[A')
                 terminal.expect(f'[HEAD] [{main_branch}] History 299')
@@ -158,35 +160,32 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.wait(lambda: bool(list(home.glob('pending-*'))))
             else:
                 terminal.expect('─ ◇ feature')
-                terminal.expect('Lifecycle root')
+                terminal.expect('Lifecy')
                 terminal.send(b'\x1b[1;3D')  # Alt+Left -> Folders
                 terminal.expect('Enter Sessions')
                 terminal.send(b'\x1b[1;3C')  # Alt+Right -> Sessions
-                terminal.expect('Enter Full-screen')
-                terminal.send(b'\x1b[1;3B')  # Alt+Down -> Git
+                terminal.expect('Enter Embedded')
+                terminal.send(b'\x1b[1;3C')  # Alt+Right -> Git
                 terminal.expect('b Collapse')
-                terminal.send(b'\x1b[1;3A')  # Alt+Up -> remembered Sessions
-                terminal.expect('Enter Full-screen')
+                terminal.send(b'\x1b[1;3D')  # Alt+Left -> Sessions
+                terminal.expect('Enter Embedded')
                 terminal.send(b'\t')
                 terminal.expect('b Collapse')
-                assert 'Enter Full-screen' not in terminal.text()
+                assert 'Enter Embedded' not in terminal.text()
                 terminal.send(b'b')
-                terminal.expect('b Expand')
-                terminal.expect('b Expand')
+                terminal.expect('Enter Embedded')
                 terminal.send(b'?')
-                terminal.expect('Expand Git history')
-                assert 'Open session full-screen' not in terminal.text()
+                terminal.expect('Open session embedded')
+                assert 'Expand Git history' not in terminal.text()
                 terminal.send(b'?')
                 terminal.wait(lambda: 'Actions & shortcuts' not in terminal.text())
-                terminal.send(b'\x1b[Z')
-                terminal.expect('Enter Full-screen')
                 terminal.send(b'\t')
-                terminal.expect('Lifecycle root')
+                terminal.expect('Lifecy')
                 terminal.expect('b Collapse')
                 terminal.resize(8, 80)
                 terminal.expect('Git')
                 terminal.resize(80, 240)
-                terminal.expect('Lifecycle root')
+                terminal.expect('Lifecy')
                 terminal.send(b'\t')
                 terminal.expect('Enter Sessions')  # Tab already focuses Folders.
                 terminal.send(b'\x1b[A')
@@ -195,7 +194,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.expect('Task first')
             pids = [int(p.name.split('-')[1]) for p in home.glob('pending-*')]
             if action in ('walkthrough', 'handoff'):
-                terminal.send(b'\x1bf')
+                terminal.send(b'\r')
                 terminal.wait(lambda: (home / 'launch.json').exists())
                 launch = json.loads((home / 'launch.json').read_text())
                 assert launch['cwd'] == str(linked), launch
