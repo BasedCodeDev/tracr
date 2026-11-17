@@ -9,3 +9,9 @@ u8::max_value() with u8::MAX to keep local dependency builds warning-free.
 Also bound visible_rows after joining history and live rows. Upstream subtracts
 the history offset from viewport height, underflowing when scrolling beyond one
 page; the iterator must always yield at most one viewport of rows.
+
+Expose absolute history/viewport row coordinates and read-only history cells and
+wrap flags for terminal text selection. A monotonically increasing scroll counter
+keeps selections attached to retained rows as the viewport moves; the history
+start bounds allow callers to invalidate selections after eviction. Coverage is in
+src/terminal_selection.rs as well as src/inline_terminal.rs.

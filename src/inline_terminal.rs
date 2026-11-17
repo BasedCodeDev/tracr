@@ -1,7 +1,7 @@
 //! Owned PTYs. Output is parsed, never written to the outer terminal.
 use crate::domain::{LaunchCommand, SessionKey};
 use crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use ratatui::{
@@ -42,6 +42,15 @@ struct Session {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     writer: mpsc::SyncSender<Vec<u8>>,
+    pending_input: std::cell::RefCell<std::collections::VecDeque<Vec<u8>>>,
+    queued_bytes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    modes: crate::terminal_input::Modes,
+    focused: Option<bool>,
+    selection: Option<crate::terminal_selection::Selection>,
+    click: Option<(Instant, crate::terminal_selection::Point, u8)>,
+    mouse_down: bool,
+    delivery_failed: bool,
+    writer_status: mpsc::Receiver<String>,
     output: mpsc::Receiver<Vec<u8>>,
     parser: vt100::Parser,
     queries: vte::Parser,
@@ -71,9 +80,26 @@ impl Session {
         }
     }
     fn write(&self, bytes: Vec<u8>) -> io::Result<()> {
-        self.writer
-            .try_send(bytes)
-            .map_err(|e| io::Error::other(format!("Terminal input unavailable: {e}")))
+        self.queued_bytes
+            .fetch_add(bytes.len(), std::sync::atomic::Ordering::Relaxed);
+        self.pending_input.borrow_mut().push_back(bytes);
+        self.flush_input()
+    }
+    fn flush_input(&self) -> io::Result<()> {
+        let mut pending = self.pending_input.borrow_mut();
+        while let Some(bytes) = pending.pop_front() {
+            match self.writer.try_send(bytes) {
+                Ok(()) => (),
+                Err(mpsc::TrySendError::Full(bytes)) => {
+                    pending.push_front(bytes);
+                    break;
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    return Err(io::Error::other("Terminal input writer disconnected"));
+                }
+            }
+        }
+        Ok(())
     }
 }
 impl Drop for Session {
@@ -185,6 +211,8 @@ pub struct Manager {
     confirmation: Option<Confirmation>,
     pub area: Rect,
     pub visible: bool,
+    pub copy_request: Option<String>,
+    pub input_error: Option<String>,
 }
 enum Confirmation {
     Quit,
@@ -308,6 +336,9 @@ impl Manager {
         });
         let (input, rx) = mpsc::sync_channel::<Vec<u8>>(64);
         let write_stop = io_stop.clone();
+        let queued_bytes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let written_bytes = queued_bytes.clone();
+        let (write_error, writer_status) = mpsc::channel();
         std::thread::spawn(move || {
             while let Ok(bytes) = rx.recv() {
                 let mut remaining = bytes.as_slice();
@@ -319,8 +350,15 @@ impl Manager {
                         continue;
                     }
                     match writer.write(remaining) {
-                        Ok(0) => return,
-                        Ok(n) => remaining = &remaining[n..],
+                        Ok(0) => {
+                            let _ =
+                                write_error.send("Terminal input closed before delivery".into());
+                            return;
+                        }
+                        Ok(n) => {
+                            written_bytes.fetch_sub(n, std::sync::atomic::Ordering::Relaxed);
+                            remaining = &remaining[n..];
+                        }
                         Err(error)
                             if matches!(
                                 error.kind(),
@@ -329,7 +367,11 @@ impl Manager {
                         {
                             continue;
                         }
-                        Err(_) => return,
+                        Err(error) => {
+                            let _ = write_error
+                                .send(format!("Terminal input delivery failed: {error}"));
+                            return;
+                        }
                     }
                 }
             }
@@ -346,6 +388,15 @@ impl Manager {
             master: pair.master,
             child,
             writer: input,
+            pending_input: Default::default(),
+            queued_bytes,
+            modes: Default::default(),
+            focused: None,
+            selection: None,
+            click: None,
+            mouse_down: false,
+            delivery_failed: false,
+            writer_status,
             output,
             parser: vt100::Parser::new(rows, cols, 2000),
             queries: vte::Parser::new(),
@@ -364,6 +415,46 @@ impl Manager {
         let mut changed = false;
         let mut exited = Vec::new();
         self.sessions.retain_mut(|s| {
+            if let Ok(error) = s.writer_status.try_recv() {
+                self.input_error = Some(error);
+                s.delivery_failed = true;
+                changed = true;
+            }
+            if let Err(error) = s.flush_input() {
+                if !s.delivery_failed {
+                    self.input_error = Some(error.to_string());
+                    changed = true;
+                }
+                s.delivery_failed = true;
+            }
+            if let Some(selection) = s.selection.as_mut().filter(|selection| {
+                selection.dragging
+                    && selection.edge != 0
+                    && self.active == Some(s.id)
+                    && self.visible
+                    && selection.tick.elapsed() >= Duration::from_millis(60)
+            }) {
+                let offset = s.parser.screen().scrollback();
+                s.parser.set_scrollback(if selection.edge < 0 {
+                    offset.saturating_add(1)
+                } else {
+                    offset.saturating_sub(1)
+                });
+                let screen = s.parser.screen();
+                let line = screen.viewport_start()
+                    + if selection.edge < 0 {
+                        0
+                    } else {
+                        u64::from(s.size.0.saturating_sub(1))
+                    };
+                selection.update(
+                    screen,
+                    crate::terminal_selection::Point(line, selection.head.1),
+                );
+                selection.tick = Instant::now();
+                changed = true;
+            }
+            let mut received_output = false;
             for _ in 0..32 {
                 let bytes = match s.output.try_recv() {
                     Ok(bytes) => bytes,
@@ -374,18 +465,36 @@ impl Manager {
                     Err(mpsc::TryRecvError::Empty) => break,
                 };
                 changed = true;
+                received_output = true;
                 for byte in bytes {
                     s.parser.process(&[byte]);
                     let mut queries = Queries {
                         cursor: s.parser.screen().cursor_position(),
                         replies: Vec::new(),
                         alternate_scroll: s.alternate_scroll,
+                        modes: std::mem::take(&mut s.modes),
+                        reset: false,
                     };
                     s.queries.advance(&mut queries, byte);
                     s.alternate_scroll = queries.alternate_scroll;
+                    s.modes = queries.modes;
+                    if queries.reset
+                        || s.selection
+                            .as_ref()
+                            .is_some_and(|selection| !selection.valid(s.parser.screen()))
+                    {
+                        s.selection = None;
+                    }
                     for reply in queries.replies {
                         let _ = s.write(reply);
                     }
+                }
+            }
+            if let Some(selection) = s.selection.as_ref().filter(|_| received_output) {
+                let mut current = selection.clone();
+                current.update(s.parser.screen(), selection.head);
+                if current.text != selection.text {
+                    s.selection = None;
                 }
             }
             if s.stopping
@@ -478,8 +587,122 @@ impl Manager {
             self.picker = true;
         }
     }
+    pub fn sync_focus(&mut self, focused: bool) -> io::Result<()> {
+        let overlay = self.has_overlay();
+        for s in &mut self.sessions {
+            let focus = focused && !overlay && self.visible && self.active == Some(s.id);
+            if !focus {
+                if let Some(selection) = s.selection.as_mut() {
+                    selection.dragging = false;
+                    selection.edge = 0;
+                }
+            }
+            if s.modes.focus {
+                if s.focused != Some(focus) {
+                    s.write(if focus { b"\x1b[I" } else { b"\x1b[O" }.to_vec())?;
+                }
+                s.focused = Some(focus);
+            } else {
+                s.focused = None;
+            }
+        }
+        Ok(())
+    }
+    pub fn input_backlogged(&self) -> bool {
+        self.sessions.iter().any(|s| {
+            !s.delivery_failed
+                && s.queued_bytes.load(std::sync::atomic::Ordering::Relaxed) > 4 * 1024 * 1024
+        })
+    }
     pub fn has_overlay(&self) -> bool {
         self.picker || self.confirmation.is_some()
+    }
+    pub fn mouse(&mut self, mut mouse: MouseEvent) -> io::Result<Input> {
+        use crate::terminal_selection::{Point, Selection};
+        if !self.visible || self.has_overlay() || self.area.is_empty() {
+            return Ok(Input::Pass);
+        }
+        let inside = self.area.contains((mouse.column, mouse.row).into());
+        let Some(s) = self.sessions.iter_mut().find(|s| Some(s.id) == self.active) else {
+            return Ok(Input::Pass);
+        };
+        let selecting = s
+            .selection
+            .as_ref()
+            .is_some_and(|selection| selection.dragging);
+        if !inside && !selecting && !s.mouse_down {
+            return Ok(Input::Pass);
+        }
+        let edge = if mouse.row < self.area.y {
+            -1
+        } else if mouse.row >= self.area.bottom() {
+            1
+        } else {
+            0
+        };
+        mouse.column = mouse.column.clamp(self.area.x, self.area.right() - 1);
+        mouse.row = mouse.row.clamp(self.area.y, self.area.bottom() - 1);
+        let screen = s.parser.screen();
+        let local = selecting
+            || mouse.modifiers.contains(KeyModifiers::SHIFT)
+            || screen.mouse_protocol_mode() == vt100::MouseProtocolMode::None;
+        let point = Point(
+            screen.viewport_start() + u64::from(mouse.row - self.area.y),
+            mouse.column - self.area.x,
+        );
+        if local {
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let clicks = s
+                        .click
+                        .filter(|(at, previous, _)| {
+                            at.elapsed() < Duration::from_millis(400) && *previous == point
+                        })
+                        .map_or(1, |(_, _, count)| count % 3 + 1);
+                    s.click = Some((Instant::now(), point, clicks));
+                    s.selection = Some(Selection::new(screen, point, clicks));
+                }
+                MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
+                    if let Some(selection) =
+                        s.selection.as_mut().filter(|selection| selection.dragging)
+                    {
+                        selection.update(screen, point);
+                        selection.edge = edge;
+                        if matches!(mouse.kind, MouseEventKind::Up(_)) {
+                            selection.dragging = false;
+                            selection.edge = 0;
+                        }
+                    }
+                }
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => return self.wheel(mouse),
+                _ => (),
+            }
+        } else {
+            let mode = screen.mouse_protocol_mode();
+            let send = match mouse.kind {
+                MouseEventKind::Moved => mode == vt100::MouseProtocolMode::AnyMotion,
+                MouseEventKind::Drag(_) => matches!(
+                    mode,
+                    vt100::MouseProtocolMode::AnyMotion | vt100::MouseProtocolMode::ButtonMotion
+                ),
+                MouseEventKind::Up(_) => mode != vt100::MouseProtocolMode::Press,
+                _ => true,
+            };
+            if matches!(mouse.kind, MouseEventKind::Down(_)) {
+                s.mouse_down = true;
+            }
+            if matches!(mouse.kind, MouseEventKind::Up(_)) {
+                s.mouse_down = false;
+            }
+            if send {
+                s.write(encode_mouse(
+                    mouse,
+                    self.area,
+                    screen.mouse_protocol_encoding(),
+                ))?;
+            }
+        }
+        Ok(Input::Consumed)
     }
     pub fn wheel(&mut self, mouse: MouseEvent) -> io::Result<Input> {
         if !self.visible
@@ -497,13 +720,15 @@ impl Manager {
             return Ok(Input::Pass);
         };
         let screen = s.parser.screen();
-        if screen.mouse_protocol_mode() != vt100::MouseProtocolMode::None {
-            let bytes = encode_wheel(mouse, self.area, screen.mouse_protocol_encoding());
+        if screen.mouse_protocol_mode() != vt100::MouseProtocolMode::None
+            && !mouse.modifiers.contains(KeyModifiers::SHIFT)
+        {
+            let bytes = encode_mouse(mouse, self.area, screen.mouse_protocol_encoding());
             if !bytes.is_empty() {
                 s.write(bytes)?;
             }
         } else if screen.alternate_screen() {
-            if s.alternate_scroll {
+            if s.alternate_scroll && !mouse.modifiers.contains(KeyModifiers::SHIFT) {
                 let code = if up { KeyCode::Up } else { KeyCode::Down };
                 s.write(
                     encode_key(
@@ -524,6 +749,13 @@ impl Manager {
         Ok(Input::Consumed)
     }
     pub fn input(&mut self, event: &Event) -> io::Result<Input> {
+        self.input_rich(event, None)
+    }
+    pub fn input_rich(
+        &mut self,
+        event: &Event,
+        rich: Option<&crate::terminal_input::Key>,
+    ) -> io::Result<Input> {
         if let Some(confirmation) = &self.confirmation {
             if let Event::Key(key) = event {
                 if key.kind == KeyEventKind::Release {
@@ -602,8 +834,23 @@ impl Manager {
             return Ok(Input::Consumed);
         }
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
+            if matches!(event, Event::Key(key) if matches!(key.code,KeyCode::Char('c'|'C')) && (key.modifiers==KeyModifiers::ALT || key.modifiers==KeyModifiers::CONTROL|KeyModifiers::SHIFT))
+            {
+                if let Some(selection) = &s.selection {
+                    if matches!(event,Event::Key(key) if key.kind!=KeyEventKind::Release) {
+                        self.copy_request = Some(selection.text.clone());
+                    }
+                    return Ok(Input::Consumed);
+                }
+            }
             let bytes = match event {
-                Event::Key(key) => encode_key(*key, s.parser.screen().application_cursor()),
+                Event::Key(key) => s.modes.encode(
+                    &rich
+                        .cloned()
+                        .unwrap_or_else(|| crate::terminal_input::Key::from_event(*key)),
+                    s.parser.screen().application_cursor(),
+                    s.parser.screen().application_keypad(),
+                ),
                 Event::Paste(text) => {
                     if s.parser.screen().bracketed_paste() {
                         format!("\x1b[200~{text}\x1b[201~").into_bytes()
@@ -616,6 +863,7 @@ impl Manager {
             if !bytes.is_empty() {
                 s.write(bytes)?;
                 s.parser.set_scrollback(0);
+                s.selection = None;
             }
         }
         Ok(Input::Consumed)
@@ -633,7 +881,7 @@ impl Manager {
             } else {
                 Color::DarkGray
             }))
-            .title(" Codex · Ctrl+B background · Alt+arrows panels ");
+            .title(" Codex · Ctrl+B background · Alt+arrows panels · Alt+C copy ");
         self.area = if self.fullscreen {
             area
         } else {
@@ -659,11 +907,16 @@ impl Manager {
                 })
                 .is_ok()
         {
+            s.selection = None;
             s.parser.set_size(inner.height, inner.width);
             s.size = (inner.height, inner.width);
         }
         self.visible = true;
         let screen = s.parser.screen();
+        let selected_bounds = s
+            .selection
+            .as_ref()
+            .map(|selection| selection.bounds(screen));
         for y in 0..inner.height {
             for x in 0..inner.width {
                 if let Some(cell) = screen.cell(y, x) {
@@ -683,6 +936,11 @@ impl Manager {
                         if enabled {
                             style = style.add_modifier(modifier);
                         }
+                    }
+                    let point =
+                        crate::terminal_selection::Point(screen.viewport_start() + u64::from(y), x);
+                    if selected_bounds.is_some_and(|(start, end)| point >= start && point < end) {
+                        style = style.bg(Color::Blue).fg(Color::White);
                     }
                     frame.buffer_mut().set_stringn(
                         inner.x + x,
@@ -780,11 +1038,33 @@ fn color(c: vt100::Color) -> Color {
     }
 }
 
-fn encode_wheel(mouse: MouseEvent, area: Rect, encoding: vt100::MouseProtocolEncoding) -> Vec<u8> {
-    let button = if mouse.kind == MouseEventKind::ScrollUp {
-        64u16
-    } else {
-        65
+fn encode_mouse(mouse: MouseEvent, area: Rect, encoding: vt100::MouseProtocolEncoding) -> Vec<u8> {
+    let release = matches!(mouse.kind, MouseEventKind::Up(_));
+    let button: u16 = match mouse.kind {
+        MouseEventKind::ScrollUp => 64,
+        MouseEventKind::ScrollDown => 65,
+        MouseEventKind::ScrollLeft => 66,
+        MouseEventKind::ScrollRight => 67,
+        MouseEventKind::Moved => 35,
+        MouseEventKind::Down(button)
+        | MouseEventKind::Up(button)
+        | MouseEventKind::Drag(button) => {
+            let button = match button {
+                MouseButton::Left => 0,
+                MouseButton::Middle => 1,
+                MouseButton::Right => 2,
+            };
+            if release && encoding != vt100::MouseProtocolEncoding::Sgr {
+                3
+            } else {
+                button
+                    + if matches!(mouse.kind, MouseEventKind::Drag(_)) {
+                        32
+                    } else {
+                        0
+                    }
+            }
+        }
     } + if mouse.modifiers.contains(KeyModifiers::SHIFT) {
         4
     } else {
@@ -801,7 +1081,9 @@ fn encode_wheel(mouse: MouseEvent, area: Rect, encoding: vt100::MouseProtocolEnc
     let x = mouse.column - area.x + 1;
     let y = mouse.row - area.y + 1;
     match encoding {
-        vt100::MouseProtocolEncoding::Sgr => format!("\x1b[<{button};{x};{y}M").into_bytes(),
+        vt100::MouseProtocolEncoding::Sgr => {
+            format!("\x1b[<{button};{x};{y}{}", if release { 'm' } else { 'M' }).into_bytes()
+        }
         vt100::MouseProtocolEncoding::Default => {
             if x > 223 || y > 223 {
                 return vec![];
@@ -831,66 +1113,16 @@ fn encode_wheel(mouse: MouseEvent, area: Rect, encoding: vt100::MouseProtocolEnc
 }
 
 fn encode_key(key: KeyEvent, application: bool) -> Vec<u8> {
-    if key.kind == KeyEventKind::Release {
-        return vec![];
-    }
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    let mut text = match key.code {
-        KeyCode::Char(c) if ctrl && c.is_ascii() => vec![(c.to_ascii_uppercase() as u8) & 0x1f],
-        KeyCode::Char(c) => c.to_string().into_bytes(),
-        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => vec![b'\n'],
-        KeyCode::Enter => vec![b'\r'],
-        KeyCode::Tab => vec![b'\t'],
-        KeyCode::BackTab => b"\x1b[Z".to_vec(),
-        KeyCode::Backspace => vec![127],
-        KeyCode::Esc => vec![27],
-        KeyCode::Up
-        | KeyCode::Down
-        | KeyCode::Right
-        | KeyCode::Left
-        | KeyCode::Home
-        | KeyCode::End => {
-            let suffix = match key.code {
-                KeyCode::Up => 'A',
-                KeyCode::Down => 'B',
-                KeyCode::Right => 'C',
-                KeyCode::Left => 'D',
-                KeyCode::Home => 'H',
-                _ => 'F',
-            };
-            let modifier = 1
-                + u8::from(key.modifiers.contains(KeyModifiers::SHIFT))
-                + 2 * u8::from(key.modifiers.contains(KeyModifiers::ALT))
-                + 4 * u8::from(ctrl);
-            if modifier > 1 {
-                format!("\x1b[1;{modifier}{suffix}").into_bytes()
-            } else {
-                format!("\x1b{}{suffix}", if application { 'O' } else { '[' }).into_bytes()
-            }
-        }
-        KeyCode::Delete => b"\x1b[3~".to_vec(),
-        KeyCode::Insert => b"\x1b[2~".to_vec(),
-        KeyCode::PageUp => b"\x1b[5~".to_vec(),
-        KeyCode::PageDown => b"\x1b[6~".to_vec(),
-        KeyCode::F(n @ 1..=4) => format!("\x1bO{}", char::from(b'P' + n - 1)).into_bytes(),
-        KeyCode::F(n @ 5..=12) => format!(
-            "\x1b[{}~",
-            [15, 17, 18, 19, 20, 21, 23, 24][usize::from(n - 5)]
-        )
-        .into_bytes(),
-        _ => vec![],
-    };
-    if key.modifiers.contains(KeyModifiers::ALT)
-        && matches!(
-            key.code,
-            KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace
-        )
-    {
-        text.insert(0, 27);
-    }
-    text
+    crate::terminal_input::Modes::default().encode(
+        &crate::terminal_input::Key::from_event(key),
+        application,
+        false,
+    )
 }
+
 struct Queries {
+    reset: bool,
+    modes: crate::terminal_input::Modes,
     alternate_scroll: bool,
     cursor: (u16, u16),
     replies: Vec<Vec<u8>>,
@@ -898,10 +1130,15 @@ struct Queries {
 impl vte::Perform for Queries {
     fn esc_dispatch(&mut self, _: &[u8], _: bool, byte: u8) {
         if byte == b'c' {
+            self.modes = Default::default();
+            self.reset = true;
             self.alternate_scroll = true;
         }
     }
     fn csi_dispatch(&mut self, params: &vte::Params, intermediates: &[u8], _: bool, action: char) {
+        if let Some(reply) = self.modes.csi(params, intermediates, action) {
+            self.replies.push(reply);
+        }
         if intermediates == b"?"
             && matches!(action, 'h' | 'l')
             && params.iter().any(|p| p == [1007])
@@ -922,7 +1159,7 @@ impl vte::Perform for Queries {
             ('n', 5, []) => "\x1b[0n".into(),
             ('c', 0, []) => "\x1b[?1;2c".into(),
             ('c', 0, [b'>']) => "\x1b[>0;0;0c".into(),
-            ('u', _, [b'?']) => "\x1b[?0u".into(),
+
             _ => return,
         };
         self.replies.push(reply.into_bytes());
@@ -957,10 +1194,356 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while !predicate(manager) {
             manager.poll();
-            assert!(Instant::now() < deadline, "terminal condition timed out");
+            assert!(
+                Instant::now() < deadline,
+                "terminal condition timed out: {:?}",
+                manager
+                    .sessions
+                    .iter()
+                    .map(|s| s.parser.screen().contents())
+                    .collect::<Vec<_>>()
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+    #[test]
+    fn real_readline_and_neovim_accept_nested_editing() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut manager = Manager {
+            area: Rect::new(0, 0, 80, 24),
+            ..Manager::default()
+        };
+        let shell = LaunchCommand {
+            executable: "/usr/bin/bash".into(),
+            args: vec!["--noprofile".into(), "--norc".into()],
+            cwd: temp.path().into(),
+            env: vec![("PS1".into(), "TRACR_READY> ".into())],
+        };
+        manager.launch(&shell, None, "readline".into()).unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0]
+                .parser
+                .screen()
+                .contents()
+                .contains("TRACR_READY>")
+        });
+        manager
+            .input(&Event::Paste("printf 'READLINE:%s\\n' alpha beta".into()))
+            .unwrap();
+        manager
+            .input(&key(KeyCode::Backspace, KeyModifiers::ALT))
+            .unwrap();
+        manager
+            .input(&key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0]
+                .parser
+                .screen()
+                .contents()
+                .contains("READLINE:alpha")
+        });
+        assert!(
+            !manager.sessions[0]
+                .parser
+                .screen()
+                .contents()
+                .contains("READLINE:beta")
+        );
+        if !std::path::Path::new("/usr/bin/nvim").exists() {
+            return;
+        }
+        let path = temp.path().join("edited.txt");
+        let editor = LaunchCommand {
+            executable: "/usr/bin/nvim".into(),
+            args: vec![
+                "--clean".into(),
+                "-i".into(),
+                "NONE".into(),
+                "-n".into(),
+                path.as_os_str().to_owned(),
+            ],
+            cwd: temp.path().into(),
+            env: vec![
+                (
+                    "NVIM_LOG_FILE".into(),
+                    temp.path().join("nvim.log").into_os_string(),
+                ),
+                ("XDG_STATE_HOME".into(), temp.path().into()),
+            ],
+        };
+        manager.launch(&editor, None, "neovim".into()).unwrap();
+        wait(&mut manager, |m| {
+            m.sessions
+                .last()
+                .unwrap()
+                .parser
+                .screen()
+                .contents()
+                .contains("edited.txt")
+        });
+        manager
+            .input(&key(KeyCode::Char('i'), KeyModifiers::NONE))
+            .unwrap();
+        wait(&mut manager, |m| {
+            m.sessions
+                .last()
+                .unwrap()
+                .parser
+                .screen()
+                .contents()
+                .contains("INSERT")
+        });
+        manager.input(&Event::Paste("alpha beta".into())).unwrap();
+        wait(&mut manager, |m| {
+            m.sessions
+                .last()
+                .unwrap()
+                .parser
+                .screen()
+                .contents()
+                .contains("alpha beta")
+        });
+        manager
+            .input(&key(KeyCode::Char('w'), KeyModifiers::CONTROL))
+            .unwrap();
+        wait(&mut manager, |m| {
+            !m.sessions
+                .last()
+                .unwrap()
+                .parser
+                .screen()
+                .contents()
+                .contains("beta")
+        });
+        manager.input(&Event::Paste("gamma".into())).unwrap();
+        wait(&mut manager, |m| {
+            m.sessions
+                .last()
+                .unwrap()
+                .parser
+                .screen()
+                .contents()
+                .contains("alpha gamma")
+        });
+        manager
+            .input(&key(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        for c in ":wq".chars() {
+            manager
+                .input(&key(KeyCode::Char(c), KeyModifiers::NONE))
+                .unwrap();
+        }
+        manager
+            .input(&key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        wait(&mut manager, |_| {
+            std::fs::read_to_string(&path).is_ok_and(|text| text == "alpha gamma\n")
+        });
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "alpha gamma\n");
+    }
+
+    #[test]
+    #[ignore = "requires tmux and permission to create a local socket"]
+    fn nested_tmux_keeps_readline_editing() {
+        if !std::path::Path::new("/usr/bin/tmux").exists() {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("tmux.sock");
+        struct Server(std::path::PathBuf);
+        impl Drop for Server {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("/usr/bin/tmux")
+                    .arg("-S")
+                    .arg(&self.0)
+                    .arg("kill-server")
+                    .output();
+            }
+        }
+        let _server = Server(socket.clone());
+        let command = LaunchCommand {
+            executable: "/usr/bin/tmux".into(),
+            args: vec![
+                "-S".into(),
+                socket.into_os_string(),
+                "-f".into(),
+                "/dev/null".into(),
+                "new-session".into(),
+                "/usr/bin/bash --noprofile --norc".into(),
+            ],
+            cwd: temp.path().into(),
+            env: vec![("PS1".into(), "NESTED_READY> ".into())],
+        };
+        let mut manager = Manager {
+            area: Rect::new(0, 0, 80, 24),
+            ..Manager::default()
+        };
+        manager.launch(&command, None, "tmux".into()).unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0].parser.screen().contents().contains("bash-")
+        });
+        manager
+            .input(&Event::Paste("printf 'NESTED:%s\\n' alpha beta".into()))
+            .unwrap();
+        manager
+            .input(&key(KeyCode::Backspace, KeyModifiers::ALT))
+            .unwrap();
+        manager
+            .input(&key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0]
+                .parser
+                .screen()
+                .contents()
+                .contains("NESTED:alpha")
+        });
+        assert!(
+            !manager.sessions[0]
+                .parser
+                .screen()
+                .contents()
+                .contains("NESTED:beta")
+        );
+    }
+
+    #[test]
+    fn input_queue_preserves_order_under_backpressure_and_reports_disconnect() {
+        let mut manager = Manager::default();
+        manager
+            .launch(
+                &command("import time; time.sleep(60)"),
+                None,
+                "queue".into(),
+            )
+            .unwrap();
+        let (writer, receiver) = mpsc::sync_channel(1);
+        let session = &mut manager.sessions[0];
+        session.writer = writer;
+        for i in 0u32..256 {
+            session.write(i.to_le_bytes().to_vec()).unwrap();
+        }
+        for i in 0u32..256 {
+            assert_eq!(
+                receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+                i.to_le_bytes()
+            );
+            session.flush_input().unwrap();
+        }
+        assert!(session.pending_input.borrow().is_empty());
+        drop(receiver);
+        assert!(session.write(vec![1]).is_err());
+    }
+
+    #[test]
+    fn negotiated_pty_receives_modified_keys_paste_mouse_and_focus() {
+        let mut manager = Manager {
+            area: Rect::new(10, 5, 80, 12),
+            visible: true,
+            ..Manager::default()
+        };
+        manager
+            .launch(
+                &command(
+                    r#"
+import os,tty,time
+tty.setraw(0)
+os.write(1,b'\x1b[>1u\x1b[?1004h\x1b[?1000h\x1b[?1006h\x1b[?2004hREADY')
+expected=b'\x1b[127;5u\x1b[200~hello\nworld\x1b[201~\x1b[<0;3;2M\x1b[<0;3;2m\x1b[I\x1b[O'
+data=b''
+while len(data)<len(expected): data+=os.read(0,len(expected)-len(data))
+os.write(1,b'\r\nMATCH' if data==expected else b'\r\nMISMATCH:'+data.hex().encode())
+time.sleep(60)
+"#,
+                ),
+                None,
+                "protocol peer".into(),
+            )
+            .unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0].parser.screen().contents().contains("READY")
+        });
+        manager
+            .input(&key(KeyCode::Backspace, KeyModifiers::CONTROL))
+            .unwrap();
+        manager.input(&Event::Paste("hello\nworld".into())).unwrap();
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            manager
+                .mouse(MouseEvent {
+                    kind,
+                    column: 12,
+                    row: 6,
+                    modifiers: KeyModifiers::NONE,
+                })
+                .unwrap();
+        }
+        manager.sync_focus(true).unwrap();
+        manager.sync_focus(false).unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0].parser.screen().contents().contains("MATCH")
+        });
+        assert!(
+            !manager.sessions[0]
+                .parser
+                .screen()
+                .contents()
+                .contains("MISMATCH")
+        );
+    }
+
+    #[test]
+    fn selection_copy_is_explicit_and_ctrl_c_still_reaches_child() {
+        let mut manager = Manager {
+            area: Rect::new(0, 0, 40, 8),
+            visible: true,
+            ..Manager::default()
+        };
+        manager
+            .launch(
+                &command("import time; print('alpha beta',flush=True); time.sleep(60)"),
+                None,
+                "selection".into(),
+            )
+            .unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0]
+                .parser
+                .screen()
+                .contents()
+                .contains("alpha beta")
+        });
+        let mouse = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        manager.mouse(mouse).unwrap();
+        manager
+            .mouse(MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: 4,
+                ..mouse
+            })
+            .unwrap();
+        assert!(manager.copy_request.is_none());
+        manager
+            .input(&key(KeyCode::Char('c'), KeyModifiers::ALT))
+            .unwrap();
+        assert_eq!(manager.copy_request.take().unwrap(), "alpha");
+        let (writer, receiver) = mpsc::sync_channel(16);
+        manager.sessions[0].writer = writer;
+        manager
+            .input(&key(KeyCode::Char('c'), KeyModifiers::CONTROL))
+            .unwrap();
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(1)).unwrap(), [3]);
+        assert!(manager.sessions[0].selection.is_none());
+    }
+
     #[test]
     fn folder_views_keep_processes_and_explicit_background_choices() {
         let temp = tempfile::tempdir().unwrap();
@@ -1152,19 +1735,19 @@ mod tests {
             modifiers: KeyModifiers::CONTROL,
         };
         assert_eq!(
-            encode_wheel(mouse, area, vt100::MouseProtocolEncoding::Sgr),
+            encode_mouse(mouse, area, vt100::MouseProtocolEncoding::Sgr),
             b"\x1b[<80;3;2M"
         );
         assert_eq!(
-            encode_wheel(mouse, area, vt100::MouseProtocolEncoding::Default),
+            encode_mouse(mouse, area, vt100::MouseProtocolEncoding::Default),
             b"\x1b[Mp#\""
         );
         assert_eq!(
-            encode_wheel(mouse, area, vt100::MouseProtocolEncoding::Utf8),
+            encode_mouse(mouse, area, vt100::MouseProtocolEncoding::Utf8),
             b"\x1b[Mp#\""
         );
         assert!(
-            encode_wheel(
+            encode_mouse(
                 MouseEvent {
                     column: 300,
                     ..mouse
@@ -1176,6 +1759,8 @@ mod tests {
         );
         let mut parser = vte::Parser::new();
         let mut queries = Queries {
+            modes: Default::default(),
+            reset: false,
             alternate_scroll: true,
             cursor: (0, 0),
             replies: vec![],
@@ -1216,6 +1801,8 @@ mod tests {
     fn terminal_queries_fragmented_and_confined() {
         let mut parser = vte::Parser::new();
         let mut queries = Queries {
+            modes: Default::default(),
+            reset: false,
             alternate_scroll: true,
             cursor: (3, 7),
             replies: vec![],

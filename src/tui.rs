@@ -316,12 +316,20 @@ fn git_regions(area: Rect, view: &View, present: bool) -> (Rect, Option<Rect>, b
     (regions[0], Some(regions[1]), expanded)
 }
 
+static ENHANCED_INPUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn reset_input() {
+    if ENHANCED_INPUT.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        let _ = execute!(io::stdout(), crossterm::style::Print("\x1b[<u"));
+    }
+}
 fn restore() {
+    reset_input();
     let _ = terminal::disable_raw_mode();
     let _ = execute!(
         io::stdout(),
         event::DisableMouseCapture,
         event::DisableBracketedPaste,
+        event::DisableFocusChange,
         LeaveAlternateScreen,
         crossterm::cursor::Show
     );
@@ -366,6 +374,12 @@ struct TerminalGuard {
     mouse: bool,
 }
 impl TerminalGuard {
+    fn enhanced(&mut self, supported: bool) -> io::Result<()> {
+        if supported && !ENHANCED_INPUT.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            execute!(io::stdout(), crossterm::style::Print("\x1b[>31u"))?;
+        }
+        Ok(())
+    }
     fn mouse_capture(&mut self, enabled: bool) -> io::Result<()> {
         if enabled != self.mouse {
             if enabled {
@@ -383,15 +397,19 @@ impl TerminalGuard {
         execute!(
             io::stdout(),
             EnterAlternateScreen,
-            event::EnableBracketedPaste
+            event::EnableBracketedPaste,
+            event::EnableFocusChange,
+            crossterm::style::Print("\x1b[?u\x1b[c")
         )
     }
     fn suspend(&mut self) -> io::Result<()> {
+        reset_input();
         terminal::disable_raw_mode()?;
         execute!(
             io::stdout(),
             event::DisableMouseCapture,
             event::DisableBracketedPaste,
+            event::DisableFocusChange,
             LeaveAlternateScreen,
             crossterm::cursor::Show
         )?;
@@ -3562,6 +3580,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         mouse: false,
     };
     guard.activate()?;
+    let mut input_reader = crate::terminal_input::Reader::default();
+    let mut outer_focused = true;
+    let mut terminal_copy: Option<tokio::task::JoinHandle<std::result::Result<(), String>>> = None;
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         restore();
@@ -3617,8 +3638,16 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     let outcome: Result<(), Box<dyn std::error::Error>> = async {
         loop {
             if let Some(notice) = browser.focus_notice.take() { view.message = Some(notice); idle.wake(); }
+            if terminal_copy.as_ref().is_some_and(|task|task.is_finished()) {
+                view.message=Some(match terminal_copy.take().unwrap().await {Ok(Ok(()))=>"Terminal selection copied".into(),Ok(Err(error))=>error,Err(error)=>format!("Copy failed: {error}")});
+                idle.wake();
+            }
+            if terminal_copy.is_none() {
+                if let Some(text)=view.terminals.borrow_mut().copy_request.take() {terminal_copy=Some(tokio::spawn(crate::clipboard::copy(text)));}
+            }
             let (terminal_changed, terminal_exits) = view.terminals.borrow_mut().poll();
             if terminal_changed { idle.wake(); }
+            if let Some(error)=view.terminals.borrow_mut().input_error.take() {view.message=Some(error);}
             if !terminal_exits.is_empty() {
                 view.message = Some(terminal_exits.iter().map(|notice| notice.message.as_str()).collect::<Vec<_>>().join("; "));
                 if let Some(notice) = terminal_exits.iter().find(|notice| notice.failed && notice.was_active) {
@@ -3738,7 +3767,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let worktree_result = if let Some(modal) = view.worktree_create.as_mut() { modal.tick().await } else { None };
             if worktree_ready {
                 // Queued Enter repeats must not accept a newly displayed preview.
-                while event::poll(Duration::ZERO)? { let _ = event::read()?; }
+                while input_reader.poll(Duration::ZERO)? { let _ = input_reader.read()?; }
             }
             if let Some(result) = worktree_result {
                 browser.invalidate_git();
@@ -3765,7 +3794,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if let Some(modal)=view.folder_move.as_mut(){modal.tick();}
             if folder_task.as_ref().is_some_and(|t|t.is_finished()) {
                 let result=folder_task.take().expect("finished folder move").await;
-                while event::poll(Duration::ZERO)?{let _=event::read()?;}
+                while input_reader.poll(Duration::ZERO)?{let _=input_reader.read()?;}
                 match result {
                     Ok(FolderMoveResult::Preview(Ok(plan)))=>{
                         if let Some(modal)=view.folder_move.as_mut(){modal.busy=false;modal.message=None;modal.plan=Some(plan);}
@@ -3792,7 +3821,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if let Some(info)=view.info.as_mut(){info.refresh(&browser);info.dialog.tick().await;}
             if relink_task.as_ref().is_some_and(|t|t.is_finished()) {
                 let task=relink_task.take().expect("finished relocation");
-                while event::poll(Duration::ZERO)?{let _=event::read()?;}
+                while input_reader.poll(Duration::ZERO)?{let _=input_reader.read()?;}
                 match task.await {
                     Ok(RelinkResult::Terminals(result)) => {
                         let failure = match result {
@@ -3843,8 +3872,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 let mut ready = pending.take().expect("finished preparation");
                 view.preparing = false;
                 // An Enter queued during preparation must not approve a changed folder.
-                while event::poll(Duration::ZERO)? {
-                    let _ = event::read()?;
+                while input_reader.poll(Duration::ZERO)? {
+                    let _ = input_reader.read()?;
                 }
                 match (&mut ready.task).await {
                     Ok(Ok(command)) => {
@@ -3898,7 +3927,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             guard.mouse_capture(view.terminals.borrow().active.is_some())?;
             idle.deadline = next_age_update(&browser, &view, size.height);
             }
-            let busy = !view.terminals.borrow().is_empty() || browser.loading() || git_discovery.pending() || view.history.loading() || pending.is_some() || relink_task.is_some() || folder_task.is_some()
+            let busy = terminal_copy.is_some() || !view.terminals.borrow().is_empty() || browser.loading() || git_discovery.pending() || view.history.loading() || pending.is_some() || relink_task.is_some() || folder_task.is_some()
                 || view.relink.is_some() || view.folder_move.is_some() || view.worktree_create.is_some()
                 || view.error_dialog.as_ref().is_some_and(|dialog| dialog.copy_task.is_some())
                 || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.is_some());
@@ -3907,12 +3936,21 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if !git_discovery.pending() && !view.history.loading() {
                 if let Some(deadline) = git_watch.deadline() { wait = wait.min(deadline.saturating_duration_since(std::time::Instant::now())); }
             }
-            if event::poll(wait)? {
+            guard.enhanced(input_reader.enhanced())?;
+            if let Err(error) = view.terminals.borrow_mut().sync_focus(outer_focused && view.terminal_focused()) { view.message = Some(error.to_string()); }
+            if view.terminals.borrow().input_backlogged() {tokio::time::sleep(wait).await;}
+            else if input_reader.poll(wait)? {
                 idle.wake();
-                let incoming=event::read()?;
+                let packet=input_reader.read()?;
+                let incoming=packet.event;
+                if matches!(incoming, Event::FocusGained | Event::FocusLost) {
+                    outer_focused = matches!(incoming, Event::FocusGained);
+                    continue;
+                }
                 if let Event::Mouse(mouse) = &incoming {
                     if !view.modal_open() {
-                        if let Err(error) = view.terminals.borrow_mut().wheel(*mouse) {
+                        if matches!(mouse.kind,crossterm::event::MouseEventKind::Down(_)) && view.terminals.borrow().visible && view.terminals.borrow().area.contains((mouse.column,mouse.row).into()) {view.focus=1;view.git_focus=false;}
+                        if let Err(error) = view.terminals.borrow_mut().mouse(*mouse) {
                             view.message = Some(error.to_string());
                         }
                     }
@@ -3921,7 +3959,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 let previous_terminal = view.terminals.borrow().active;
                 let terminal_overlay = view.terminals.borrow().has_overlay();
                 let terminal_input = if terminal_overlay || view.terminal_focused() {
-                    view.terminals.borrow_mut().input(&incoming)
+                    view.terminals.borrow_mut().input_rich(&incoming, packet.key.as_ref())
                 } else { Ok(crate::inline_terminal::Input::Pass) };
                 match terminal_input {
                     Ok(crate::inline_terminal::Input::Quit) => break,
@@ -3949,8 +3987,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     if was_help && !view.help && key.code == KeyCode::Enter {
                         // An activation must not also accept a newly opened modal or
                         // resume the underlying session through queued Enter repeats.
-                        while event::poll(Duration::ZERO)? {
-                            let _ = event::read()?;
+                        while input_reader.poll(Duration::ZERO)? {
+                            let _ = input_reader.read()?;
                         }
                     }
                     match action {
@@ -3992,7 +4030,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             }));
                         },
                         Action::CloseInformation => {
-                            while event::poll(Duration::ZERO)? { let _ = event::read()?; }
+                            while input_reader.poll(Duration::ZERO)? { let _ = input_reader.read()?; }
                         },
                         Action::CopyInformation => {
                             if let Some(info)=view.info.as_mut(){ info.dialog.start_copy(); }
@@ -5416,6 +5454,10 @@ mod cleanup_tests {
                 mouse: false,
             };
             guard.activate()?;
+            guard.enhanced(true)?;
+            guard.suspend()?;
+            guard.activate()?;
+            guard.enhanced(true)?;
             if std::env::var("TRACR_TEST_CLEANUP").as_deref() == Ok("panic") {
                 panic!("simulated failure after terminal activation");
             }

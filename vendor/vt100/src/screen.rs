@@ -138,6 +138,29 @@ impl Screen {
         self.grid_mut().set_scrollback(rows);
     }
 
+    /// Absolute index of the oldest retained row.
+    pub fn history_start(&self) -> u64 {
+        self.grid().history_start()
+    }
+    /// Exclusive absolute index of the last live row.
+    pub fn history_end(&self) -> u64 {
+        self.grid().history_end()
+    }
+    /// Absolute index of the first row in the current viewport.
+    pub fn viewport_start(&self) -> u64 {
+        self.grid().viewport_start()
+    }
+    /// Read a cell in retained history without changing the viewport.
+    pub fn history_cell(&self, line: u64, col: u16) -> Option<&crate::cell::Cell> {
+        self.grid().history_row(line)?.get(col)
+    }
+    /// Whether a retained row soft-wraps into its successor.
+    pub fn history_wrapped(&self, line: u64) -> bool {
+        self.grid()
+            .history_row(line)
+            .is_some_and(crate::row::Row::wrapped)
+    }
+
     /// Returns the text contents of the terminal.
     ///
     /// This will not include any formatting information, and will be in plain

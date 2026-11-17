@@ -9,6 +9,9 @@ for mode in ['error', 'panic']:
     try:
         terminal.wait(lambda: terminal.child.poll() is not None)
         assert terminal.child.returncode == 0, terminal.text()
+        assert terminal.output.count(b"\x1b[>31u") == 2
+        assert terminal.output.count(b"\x1b[<u") == 2
+        assert terminal.output.rfind(b"\x1b[<u") < terminal.output.rfind(b"\x1b[?1049l")
         assert termios.tcgetattr(terminal.slave) == terminal.original
     finally:
         terminal.close()

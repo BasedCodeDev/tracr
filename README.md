@@ -394,6 +394,21 @@ indicator appears while viewing older output. CLIs that request mouse reporting
 receive wheel events themselves; their alternate-screen behavior is respected.
 Tracr dialogs block scrolling into the terminal behind them.
 
+Keyboard input preserves modifiers and negotiates the child application's keyboard
+protocol, including Ctrl+Backspace, modified navigation/function keys, and
+press/repeat/release events. Legacy terminals retain their normal byte mappings;
+keys intercepted by the desktop or outer terminal cannot reach Tracr. Each running
+session keeps independent keyboard, paste, focus, and mouse modes.
+
+Drag to select terminal text, double-click a word, or triple-click a wrapped logical
+line. Hold **Shift** while dragging to select locally when the child captures the
+mouse. Dragging past the top or bottom scrolls the selection through retained history.
+**Alt+C** copies a selection; **Ctrl+Shift+C** also works if the outer terminal
+forwards it. Copying is explicit and uses the desktop clipboard; **Ctrl+C** continues
+to interrupt the child. Selections stay with their folder's terminal, but clear when
+you type, resize, reset the screen, or the selected text changes or leaves history.
+
+
 Each folder remembers its Sessions panel for the current Tracr run. Navigating to
 another folder shows that folder's session list or its last displayed terminal;
 returning restores the same running process inline without changing keyboard focus.

@@ -13,6 +13,7 @@ pub struct Grid {
     scrollback: std::collections::VecDeque<crate::row::Row>,
     scrollback_len: usize,
     scrollback_offset: usize,
+    scrolled: u64,
 }
 
 impl Grid {
@@ -29,6 +30,7 @@ impl Grid {
             scrollback: std::collections::VecDeque::new(),
             scrollback_len,
             scrollback_offset: 0,
+            scrolled: 0,
         }
     }
 
@@ -173,6 +175,23 @@ impl Grid {
             .and_then(|r| r.get_mut(pos.col))
     }
 
+    pub fn history_start(&self) -> u64 {
+        self.scrolled.saturating_sub(self.scrollback.len() as u64)
+    }
+    pub fn history_end(&self) -> u64 {
+        self.scrolled + self.rows.len() as u64
+    }
+    pub fn viewport_start(&self) -> u64 {
+        self.scrolled.saturating_sub(self.scrollback_offset as u64)
+    }
+    pub fn history_row(&self, line: u64) -> Option<&crate::row::Row> {
+        if line < self.scrolled {
+            self.scrollback
+                .get(usize::try_from(line.checked_sub(self.history_start())?).ok()?)
+        } else {
+            self.rows.get(usize::try_from(line - self.scrolled).ok()?)
+        }
+    }
     pub fn scrollback_len(&self) -> usize {
         self.scrollback_len
     }
@@ -550,6 +569,7 @@ impl Grid {
                 .insert(usize::from(self.scroll_bottom) + 1, self.new_row());
             let removed = self.rows.remove(usize::from(self.scroll_top));
             if self.scrollback_len > 0 && self.scroll_top == 0 {
+                self.scrolled += 1;
                 self.scrollback.push_back(removed);
                 while self.scrollback.len() > self.scrollback_len {
                     self.scrollback.pop_front();

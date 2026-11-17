@@ -56,3 +56,7 @@ pub mod terminal_recovery;
 pub mod worktree_status;
 
 pub mod inline_terminal;
+
+pub mod terminal_input;
+
+mod terminal_selection;
