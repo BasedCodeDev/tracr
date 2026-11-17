@@ -1823,7 +1823,11 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             PaneUp,
             "Navigation",
             "Alt+Up",
-            "Focus previous upper pane",
+            if view.folders_hidden {
+                "Focus Sessions"
+            } else {
+                "Focus previous upper pane"
+            },
             None,
         ),
     };
@@ -3489,7 +3493,12 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
         Command::Refresh => return Action::Refresh,
         Command::Archives => browser.include_archived = !browser.include_archived,
-        Command::PaneUp => view.git_focus = false,
+        Command::PaneUp => {
+            if view.git_focus && view.folders_hidden {
+                view.focus = 1;
+            }
+            view.git_focus = false;
+        }
         Command::PaneDown => {
             if !view.git_focus && view.history.present() {
                 view.git_focus = true;
@@ -5071,6 +5080,58 @@ mod cleanup_tests {
             assert_eq!((view.focus, view.git_focus), (1, false));
             handle_key(&mut browser, &mut view, key);
             assert!(!view.terminals.borrow().fullscreen);
+        }
+    }
+
+    #[tokio::test]
+    async fn git_pane_up_preserves_collapsed_folders() {
+        let mut browser = Browser::new(vec![]);
+        browser.open_folder("/synthetic/repo/child".into());
+        let folder = browser.folder.clone();
+        let selected = browser.selected.clone();
+        let expanded = browser.expanded.clone();
+        for folders_hidden in [false, true] {
+            for upper in [0, 1] {
+                for git_hidden in [false, true] {
+                    for via_menu in [false, true] {
+                        let mut view = View {
+                            focus: upper,
+                            git_focus: true,
+                            folders_hidden,
+                            git_hidden,
+                            ..View::default()
+                        };
+                        view.history
+                            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+                            .await;
+                        if via_menu {
+                            open_help(&browser, &mut view);
+                            let entries = menu_entries(&browser, &view);
+                            view.help_selected = entries
+                                .iter()
+                                .position(|e| e.command == Command::PaneUp)
+                                .unwrap();
+                            if folders_hidden {
+                                assert_eq!(entries[view.help_selected].label, "Focus Sessions");
+                            }
+                            press(&mut browser, &mut view, KeyCode::Enter);
+                        } else {
+                            handle_key(
+                                &mut browser,
+                                &mut view,
+                                KeyEvent::new(KeyCode::Up, KeyModifiers::ALT),
+                            );
+                        }
+                        assert_eq!(view.context(), if folders_hidden { 1 } else { upper });
+                        assert_eq!(view.folders_hidden, folders_hidden);
+                        assert_eq!(view.git_hidden, git_hidden);
+                        assert_eq!(browser.folder, folder);
+                        assert_eq!(browser.selected, selected);
+                        assert_eq!(browser.expanded, expanded);
+                        assert!(!view.help);
+                    }
+                }
+            }
         }
     }
 

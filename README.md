@@ -231,11 +231,12 @@ when Folders is collapsed: its two-column strip sits beside Sessions.
   Folder selection and expanded tree nodes are preserved. Hidden folder actions
   are disabled; pane navigation, help, refresh, and quit remain available.
   Leaving preserves the collapsed state; returning through pane navigation
-  expands Folders. This state lasts for the current run.
+  expands Folders, except Alt+Up from Git favors Sessions while Folders is collapsed.
+  This state lasts for the current run.
 - Alt+Left focuses Folders; Alt+Right focuses Sessions, including from the bottom
   Git Worktrees pane. Alt+Down focuses Git Worktrees and expands it if collapsed;
-  Alt+Up returns to the last focused
-  upper pane. Directions do not wrap. These shortcuts do nothing during dialogs,
+  Alt+Up returns to the last focused upper pane, or to Sessions if Folders is
+  collapsed, leaving Folders collapsed. Directions do not wrap. These shortcuts do nothing during dialogs,
   search, or resume preparation; Alt+Down also does nothing without a Git pane.
 - Tab cycles Folders → Sessions → Git → Folders; Shift-Tab reverses the order.
   Without a Git panel, both keys switch between Folders and Sessions. Entering
