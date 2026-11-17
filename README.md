@@ -379,11 +379,11 @@ The open-terminals picker uses the same shortcuts when reattaching a running ter
 Once a terminal is displayed, **Alt+F** toggles between embedded and full-screen
 from Sessions, Folders, or Git history, focusing it without restarting the process.
 The action menu also offers full-screen and embedded opening.
-**Ctrl+B** returns to the list. **Tab / Shift+Tab** cycle Tracer panes even while
-Codex is focused; these keys never reach Codex for completion or input. From
-full-screen Codex, they reveal the panes and cycle forward/backward from Sessions
-without restarting the session or changing its typed input. Tracer dialogs keep
-their own Tab navigation. **Alt+arrow keys** move panel focus in inline mode.
+**Ctrl+B** returns to the list. In embedded mode, **Tab / Shift+Tab** cycle
+Tracer panes. In full-screen mode, they reach Codex for completion, context, or
+other application actions without revealing the panels. Use **Alt+F** to return
+to embedded mode before using Tab to navigate panels. Tracer dialogs keep their
+own Tab navigation. **Alt+arrow keys** move panel focus in inline mode.
 In full-screen mode, they are forwarded to the session without revealing panels
 or leaving full-screen. Alt+Enter inside Codex is forwarded to Codex.
 In Folders, **Alt+Z** zooms into the selected folder as the tree root, hiding ancestors
@@ -431,7 +431,7 @@ Parent folders and worktrees have independent views. If a terminal exits, its
 folder returns to the session list. Choosing an open terminal from the terminal
 picker navigates to its folder.
 **Ctrl+B** backgrounds the terminal and remembers the session-list view for that folder; selecting an
-open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Tab / Shift+Tab** move focus between panels
+open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Tab / Shift+Tab** move focus between panels in embedded mode
 without backgrounding the terminal; input goes to whichever panel is focused.
 From the browser, press **g** for Open terminals (including newly started sessions).
 The navigator lists open terminals with aligned provider and status columns; use

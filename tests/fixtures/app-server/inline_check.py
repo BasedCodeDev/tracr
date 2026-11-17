@@ -88,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.wait(lambda: size()['columns'] == 240 and size()['rows'] == 80)
         terminal.wait(lambda: 'Folders' not in terminal.text() and 'Ctrl+B background' not in terminal.text())
         assert size()['pid'] == first['pid']
-        terminal.send(b'\t')
+        terminal.send(b'\x1bf\t')
         terminal.expect('Ctrl+B background')
         terminal.expect('Enter Sessions')
         terminal.wait(lambda: size()['columns'] == initial_columns)
@@ -96,8 +96,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.wait(lambda: size()['columns'] == 240 and size()['rows'] == 80)
         terminal.resize(45, 150)
         terminal.wait(lambda: size()['columns'] == 150 and size()['rows'] == 45)
-        # Shift+Tab reveals the panes and moves from Sessions to Folders.
-        terminal.send(b'\x1b[Z')
+        # Return embedded before Shift+Tab moves focus from Sessions to Folders.
+        terminal.send(b'\x1bf\x1b[Z')
         terminal.expect('Ctrl+B background')
         terminal.expect('Enter Sessions')
         terminal.expect('Ctrl+B background')

@@ -814,15 +814,15 @@ impl Manager {
             }
             return Ok(Input::Consumed);
         }
-        // Tab belongs to Tracer, including when the terminal fills the screen.
+        // Embedded terminals reserve Tab for panel navigation; fullscreen forwards it.
         if let Event::Key(key) = event {
-            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+            if !self.fullscreen
+                && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
                 && (key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT)
             {
                 if key.kind == KeyEventKind::Release {
                     return Ok(Input::Consumed);
                 }
-                self.fullscreen = false;
                 return Ok(Input::Pass);
             }
         }
@@ -2070,7 +2070,7 @@ time.sleep(60)
     }
 
     #[test]
-    fn tabs_leave_fullscreen_without_reaching_the_child() {
+    fn tabs_reach_fullscreen_child_but_navigate_when_embedded() {
         let mut manager = Manager {
             area: Rect::new(0, 0, 80, 24),
             ..Manager::default()
@@ -2085,6 +2085,7 @@ time.sleep(60)
         let active = manager.active;
         let pid = manager.sessions[0].pid;
         manager.input(&Event::Paste("draft".into())).unwrap();
+        let mut expected = b"draft".to_vec();
         for fullscreen in [false, true] {
             for (code, modifiers) in [
                 (KeyCode::Tab, KeyModifiers::NONE),
@@ -2101,13 +2102,21 @@ time.sleep(60)
                     let result = manager
                         .input(&Event::Key(KeyEvent::new_with_kind(code, modifiers, kind)))
                         .unwrap();
-                    if kind == KeyEventKind::Release {
+                    if fullscreen || kind == KeyEventKind::Release {
                         assert!(matches!(result, Input::Consumed));
-                        assert_eq!(manager.fullscreen, fullscreen);
                     } else {
                         assert!(matches!(result, Input::Pass));
-                        assert!(!manager.fullscreen);
                     }
+                    if fullscreen && kind != KeyEventKind::Release {
+                        expected.extend_from_slice(
+                            if code == KeyCode::Tab && modifiers == KeyModifiers::NONE {
+                                b"\t"
+                            } else {
+                                b"\x1b[Z"
+                            },
+                        );
+                    }
+                    assert_eq!(manager.fullscreen, fullscreen);
                     assert_eq!(manager.active, active);
                     assert_eq!(manager.sessions[0].pid, pid);
                 }
@@ -2116,12 +2125,13 @@ time.sleep(60)
         manager
             .input(&key(KeyCode::Enter, KeyModifiers::NONE))
             .unwrap();
+        expected.push(b'\r');
+        let expected = expected
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         wait(&mut manager, |m| {
-            m.sessions[0]
-                .parser
-                .screen()
-                .contents()
-                .contains("64726166740d")
+            m.sessions[0].parser.screen().contents().contains(&expected)
         });
         for modifiers in [KeyModifiers::CONTROL, KeyModifiers::ALT] {
             manager.fullscreen = true;
