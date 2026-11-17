@@ -609,7 +609,7 @@ fn session_metadata(
 fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String, String, u16) {
     if view.terminal_focused() && view.terminals.borrow().active.is_some() {
         return (
-            "Ctrl+B Background · Ctrl+C Interrupt Codex".into(),
+            "Ctrl+B Background · Alt+F Full-screen · Ctrl+C Interrupt Codex".into(),
             "Keyboard input goes to the terminal".into(),
             view.message.clone().unwrap_or_default(),
             2,
@@ -786,6 +786,13 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         return;
     }
     let area = frame.area();
+    if view.terminals.borrow().fullscreen
+        && view.terminals.borrow().active.is_some()
+        && !view.modal_open()
+    {
+        view.terminals.borrow_mut().draw(frame, area, true);
+        return;
+    }
     if area.width < 12 || area.height < 4 {
         frame.render_widget(Paragraph::new("tracr: enlarge terminal"), area);
         return;
@@ -1392,6 +1399,7 @@ enum Command {
     FolderLeft,
     FolderRight,
     Resume,
+    ResumeFullscreen,
     Info,
     Relink,
     MoveFolder,
@@ -1736,6 +1744,15 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             Some(("b Terminals", "b Terminals")),
         ));
         entries.push((CloseTerminal, "Terminals", "x", "Close terminal", None));
+        if view.context() == 1 {
+            entries.push((
+                ResumeFullscreen,
+                "Sessions",
+                "Alt+F",
+                "Open session full-screen",
+                Some(("Alt+F Full-screen", "Alt+F Full")),
+            ));
+        }
     }
     entries
         .into_iter()
@@ -1819,7 +1836,7 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
                 None
             }
         }
-        Command::Resume => {
+        Command::Resume | Command::ResumeFullscreen => {
             let session = browser
                 .visible()
                 .into_iter()
@@ -2627,6 +2644,7 @@ pub enum Action {
     Quit,
     Refresh,
     ResumeSelected,
+    ResumeSelectedFullscreen,
     CancelResume,
     CreateNew(usize),
 }
@@ -3092,6 +3110,12 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         {
             Command::Create
         }
+        KeyCode::Char('f') if key.modifiers == KeyModifiers::ALT && view.context() == 1 => {
+            if key.kind != KeyEventKind::Press {
+                return Action::Continue;
+            }
+            Command::ResumeFullscreen
+        }
         KeyCode::Enter => Command::Resume,
         _ => return Action::Continue,
     };
@@ -3353,14 +3377,18 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             view.source_picker = Some(0);
             view.source_control = 0;
         }
-        Command::Resume => {
+        Command::Resume | Command::ResumeFullscreen => {
             if selected_session(browser).is_some_and(|s| {
                 crate::domain::classify_folder(s.cwd.as_deref())
                     == crate::domain::FolderStatus::Unlinked
             }) {
                 return Action::OpenRelink;
             }
-            return Action::ResumeSelected;
+            return if command == Command::ResumeFullscreen {
+                Action::ResumeSelectedFullscreen
+            } else {
+                Action::ResumeSelected
+            };
         }
     }
     browser.reconcile(0);
@@ -3370,6 +3398,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
 struct PendingResume {
     task: tokio::task::JoinHandle<Result<crate::domain::ResumeCommand, String>>,
     observed_cwd: Option<std::path::PathBuf>,
+    fullscreen: bool,
 }
 impl Drop for PendingResume {
     fn drop(&mut self) {
@@ -3695,7 +3724,12 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             ));
                         } else {
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
+                            if ready.fullscreen {
+                                let size = terminal.size()?;
+                                view.terminals.borrow_mut().area = Rect::new(0, 0, size.width, size.height);
+                            }
                             let result = view.terminals.borrow_mut().launch(&command.launch, Some(command.session.key.clone()), command.session.title.clone());
+                            if result.is_ok() { view.terminals.borrow_mut().fullscreen = ready.fullscreen; }
                             view.focus = 1;
                             view.git_focus = false;
                             if let Err(error) = result { view.message = Some(format!("Could not resume Codex: {error}")); }
@@ -3916,8 +3950,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             view.git_focus = false;
                             if let Err(error) = result { view.message = Some(format!("Could not start session: {error}")); }
                         }
-                        Action::ResumeSelected => {
-                            if browser.selected.as_ref().is_some_and(|key| view.terminals.borrow_mut().attach(key)) { view.focus = 1; view.git_focus = false; continue; }
+                        Action::ResumeSelected | Action::ResumeSelectedFullscreen => {
+                            let fullscreen = action == Action::ResumeSelectedFullscreen;
+                            if browser.selected.as_ref().is_some_and(|key| view.terminals.borrow_mut().attach(key)) { view.terminals.borrow_mut().fullscreen = fullscreen; view.focus = 1; view.git_focus = false; continue; }
                             if let Some(session) = browser
                                 .visible()
                                 .into_iter()
@@ -3939,6 +3974,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                         view.preparing = true;
                                         view.message = None;
                                         pending = Some(PendingResume {
+                                            fullscreen,
                                             observed_cwd,
                                             task: tokio::spawn(async move {
                                                 provider.prepare_resume(&session).await

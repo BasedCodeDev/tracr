@@ -365,7 +365,10 @@ If the destination changed since it was displayed, review it and press Enter aga
 Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
-Sessions open inside the Sessions pane, with the rest of tracr still visible.
+Enter opens sessions inside the Sessions pane, with the rest of tracr still visible.
+**Alt+F** from the session list opens the session full-screen. Inside a session,
+Alt+F toggles between inline and full-screen without restarting it; **Ctrl+B** returns to the list, and **Alt+arrow keys**
+restore the panels and move focus. Alt+Enter inside Codex is forwarded to Codex.
 At 100 columns and above, Folders fits the expanded tree up to 40% of the
 window width; Sessions uses the remaining space. Narrower windows show the
 focused panel. Scrolling or changing selection does not move the divider.

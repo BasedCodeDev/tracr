@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 use std::{
     fs::{File, OpenOptions},
@@ -173,6 +173,7 @@ pub struct Manager {
     sessions: Vec<Session>,
     next_id: u64,
     pub active: Option<u64>,
+    pub fullscreen: bool,
     pub picker: bool,
     selected: usize,
     confirmation: Option<Confirmation>,
@@ -201,6 +202,7 @@ impl Manager {
     }
     pub fn attach(&mut self, key: &SessionKey) -> bool {
         if let Some(s) = self.sessions.iter().find(|s| s.key.as_ref() == Some(key)) {
+            self.fullscreen = false;
             self.active = Some(s.id);
             true
         } else {
@@ -305,6 +307,7 @@ impl Manager {
             }
         });
         self.next_id += 1;
+        self.fullscreen = false;
         self.active = Some(self.next_id);
         self.sessions.push(Session {
             id: self.next_id,
@@ -389,6 +392,7 @@ impl Manager {
                         was_active: self.active == Some(s.id),
                     });
                     if self.active == Some(s.id) {
+                        self.fullscreen = false;
                         self.active = None;
                     }
                     false
@@ -400,6 +404,7 @@ impl Manager {
                         was_active: self.active == Some(s.id),
                     });
                     if self.active == Some(s.id) {
+                        self.fullscreen = false;
                         self.active = None;
                     }
                     false
@@ -423,6 +428,7 @@ impl Manager {
         if self.is_empty() {
             true
         } else {
+            self.fullscreen = false;
             self.active = None;
             self.confirmation = Some(Confirmation::Quit);
             false
@@ -478,6 +484,7 @@ impl Manager {
                     }
                     KeyCode::Enter => {
                         if let Some(s) = self.sessions.get(self.selected) {
+                            self.fullscreen = false;
                             self.active = Some(s.id);
                             self.picker = false;
                         }
@@ -495,13 +502,23 @@ impl Manager {
         // Pane navigation belongs to tracr even while the child has input focus.
         if matches!(event, Event::Key(key) if key.modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down))
         {
+            self.fullscreen = false;
             return Ok(Input::Pass);
         }
         let Some(id) = self.active else {
             return Ok(Input::Pass);
         };
+        if matches!(event, Event::Key(key) if key.code == KeyCode::Char('f') && key.modifiers == KeyModifiers::ALT)
+        {
+            if matches!(event, Event::Key(key) if key.kind == KeyEventKind::Press) {
+                self.fullscreen = !self.fullscreen;
+            }
+            return Ok(Input::Consumed);
+        }
+
         if matches!(event, Event::Key(k) if k.kind != KeyEventKind::Release && k.code == KeyCode::Char('b') && k.modifiers.contains(KeyModifiers::CONTROL))
         {
+            self.fullscreen = false;
             self.active = None;
             return Ok(Input::Consumed);
         }
@@ -526,17 +543,28 @@ impl Manager {
     pub fn draw(&mut self, frame: &mut Frame<'_>, area: Rect, focused: bool) -> bool {
         let border = Block::default()
             .borders(Borders::ALL)
+            .border_type(if focused {
+                BorderType::Thick
+            } else {
+                BorderType::Plain
+            })
             .border_style(Style::default().fg(if focused {
                 Color::Cyan
             } else {
                 Color::DarkGray
             }))
             .title(" Codex · Ctrl+B background · Alt+arrows panels ");
-        self.area = border.inner(area);
+        self.area = if self.fullscreen {
+            area
+        } else {
+            border.inner(area)
+        };
         let Some(s) = self.sessions.iter_mut().find(|s| Some(s.id) == self.active) else {
             return false;
         };
-        frame.render_widget(border, area);
+        if !self.fullscreen {
+            frame.render_widget(border, area);
+        }
         let inner = self.area;
         if inner.width == 0 || inner.height == 0 {
             return true;
@@ -784,6 +812,7 @@ mod tests {
             ),
             (KeyCode::Esc, KeyModifiers::NONE, b"\x1b"),
             (KeyCode::Tab, KeyModifiers::NONE, b"\t"),
+            (KeyCode::Enter, KeyModifiers::ALT, b"\x1b\r"),
             (KeyCode::Up, KeyModifiers::NONE, b"\x1b[A"),
             (KeyCode::Left, KeyModifiers::CONTROL, b"\x1b[1;5D"),
             (KeyCode::Char('é'), KeyModifiers::NONE, "é".as_bytes()),
@@ -828,6 +857,26 @@ mod tests {
             m.sessions[0].parser.screen().contents().contains("READY")
         });
         let pid = manager.sessions[0].pid;
+        assert!(matches!(
+            manager
+                .input(&key(KeyCode::Char('f'), KeyModifiers::ALT))
+                .unwrap(),
+            Input::Consumed
+        ));
+        assert!(manager.fullscreen);
+        manager
+            .input(&Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char('f'),
+                KeyModifiers::ALT,
+                KeyEventKind::Repeat,
+            )))
+            .unwrap();
+        assert!(manager.fullscreen);
+        manager
+            .input(&key(KeyCode::Char('f'), KeyModifiers::ALT))
+            .unwrap();
+        assert!(!manager.fullscreen);
+        assert_eq!(manager.sessions[0].pid, pid);
         for direction in [KeyCode::Left, KeyCode::Right, KeyCode::Up, KeyCode::Down] {
             assert!(matches!(
                 manager.input(&key(direction, KeyModifiers::ALT)).unwrap(),
@@ -877,6 +926,16 @@ mod tests {
             .unwrap();
         assert_eq!(manager.sessions[0].size, (10, 28));
         assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "O");
+        assert_eq!(terminal.backend().buffer()[(10, 2)].symbol(), "┏");
+        assert_eq!(terminal.backend().buffer()[(10, 2)].fg, Color::Cyan);
+        terminal
+            .draw(|frame| {
+                manager.draw(frame, Rect::new(10, 2, 30, 12), false);
+            })
+            .unwrap();
+        assert_eq!(terminal.backend().buffer()[(10, 2)].symbol(), "┌");
+        assert_eq!(terminal.backend().buffer()[(10, 2)].fg, Color::DarkGray);
+
         assert!(!manager.request_quit());
         assert!(matches!(
             manager
@@ -904,6 +963,7 @@ mod tests {
                 "failed".into(),
             )
             .unwrap();
+        manager.fullscreen = true;
         let deadline = Instant::now() + Duration::from_secs(5);
         let notices = loop {
             let (_, notices) = manager.poll();
@@ -916,6 +976,7 @@ mod tests {
         assert!(notices[0].failed && notices[0].was_active);
         assert!(notices[0].message.contains("specific startup failure"));
         assert!(manager.is_empty());
+        assert!(!manager.fullscreen);
     }
 
     #[test]
