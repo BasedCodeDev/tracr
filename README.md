@@ -218,8 +218,11 @@ retries and refreshes the data. Filesystems that silently omit notifications may
 require those refresh actions. Polling fallback is not implemented yet.
 
 The folder and session panes show partial results while loading.
-Terminals narrower than 100 columns show the focused pane full-width, except
-when Folders is collapsed: its two-column strip sits beside Sessions.
+Terminals shorter than 24 rows show only the focused pane above the footer,
+regardless of width. Tab cycles through Folders, Sessions, and Git (when available);
+Shift+Tab cycles backwards. At 24 rows or taller, terminals narrower than 100
+columns show the focused browser pane full-width, except when Folders is
+collapsed: its two-column strip sits beside Sessions. Git appears below the browser.
 
 - Up / Down or `k/j`: select the previous / next item. In Folders, Right / `l`
   expands a collapsed folder without changing selection; when already expanded,

@@ -303,10 +303,30 @@ fn selection_style(focused: bool) -> Style {
     })
 }
 
-// Shared by rendering and history scheduling, including short-terminal fallback.
-fn git_regions(area: Rect, view: &View, present: bool) -> (Rect, Option<Rect>, bool) {
+const SINGLE_PANE_HEIGHT: u16 = 24;
+
+// Shared by rendering and history scheduling. Use total terminal height so a
+// footer message cannot change the layout mode.
+fn git_regions(
+    area: Rect,
+    terminal_height: u16,
+    view: &View,
+    present: bool,
+) -> (Rect, Option<Rect>, bool) {
     if !present || area.width < 12 || area.height < 2 {
         return (area, None, false);
+    }
+    if terminal_height < SINGLE_PANE_HEIGHT {
+        if view.context() != 2 {
+            return (area, None, false);
+        }
+        let expanded = !view.git_hidden && area.height >= 4;
+        let git_area = if expanded {
+            area
+        } else {
+            Rect::new(area.x, area.y, area.width, 1)
+        };
+        return (Rect::default(), Some(git_area), expanded);
     }
     let expanded = !view.git_hidden && area.height >= 9;
     let constraints = if expanded {
@@ -860,7 +880,8 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(footer_height)])
         .split(area);
-    let (content, git_area, expanded) = git_regions(layout[0], view, view.history.present());
+    let (content, git_area, expanded) =
+        git_regions(layout[0], area.height, view, view.history.present());
     if let Some(git_area) = git_area {
         if expanded {
             let mut presentation = view.git_sessions.borrow_mut();
@@ -975,7 +996,10 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             );
         }
     }
-    if view.folders_hidden {
+    let single_pane = area.height < SINGLE_PANE_HEIGHT;
+    if single_pane && view.context() == 2 {
+        // Git already occupies the content area.
+    } else if view.folders_hidden && (!single_pane || view.context() == 0) {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(2), Constraint::Min(0)])
@@ -998,8 +1022,10 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 }),
             panes[0],
         );
-        draw_pane(frame, panes[1], 1, browser, view);
-    } else if area.width >= 100 {
+        if !single_pane {
+            draw_pane(frame, panes[1], 1, browser, view);
+        }
+    } else if !single_pane && area.width >= 100 {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -3821,8 +3847,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let area = Rect::new(0, 0, size.width, size.height);
             let (_, _, _, footer_height) = browser_footer(area, &browser, &view);
             let content_height = size.height.saturating_sub(footer_height);
-            view.git_size_limited = content_height < 9 || size.width < 12;
-            let (_, git_area, graph_visible) = git_regions(Rect::new(0, 0, size.width, content_height), &view, target.is_some());
+            view.git_size_limited = content_height < if size.height < SINGLE_PANE_HEIGHT { 4 } else { 9 } || size.width < 12;
+            let (_, git_area, graph_visible) = git_regions(Rect::new(0, 0, size.width, content_height), size.height, &view, target.is_some());
             let page = usize::from(git_area.map_or(0, |area| area.height.saturating_sub(3))).max(1);
             git_watch.context(target.clone(), browser.git_generation, graph_visible);
             view.history.tick(target, browser.git_generation, graph_visible, page).await;
@@ -5606,6 +5632,104 @@ mod cleanup_tests {
         assert_eq!(terminal.backend().buffer()[(79, 0)].symbol(), "┓");
     }
 
+    #[tokio::test]
+    async fn short_terminals_show_only_the_focused_pane() {
+        let mut browser = Browser::new(vec![]);
+        browser.open_folder("/synthetic/repo/child".into());
+        let mut view = View::default();
+        view.history
+            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+            .await;
+        let selected = browser.selected.clone();
+        let folder = browser.folder.clone();
+        for width in [80, 120] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, 24)).unwrap();
+            for height in [22, 23, 24, 23] {
+                for context in 0..3 {
+                    view.focus = context.min(1);
+                    view.git_focus = context == 2;
+                    terminal.backend_mut().resize(width, height);
+                    terminal.resize(Rect::new(0, 0, width, height)).unwrap();
+                    terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+                    let (_, _, _, footer) =
+                        browser_footer(Rect::new(0, 0, width, height), &browser, &view);
+                    let text: String = terminal
+                        .backend()
+                        .buffer()
+                        .content
+                        .iter()
+                        .take(usize::from(width * (height - footer)))
+                        .map(|cell| cell.symbol())
+                        .collect();
+                    assert_eq!(text.contains("Git Worktrees"), height >= 24 || context == 2);
+                    if height < 24 {
+                        assert_eq!(text.contains("Folders"), context == 0);
+                        assert_eq!(text.contains("Sessions"), context == 1);
+                        assert_eq!(terminal.backend().buffer()[(width - 1, 0)].symbol(), "┓");
+                    }
+                    assert_eq!(view.context(), context);
+                    assert_eq!(browser.selected, selected);
+                    assert_eq!(browser.folder, folder);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn short_terminal_hides_collapsed_rails_and_cycles_to_expanded_panes() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View {
+            folders_hidden: true,
+            git_hidden: true,
+            focus: 1,
+            ..View::default()
+        };
+        view.history
+            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+            .await;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 22)).unwrap();
+        for expected in [1, 2, 0] {
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            assert_eq!(view.context(), expected);
+            assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "┏");
+            assert_eq!(terminal.backend().buffer()[(119, 0)].symbol(), "┓");
+            press(&mut browser, &mut view, KeyCode::Tab);
+        }
+        assert!(!view.folders_hidden);
+        assert!(!view.git_hidden);
+        press(&mut browser, &mut view, KeyCode::BackTab);
+        assert_eq!(view.context(), 0);
+        press(&mut browser, &mut view, KeyCode::Char('b'));
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        let (_, _, _, footer) = browser_footer(Rect::new(0, 0, 120, 22), &browser, &view);
+        for y in 0..22 - footer {
+            assert_eq!(terminal.backend().buffer()[(0, y)].symbol(), "┃");
+            for x in 1..120 {
+                assert_eq!(terminal.backend().buffer()[(x, y)].symbol(), " ");
+            }
+        }
+    }
+
+    #[test]
+    fn short_git_geometry_matches_visibility_and_page_capacity() {
+        let mut view = View::default();
+        let area = Rect::new(0, 0, 80, 20);
+        assert_eq!(git_regions(area, 23, &view, true), (area, None, false));
+        view.git_focus = true;
+        assert_eq!(
+            git_regions(area, 23, &view, true),
+            (Rect::default(), Some(area), true)
+        );
+        assert!(git_regions(Rect::new(0, 0, 80, 4), 6, &view, true).2);
+        assert!(!git_regions(Rect::new(0, 0, 80, 3), 5, &view, true).2);
+        view.git_hidden = true;
+        let (_, git, visible) = git_regions(area, 23, &view, true);
+        assert_eq!(git.unwrap().height, 1);
+        assert!(!visible);
+        assert!(git_regions(area, 23, &view, false).1.is_none());
+    }
+
     #[test]
     fn folder_width_fits_display_columns_and_caps_long_labels() {
         assert_eq!(folder_pane_width(160, &[]), 9);
@@ -5637,16 +5761,16 @@ mod cleanup_tests {
                 .unwrap()
                 + 1
         };
-        assert_eq!(divider(&browser, &view, 99, 20), 99);
-        assert_eq!(divider(&browser, &view, 100, 20), 40);
-        assert_eq!(divider(&browser, &view, 160, 20), 64);
+        assert_eq!(divider(&browser, &view, 99, 24), 99);
+        assert_eq!(divider(&browser, &view, 100, 24), 40);
+        assert_eq!(divider(&browser, &view, 160, 24), 64);
         browser.folder = FolderFilter::Unlinked;
-        assert_eq!(divider(&browser, &view, 160, 6), 64);
+        assert_eq!(divider(&browser, &view, 160, 6), 160);
         browser.expanded.remove(std::path::Path::new("/parent"));
-        let collapsed = divider(&browser, &view, 160, 20);
+        let collapsed = divider(&browser, &view, 160, 24);
         assert!(collapsed < 64);
         browser.expanded.insert("/parent".into());
-        assert_eq!(divider(&browser, &view, 160, 20), 64);
+        assert_eq!(divider(&browser, &view, 160, 24), 64);
         view.focus = 1;
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(99, 20)).unwrap();
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
@@ -5701,13 +5825,13 @@ mod cleanup_tests {
             view.git_focus = true;
         }
         let area = Rect::new(0, 0, 80, 20);
-        assert_eq!(git_regions(area, &view, true).1.unwrap().height, 1);
-        assert!(!git_regions(area, &view, true).2);
+        assert_eq!(git_regions(area, 24, &view, true).1.unwrap().height, 1);
+        assert!(!git_regions(area, 24, &view, true).2);
         view.git_hidden = false;
-        assert!(git_regions(area, &view, true).2);
-        assert!(!git_regions(Rect::new(0, 0, 80, 5), &view, true).2);
+        assert!(git_regions(area, 24, &view, true).2);
+        assert!(!git_regions(Rect::new(0, 0, 80, 5), 24, &view, true).2);
         assert!(!view.git_hidden);
-        assert!(git_regions(area, &view, false).1.is_none());
+        assert!(git_regions(area, 24, &view, false).1.is_none());
         assert!(selection_style(false).add_modifier.contains(Modifier::DIM));
     }
 

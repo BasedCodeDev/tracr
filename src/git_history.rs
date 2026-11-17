@@ -2012,8 +2012,15 @@ mod tests {
                             && cell.modifier.contains(Modifier::BOLD)
                     })
                     .collect();
-                assert_eq!(arrows.iter().any(|(_, c)| c.symbol() == "↑"), expected.0);
-                assert_eq!(arrows.iter().any(|(_, c)| c.symbol() == "↓"), expected.1);
+                let visible = height >= 24 || focused;
+                assert_eq!(
+                    arrows.iter().any(|(_, c)| c.symbol() == "↑"),
+                    visible && expected.0
+                );
+                assert_eq!(
+                    arrows.iter().any(|(_, c)| c.symbol() == "↓"),
+                    visible && expected.1
+                );
                 for (index, cell) in arrows {
                     assert_eq!(index % usize::from(width), usize::from(width - 3));
                     assert_eq!(cell.fg, Color::Cyan);
