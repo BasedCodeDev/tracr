@@ -369,7 +369,7 @@ async fn enter_respects_focus_search_and_pending_preparation() {
     view.focus = 1;
     assert_eq!(
         handle_key(&mut browser, &mut view, enter),
-        Action::ResumeSelected
+        Action::ResumeSelectedFullscreen
     );
     view.editing = true;
     assert_eq!(handle_key(&mut browser, &mut view, enter), Action::Continue);
@@ -782,7 +782,7 @@ fn empty_folder_creation_picker_and_validation() {
     browser.begin_refresh();
     assert_eq!(
         handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
-        Action::ResumeSelected
+        Action::ResumeSelectedFullscreen
     );
 }
 
@@ -950,7 +950,7 @@ async fn unlinked_rows_use_explicit_undimmed_labels_and_footer_preserves_primary
                     .find(|&row| line(row).contains(if width < 15 { "? · q" } else { "? Help" }))
                     .unwrap();
                 assert!(
-                    line(upper + 1).contains("Enter Resume"),
+                    line(upper + 1).contains("Enter Full"),
                     "{width}: {footer}"
                 );
                 assert!(line(upper + 1).ends_with(if width >= 80 {
@@ -960,7 +960,7 @@ async fn unlinked_rows_use_explicit_undimmed_labels_and_footer_preserves_primary
                 } else if width >= 24 {
                     "n New"
                 } else {
-                    "Enter Resume"
+                    "Enter Full"
                 }));
                 assert!(footer.contains("Test message"));
                 let mut labels = 0;
@@ -1130,7 +1130,7 @@ async fn footer_and_menu_follow_focus_with_stable_shared_controls() {
                     assert!(text.contains("Move folder"));
                     assert!(
                         !text.contains("Relink session")
-                            && !text.contains("Resume selected session")
+                            && !text.contains("Open session full-screen")
                             && !text.contains("Session information")
                     );
                 } else {

@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-scroll-') as directory:
     t = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(fake), str(listed)])
     try:
         t.inspect('ID: first')
-        t.send(b'\r')
+        t.send(b'\x1bf')
         t.expect('COMPOSER')
         t.expect('HISTORY-0199')
         t.wait(lambda: b'\x1b[?1006h' in t.output)

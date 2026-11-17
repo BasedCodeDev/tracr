@@ -1482,7 +1482,7 @@ enum Command {
     FolderLeft,
     FolderRight,
     Resume,
-    ResumeFullscreen,
+    ResumeInline,
     ToggleTerminalFullscreen,
     Info,
     Relink,
@@ -1693,8 +1693,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 Resume,
                 "Sessions",
                 "Enter",
-                "Resume selected session",
-                Some(("Enter Resume", "Enter Resume")),
+                "Open session full-screen",
+                Some(("Enter Full-screen", "Enter Full")),
             )
         });
         if !browser.visible().is_empty() || !can_create(browser) {
@@ -1881,11 +1881,11 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             ));
         } else if view.context() == 1 {
             entries.push((
-                ResumeFullscreen,
+                ResumeInline,
                 "Sessions",
-                "",
-                "Open session full-screen",
-                None,
+                "Alt+F",
+                "Open session embedded",
+                Some(("Alt+F Embedded", "Alt+F Embed")),
             ));
         }
     }
@@ -1999,7 +1999,7 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
                 None
             }
         }
-        Command::Resume | Command::ResumeFullscreen => {
+        Command::Resume | Command::ResumeInline => {
             let session = browser
                 .visible()
                 .into_iter()
@@ -2487,7 +2487,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                             area.width.saturating_sub(4 + right_padding),
                         ),
                         if view.terminals.borrow().owns(&s.key) {
-                            Line::from("Open here · Enter attach · x Close terminal")
+                            Line::from("Open here · Enter Full-screen · Alt+F Embedded · x Close terminal")
                         } else if browser.specs.iter().any(|spec| matches!(spec, crate::browser::SourceSpec::Codex { source, .. } if source.id == s.key.source_id && crate::inline_terminal::open_elsewhere(&source.home, &s.key))) {
                             Line::from("Open in another tracr")
                         } else {
@@ -2932,7 +2932,7 @@ fn resume_hint(browser: &Browser, session: &crate::domain::SessionSummary) -> St
         return relink_unavailable(browser)
             .unwrap_or_else(|| "Folder missing — Enter or R to relink.".into());
     }
-    "Enter to resume in this terminal; the destination is checked again before launch.".into()
+    "Enter opens full-screen · Alt+F opens embedded; the destination is checked again before launch.".into()
 }
 
 pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Action {
@@ -3337,6 +3337,12 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
     let previous_context = view.context();
     match command {
         Command::ToggleTerminalFullscreen => {
+            if view.terminals.borrow().active.is_none()
+                && view.context() == 1
+                && selected_session(browser).is_some()
+            {
+                return execute_command(Command::ResumeInline, browser, view);
+            }
             let mut terminals = view.terminals.borrow_mut();
             if terminals.active.is_some() {
                 terminals.fullscreen = !terminals.fullscreen;
@@ -3604,17 +3610,17 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             view.source_picker = Some(0);
             view.source_control = 0;
         }
-        Command::Resume | Command::ResumeFullscreen => {
+        Command::Resume | Command::ResumeInline => {
             if selected_session(browser).is_some_and(|s| {
                 crate::domain::classify_folder(s.cwd.as_deref())
                     == crate::domain::FolderStatus::Unlinked
             }) {
                 return Action::OpenRelink;
             }
-            return if command == Command::ResumeFullscreen {
-                Action::ResumeSelectedFullscreen
-            } else {
+            return if command == Command::ResumeInline {
                 Action::ResumeSelected
+            } else {
+                Action::ResumeSelectedFullscreen
             };
         }
     }
@@ -4049,9 +4055,14 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     Ok(crate::inline_terminal::Input::Quit) => break,
                     Ok(crate::inline_terminal::Input::Consumed) => {
                         let active = view.terminals.borrow().active;
-                        if previous_terminal != active || (terminal_overlay && active.is_some() && matches!(&incoming, Event::Key(key) if key.code == KeyCode::Enter)) {
-                            if let Some(folder) = view.terminals.borrow().active_folder() {
-                                browser.open_folder(folder);
+                        if previous_terminal != active || (terminal_overlay && active.is_some() && !view.terminals.borrow().has_overlay() && matches!(&incoming, Event::Key(key) if key.kind == KeyEventKind::Press && (key.code == KeyCode::Enter || key.code == KeyCode::Char('f') && key.modifiers == KeyModifiers::ALT))) {
+                            let folder = view.terminals.borrow().active_folder();
+                            if let Some(folder) = folder {
+                                browser.open_folder(folder.clone());
+                                let mut terminals = view.terminals.borrow_mut();
+                                let fullscreen = terminals.fullscreen;
+                                terminals.sync_folder(Some(&folder));
+                                terminals.fullscreen = fullscreen;
                             }
                             view.focus = 1; view.git_focus = false;
                         }
@@ -4482,7 +4493,7 @@ mod cleanup_tests {
                     &mut view,
                     KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
                 ),
-                Action::ResumeSelected
+                Action::ResumeSelectedFullscreen
             ));
             assert_eq!(browser.selected, Some(key));
             assert_eq!(browser.folder, FolderFilter::Path(cwd.path().into()));
@@ -5035,6 +5046,61 @@ mod cleanup_tests {
                 .unwrap()
                 .contains("Cannot inspect folder-move journal")
         );
+    }
+
+    #[tokio::test]
+    async fn session_opening_shortcuts_choose_mode_and_ignore_repeats() {
+        use crate::git_sessions::tests::{add_session, fixture};
+        let cwd = tempfile::tempdir().unwrap();
+        let (mut browser, _) = fixture().await;
+        let session = add_session(
+            &mut browser,
+            "Open mode",
+            cwd.path().to_str().unwrap(),
+            "/worktree",
+            "/repo/.git",
+            crate::domain::RuntimeStatus::Idle,
+            1,
+        );
+        browser.open_folder(cwd.path().into());
+        browser.selected = Some(session);
+        let mut view = View {
+            focus: 1,
+            ..View::default()
+        };
+        for (code, modifiers, fullscreen) in [
+            (KeyCode::Enter, KeyModifiers::NONE, true),
+            (KeyCode::Char('f'), KeyModifiers::ALT, false),
+        ] {
+            let key = KeyEvent::new(code, modifiers);
+            let action = handle_key(&mut browser, &mut view, key);
+            assert!(if fullscreen {
+                matches!(action, Action::ResumeSelectedFullscreen)
+            } else {
+                matches!(action, Action::ResumeSelected)
+            });
+            assert!(view.terminals.borrow().active.is_none());
+            for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+                assert!(matches!(
+                    handle_key(&mut browser, &mut view, KeyEvent { kind, ..key }),
+                    Action::Continue
+                ));
+            }
+            view.preparing = true;
+            assert!(matches!(
+                handle_key(&mut browser, &mut view, key),
+                Action::Continue
+            ));
+            view.preparing = false;
+        }
+        assert!(matches!(
+            execute_command(Command::Resume, &mut browser, &mut view),
+            Action::ResumeSelectedFullscreen
+        ));
+        assert!(matches!(
+            execute_command(Command::ResumeInline, &mut browser, &mut view),
+            Action::ResumeSelected
+        ));
     }
 
     #[test]
@@ -5895,7 +5961,10 @@ mod graph_viewport_tests {
         let spans = vec![
             Span::styled("| * ", Style::default().fg(Color::Cyan)),
             Span::raw("abcdef0 "),
-            Span::styled("[main] ", Style::default().fg(crate::git_render::BRANCH_COLOR)),
+            Span::styled(
+                "[main] ",
+                Style::default().fg(crate::git_render::BRANCH_COLOR),
+            ),
             Span::styled("[remote: origin/main] ", Style::default().fg(Color::Cyan)),
             Span::styled("[tag: v1] ", Style::default().fg(Color::Yellow)),
             Span::raw("long subject 界界"),
@@ -5926,7 +5995,8 @@ mod graph_viewport_tests {
                     buffer
                         .content
                         .iter()
-                        .any(|cell| cell.symbol() == "m" && cell.fg == crate::git_render::BRANCH_COLOR)
+                        .any(|cell| cell.symbol() == "m"
+                            && cell.fg == crate::git_render::BRANCH_COLOR)
                 );
             }
             if offset == 20 {

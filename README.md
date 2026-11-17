@@ -373,11 +373,12 @@ If the destination changed since it was displayed, review it and press Enter aga
 Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
-Enter opens sessions inside the Sessions pane, with the rest of tracr still visible.
-**Alt+F** toggles the displayed terminal between inline and full-screen from
-Sessions, Folders, or Git history, focusing the terminal without restarting it.
-It does nothing while the session selector is displayed. Enter opens a session;
-then Alt+F can maximize it. The action menu also offers Open session full-screen.
+Enter opens the selected session full-screen. **Alt+F** on a highlighted session
+opens it embedded inside the Sessions pane instead, keeping the other panels visible.
+The open-terminals picker uses the same shortcuts when reattaching a running terminal.
+Once a terminal is displayed, **Alt+F** toggles between embedded and full-screen
+from Sessions, Folders, or Git history, focusing it without restarting the process.
+The action menu also offers full-screen and embedded opening.
 **Ctrl+B** returns to the list. **Tab / Shift+Tab** cycle Tracer panes even while
 Codex is focused; these keys never reach Codex for completion or input. From
 full-screen Codex, they reveal the panes and cycle forward/backward from Sessions

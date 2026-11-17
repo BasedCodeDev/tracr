@@ -793,9 +793,14 @@ impl Manager {
                         self.selected =
                             (self.selected + 1).min(self.sessions.len().saturating_sub(1))
                     }
-                    KeyCode::Enter => {
+                    KeyCode::Enter | KeyCode::Char('f')
+                        if key.kind == KeyEventKind::Press
+                            && (key.code == KeyCode::Enter
+                                || key.modifiers == KeyModifiers::ALT) =>
+                    {
                         if let Some(s) = self.sessions.get(self.selected) {
                             self.activate(s.id);
+                            self.fullscreen = key.code == KeyCode::Enter;
                             self.picker = false;
                         }
                     }
@@ -1084,8 +1089,10 @@ impl Manager {
         }
         if inner.height > 0 {
             frame.render_widget(
-                Paragraph::new("↑/↓ j/k Select · Enter Attach · x Close · g/Esc Back")
-                    .style(Style::default().fg(Color::DarkGray)),
+                Paragraph::new(
+                    "↑/↓ j/k Select · Enter Full-screen · Alt+F Embedded · x Close · g/Esc Back",
+                )
+                .style(Style::default().fg(Color::DarkGray)),
                 Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
             );
         }
@@ -1658,6 +1665,48 @@ time.sleep(60)
             .unwrap();
         assert_eq!(receiver.recv_timeout(Duration::from_secs(1)).unwrap(), [3]);
         assert!(manager.sessions[0].selection.is_none());
+    }
+
+    #[test]
+    fn picker_opens_fullscreen_or_embedded_without_restarting() {
+        let mut manager = Manager::default();
+        manager
+            .launch(
+                &command("import time; time.sleep(60)"),
+                None,
+                "picker modes".into(),
+            )
+            .unwrap();
+        let id = manager.active;
+        let pid = manager.sessions[0].pid;
+        for (code, mods, fullscreen) in [
+            (KeyCode::Enter, KeyModifiers::NONE, true),
+            (KeyCode::Char('f'), KeyModifiers::ALT, false),
+        ] {
+            manager.active = None;
+            manager.picker = true;
+            let key = KeyEvent::new(code, mods);
+            for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+                manager
+                    .input(&Event::Key(KeyEvent { kind, ..key }))
+                    .unwrap();
+                assert!(manager.picker);
+                assert!(manager.active.is_none());
+            }
+            manager.input(&Event::Key(key)).unwrap();
+            assert!(!manager.picker);
+            assert_eq!(manager.active, id);
+            assert_eq!(manager.fullscreen, fullscreen);
+            assert_eq!(manager.sessions[0].pid, pid);
+            manager
+                .input(&Event::Key(KeyEvent::new(
+                    KeyCode::Char('f'),
+                    KeyModifiers::ALT,
+                )))
+                .unwrap();
+            assert_eq!(manager.fullscreen, !fullscreen);
+            assert_eq!(manager.sessions[0].pid, pid);
+        }
     }
 
     #[test]

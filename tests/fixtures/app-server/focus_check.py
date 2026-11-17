@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
         terminal.expect('Task first')
         terminal.send(b'\x1b')
         terminal.wait(lambda: 'Search within folder' not in terminal.text())
-        terminal.send(b'\r')
+        terminal.send(b'\x1bf')
         terminal.expect('Ctrl+B background')
         size = lambda: json.loads((home/'terminal-size.json').read_text())
         terminal.wait(lambda: (home/'terminal-size.json').exists())

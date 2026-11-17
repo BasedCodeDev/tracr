@@ -99,7 +99,7 @@ def submit_status(terminal):
 def return_to_browser(terminal):
     terminal.send(b'\x02')
     terminal.expect('Open here')
-    terminal.send(b'\r')
+    terminal.send(b'\x1bf')
     terminal.expect('Ctrl+B background')
     terminal.send(b'\x02')
     terminal.expect('Open here')
@@ -194,7 +194,7 @@ def run_case(binary, codex, home, mode):
         passed(phase)
         phase = 'startup'
         mark = len(terminal.output)
-        terminal.send(b'\r')
+        terminal.send(b'\x1bf')
         terminal.expect('Ctrl+B background')
         handoff = mark
         def started():
