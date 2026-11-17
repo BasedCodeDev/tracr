@@ -12,30 +12,18 @@ live = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(live)
 
 class AcceptanceTests(unittest.TestCase):
-    def test_exit_acknowledges_composer_clear_before_confirmation(self):
+    def test_background_reattach_and_explicit_close(self):
         class ExitTerminal:
-            def __init__(self, replies):
-                self.output = bytearray(b'Ask Codex to do anything')
-                self.replies = iter(replies)
-                self.sent = 0
+            def __init__(self): self.sent = []; self.state = ''
             def send(self, data):
-                self.assert_interrupt(data)
-                self.sent += 1
-                self.output.extend(next(self.replies))
-            def assert_interrupt(self, data):
-                assert data == b'\x03'
-            def wait(self, predicate):
-                assert predicate(), 'unrecognized interrupt response'
-        for replies in ([b'Ask Codex to do anything', b'Press Ctrl-C again', b'Sessions'],
-                        [b'Press Ctrl-C again', b'Sessions'],
-                        [b'Sessions']):
-            terminal = ExitTerminal(replies)
-            live.return_to_browser(terminal)
-            self.assertEqual(terminal.sent, len(replies))
-        for replies in ([b''], [b'Ask Codex to do anything', b'Ask Codex to do anything'],
-                        [b'Press Ctrl-C again', b'still in Codex']):
-            with self.assertRaises(AssertionError):
-                live.return_to_browser(ExitTerminal(replies))
+                self.sent.append(data)
+                self.state = {b'\x02': 'Open here', b'\r': 'Ctrl+B background', b'x': 'Close this terminal?', b'y': 'Sessions'}[data]
+            def expect(self, text): assert text in self.state
+            def text(self): return self.state
+            def wait(self, predicate): assert predicate()
+        terminal = ExitTerminal()
+        live.return_to_browser(terminal)
+        self.assertEqual(terminal.sent, [b'\x02', b'\r', b'\x02', b'x', b'y'])
 
     def test_history_uses_fixture_messages_not_turn_completion_marker(self):
         expected = ['Remember the project.', 'The project is here.']
@@ -196,7 +184,8 @@ class SimulatedFlowTests(unittest.TestCase):
                     return self.state
                 def send(self, data):
                     if data == b'\r':
-                        self.output.extend(b'\x1b[?1049l')
+                        self.state = browser + ' Ctrl+B background'
+                        self.output.extend(b'Ctrl+B background')
                         message = ('app-server socket: Operation not permitted' if scenario == 'blocked' else 'Synthetic fixture complete.')
                         if scenario == 'timeout': message = 'No recognized startup state'
                         self.output.extend(message.encode())
@@ -204,9 +193,9 @@ class SimulatedFlowTests(unittest.TestCase):
                         identity = 'wrong' if scenario == 'wrong-session' else 'abc'
                         directory = '/wrong' if scenario == 'wrong-directory' else cwd
                         self.output.extend(f' Session: {identity} Directory: {directory}'.encode())
-                    elif data == b'\x03':
-                        self.interrupts += 1
-                        self.output.extend(b' Press Ctrl-C again' if self.interrupts == 1 else b'Sessions')
+                    elif data == b'\x02': self.state = browser + ' Open here'
+                    elif data == b'x': self.state = 'Close this terminal?'
+                    elif data == b'y': self.state = browser
                     elif data == b'r':
                         self.output.extend(b'refreshing')
                         self.state = 'refreshing'
@@ -217,6 +206,8 @@ class SimulatedFlowTests(unittest.TestCase):
                         self.state = browser
                         self.refreshing = False
                     if not predicate(): raise AssertionError('unexplained timeout')
+                def expect(self, expected):
+                    self.wait(lambda: expected in self.state)
                 def inspect(self, expected):
                     assert expected in self.state
                 def finish(self):
@@ -236,7 +227,7 @@ class SimulatedFlowTests(unittest.TestCase):
                 stack.enter_context(patch.object(live, 'Terminal', FakeTerminal))
                 stack.enter_context(patch.object(live, 'screen_since', side_effect=screen))
                 stack.enter_context(patch.object(live, 'submit_status', side_effect=lambda terminal: terminal.send(b'/status\r')))
-                stack.enter_context(patch.object(live.os, 'tcgetpgrp', side_effect=[100,100,50]))
+                stack.enter_context(patch.object(live.os, 'tcgetpgrp', return_value=50))
                 stack.enter_context(patch.object(live, 'stop_daemons', return_value={'observed_pids':[]}))
                 return live.run_case('/tracr', str(executable), home, 'legacy')
 

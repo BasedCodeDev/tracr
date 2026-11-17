@@ -365,15 +365,31 @@ If the destination changed since it was displayed, review it and press Enter aga
 Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
-Exiting Codex returns to tracr, preserving filters and selection and refreshing metadata.
-Ctrl-C belongs to Codex while it is running; SIGTERM to tracr terminates the owned
-child process group, with a five-second grace period. See the relinking section below
+Sessions open inside the Sessions pane, with the rest of tracr still visible.
+**Ctrl+B** backgrounds the terminal and returns to the session list; selecting an
+open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Alt+arrow keys** move focus between panels
+without backgrounding the terminal; input goes to whichever panel is focused.
+From the browser, press **b** for Open terminals (including newly started sessions),
+or **x** in Sessions to close a terminal. Closure requires confirmation.
+New terminals keep their own entries until closed; tracr does not infer their
+Codex session identity from timing or directory names.
+
+Each tracr instance owns its terminals. Quitting with open terminals asks before
+closing them, while another instance can continue monitoring. Resuming an identified
+session already owned by another tracr is blocked. Terminals do not persist after
+their owning tracr exits. Inside tmux with its default prefix, press Ctrl+B twice
+to send the background shortcut through to tracr.
+
+Exiting Codex restores the session list and refreshes metadata.
+Ctrl-C belongs to Codex while its terminal is focused; SIGTERM to tracr terminates
+its owned child process groups, with a five-second grace period. See the relinking section below
 for supported versions and permission configurations.
 
-Resume PTY checks (no real sessions or inference):
+Resume and inline PTY checks (no real sessions or inference):
 
 ```sh
 python tests/fixtures/app-server/resume_check.py target/debug/tracr
+python tests/fixtures/app-server/inline_check.py target/debug/tracr
 ```
 
 

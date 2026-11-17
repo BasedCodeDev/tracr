@@ -54,3 +54,5 @@ pub mod dev_reload;
 pub mod terminal_recovery;
 
 pub mod worktree_status;
+
+pub mod inline_terminal;

@@ -97,29 +97,16 @@ def submit_status(terminal):
 
 
 def return_to_browser(terminal):
-    # Ctrl-C can clear residual composer input before it arms Codex's exit
-    # confirmation. Require a fresh, recognized redraw between interrupts.
-    start = len(terminal.output)
-    returned = lambda: b'Sessions' in terminal.output[start:]
-    cleared = False
-    for _ in range(2):
-        mark = len(terminal.output)
-        terminal.send(b'\x03')
-        def acknowledged():
-            text = screen_since(terminal, mark).lower()
-            return (returned() or ('again' in text and 'ctrl' in text)
-                    or (not cleared and ('ask codex to do anything' in text
-                        or b'state=idle:app=codex' in terminal.output[mark:])))
-        terminal.wait(acknowledged)
-        if returned():
-            return
-        text = screen_since(terminal, mark).lower()
-        if 'again' in text and 'ctrl' in text:
-            terminal.send(b'\x03')
-            terminal.wait(returned)
-            return
-        cleared = True
-    raise AssertionError('Codex did not return to tracr after acknowledged interrupts')
+    terminal.send(b'\x02')
+    terminal.expect('Open here')
+    terminal.send(b'\r')
+    terminal.expect('Ctrl+B background')
+    terminal.send(b'\x02')
+    terminal.expect('Open here')
+    terminal.send(b'x')
+    terminal.expect('Close this terminal?')
+    terminal.send(b'y')
+    terminal.wait(lambda: 'Close this terminal?' not in terminal.text() and 'Open here' not in terminal.text())
 
 
 def stop_owned_updater(home):
@@ -208,16 +195,16 @@ def run_case(binary, codex, home, mode):
         phase = 'startup'
         mark = len(terminal.output)
         terminal.send(b'\r')
-        terminal.wait(lambda: b'\x1b[?1049l' in terminal.output[mark:])
-        handoff = terminal.output.index(b'\x1b[?1049l', mark) + len(b'\x1b[?1049l')
+        terminal.expect('Ctrl+B background')
+        handoff = mark
         def started():
             text = screen_since(terminal, handoff)
             raw = terminal.output[handoff:].decode(errors='replace')
             blocker = startup_blocker(raw)
             if blocker:
                 raise Blocked(blocker)
-            assert b'Sessions' not in terminal.output[handoff:], 'Codex exited before acceptance'
-            return history_visible(text, fixture['expected_messages']) and os.tcgetpgrp(terminal.master) != terminal.child.pid
+            assert 'Folders' in terminal.text(), 'surrounding UI disappeared'
+            return history_visible(text, fixture['expected_messages']) and os.tcgetpgrp(terminal.master) == terminal.child.pid
         terminal.wait(started, timeout=30)
         passed(phase, foreground_group=os.tcgetpgrp(terminal.master))
         phase = 'session-and-directory'
@@ -281,19 +268,28 @@ def run_new_case(binary, codex, home):
         terminal.expect('Create new session')
         mark = len(terminal.output)
         terminal.send(b'\r')
-        terminal.wait(lambda: b'\x1b[?1049l' in terminal.output[mark:])
-        handoff = terminal.output.index(b'\x1b[?1049l', mark) + len(b'\x1b[?1049l')
+        terminal.expect('Ctrl+B background')
+        handoff = mark
         def started():
             raw = terminal.output[handoff:].decode(errors='replace')
             blocker = startup_blocker(raw)
             if blocker: raise Blocked(blocker)
-            return 'OpenAI Codex' in screen_since(terminal, handoff) and os.tcgetpgrp(terminal.master) != terminal.child.pid
+            return 'OpenAI Codex' in screen_since(terminal, handoff) and os.tcgetpgrp(terminal.master) == terminal.child.pid
         terminal.wait(started, timeout=30)
         mark = len(terminal.output)
         submit_status(terminal)
         terminal.wait(lambda: re.search(r'Directory:\s*' + re.escape(str(project)), screen_since(terminal, mark)) is not None)
         result['phases'].append({'phase': 'new-session-directory', 'status': 'passed'})
-        return_to_browser(terminal)
+        terminal.send(b'\x02')
+        terminal.expect('Folders')
+        terminal.send(b'b')
+        terminal.expect('Open terminals')
+        terminal.send(b'x')
+        terminal.expect('Close this terminal?')
+        terminal.send(b'y')
+        terminal.expect('No open terminals')
+        terminal.send(b'\x1b')
+        terminal.wait(lambda: 'Open terminals' not in terminal.text())
         terminal.expect('Folders')
         terminal.finish()
         result['status'] = 'passed'

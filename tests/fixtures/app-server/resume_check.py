@@ -85,6 +85,9 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout', 'reload
             else:
                 return_mark=len(output)
                 os.write(master, b'\x03' if action == 'ctrl-c' else b'x')
+                if action in ('nonzero', 'ctrl-c'):
+                    wait(lambda: 'Terminal exited' in screen.text())
+                    os.write(master, b'\x1b')
                 wait(lambda: os.tcgetpgrp(master) == child.pid)
                 # Wait for refreshed browser before quitting.
                 wait(lambda: b'Sessions' in output[return_mark:])

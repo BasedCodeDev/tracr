@@ -213,6 +213,7 @@ fn select_git_worktree(browser: &mut Browser, view: &mut View, picker: &Worktree
 
 #[derive(Default)]
 pub struct View {
+    pub terminals: std::cell::RefCell<crate::inline_terminal::Manager>,
     pub terminal_recovery: Option<crate::terminal_recovery::Dialog>,
     pub history: crate::git_history::History,
     pub git_sessions: std::cell::RefCell<crate::git_sessions::Presentation>,
@@ -247,6 +248,24 @@ pub struct View {
     pub error_dialog: Option<crate::error_dialog::ErrorDialog>,
 }
 impl View {
+    fn modal_open(&self) -> bool {
+        self.terminal_recovery.is_some()
+            || self.error_dialog.is_some()
+            || self.worktree_create.is_some()
+            || self.folder_move.is_some()
+            || self.relink.is_some()
+            || self.info.is_some()
+            || self.source_picker.is_some()
+            || self.worktree_picker.is_some()
+            || self.help
+            || self.editing
+            || self.preparing
+    }
+
+    fn terminal_focused(&self) -> bool {
+        self.context() == 1 && !self.modal_open()
+    }
+
     fn context(&self) -> usize {
         if self.git_focus { 2 } else { self.focus }
     }
@@ -588,6 +607,14 @@ fn session_metadata(
 }
 
 fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String, String, u16) {
+    if view.terminal_focused() && view.terminals.borrow().active.is_some() {
+        return (
+            "Ctrl+B Background · Ctrl+C Interrupt Codex".into(),
+            "Keyboard input goes to the terminal".into(),
+            view.message.clone().unwrap_or_default(),
+            2,
+        );
+    }
     let mut issues: Vec<_> = browser
         .diagnostics()
         .into_iter()
@@ -1330,6 +1357,8 @@ pub(crate) fn render_picker(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Command {
+    OpenTerminals,
+    CloseTerminal,
     CreateWorktree,
     GitToggle,
     GitReturn,
@@ -1687,6 +1716,21 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     }
     entries
         .retain(|entry| entry.0 != CreateWorktree || worktree_unavailable(browser, view).is_none());
+    if browser
+        .specs
+        .iter()
+        .any(|spec| matches!(spec, crate::browser::SourceSpec::Codex { .. }))
+        && (view.context() == 1 || !view.terminals.borrow().is_empty())
+    {
+        entries.push((
+            OpenTerminals,
+            "Terminals",
+            "b",
+            "Open terminals",
+            Some(("b Terminals", "b Terminals")),
+        ));
+        entries.push((CloseTerminal, "Terminals", "x", "Close terminal", None));
+    }
     entries
         .into_iter()
         .map(|(command, section, shortcut, label, footer)| MenuEntry {
@@ -2190,6 +2234,13 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             );
         }
         1 => {
+            if view
+                .terminals
+                .borrow_mut()
+                .draw(frame, area, view.terminal_focused())
+            {
+                return;
+            }
             let sessions = browser.visible();
             // Preserve eight columns for essential status labels in tiny panes.
             let right_padding = area.width.saturating_sub(12).min(2);
@@ -2211,7 +2262,13 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                             browser.runtime_status(&s.key),
                             area.width.saturating_sub(4 + right_padding),
                         ),
-                        session_metadata(browser, s, now),
+                        if view.terminals.borrow().owns(&s.key) {
+                            Line::from("Open here · Enter attach · x Close terminal")
+                        } else if browser.specs.iter().any(|spec| matches!(spec, crate::browser::SourceSpec::Codex { source, .. } if source.id == s.key.source_id && crate::inline_terminal::open_elsewhere(&source.home, &s.key))) {
+                            Line::from("Open in another tracr")
+                        } else {
+                            session_metadata(browser, s, now)
+                        },
                         Line::default(),
                     ])
                 })
@@ -2660,18 +2717,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         };
         if let Some(command) = command {
             // These keys belong to pane navigation, never to a dialog's arrows.
-            if view.terminal_recovery.is_some()
-                || view.error_dialog.is_some()
-                || view.worktree_create.is_some()
-                || view.folder_move.is_some()
-                || view.relink.is_some()
-                || view.info.is_some()
-                || view.source_picker.is_some()
-                || view.worktree_picker.is_some()
-                || view.help
-                || view.editing
-                || view.preparing
-            {
+            if view.modal_open() {
                 return Action::Continue;
             }
             return execute_command(command, browser, view);
@@ -2972,6 +3018,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         let command = match key.code {
             KeyCode::Char('g') => Command::GitToggle,
             KeyCode::Esc => Command::GitReturn,
+            KeyCode::Char('b') => Command::OpenTerminals,
+            KeyCode::Char('x') if view.focus == 1 => Command::CloseTerminal,
             KeyCode::Char('q') => Command::Quit,
             KeyCode::Char('r') => Command::Refresh,
             KeyCode::Char('?') => {
@@ -3003,6 +3051,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 .unwrap_or(0);
             return Action::Continue;
         }
+        KeyCode::Char('b') => Command::OpenTerminals,
+        KeyCode::Char('x') if view.focus == 1 => Command::CloseTerminal,
         KeyCode::Char('q') => Command::Quit,
         KeyCode::Char('/') => Command::Search,
         KeyCode::Char('r') => Command::Refresh,
@@ -3162,6 +3212,11 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 view.info = Some(InfoModal::new(browser, session));
             }
         }
+        Command::OpenTerminals => view.terminals.borrow_mut().picker = true,
+        Command::CloseTerminal => view
+            .terminals
+            .borrow_mut()
+            .request_close(browser.selected.as_ref()),
         Command::Quit => return Action::Quit,
         Command::Relink => return Action::OpenRelink,
         Command::MoveFolder => return Action::OpenFolderMove,
@@ -3364,11 +3419,6 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     }
     let mut relocated: Option<crate::relocation::Preview> = None;
     let mut last_folder = browser.initial_folder.clone();
-    let mut created: Option<(
-        crate::domain::SourceId,
-        std::path::PathBuf,
-        std::collections::BTreeSet<crate::domain::SessionKey>,
-    )> = None;
     let mut git_discovery = crate::git_discovery::Controller::default();
     let mut status_monitor = crate::worktree_status::Monitor::default();
     let mut git_watch = crate::git_watch::Monitor::default();
@@ -3381,6 +3431,16 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     let mut folder_checks_dirty = true;
     let outcome: Result<(), Box<dyn std::error::Error>> = async {
         loop {
+            let (terminal_changed, terminal_exits) = view.terminals.borrow_mut().poll();
+            if terminal_changed { idle.wake(); }
+            if !terminal_exits.is_empty() {
+                view.message = Some(terminal_exits.iter().map(|notice| notice.message.as_str()).collect::<Vec<_>>().join("; "));
+                if let Some(notice) = terminal_exits.iter().find(|notice| notice.failed && notice.was_active) {
+                    view.error_dialog = Some(crate::error_dialog::ErrorDialog::new("Terminal exited", "The session remains available to resume.", notice.message.clone()));
+                }
+                browser.invalidate_git();
+                discovery.refresh(&mut browser);
+            }
             for _ in 0..100 {
                 match discovery.rx.try_recv() {
                     Ok(update) => {
@@ -3482,8 +3542,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 break;
             }
             // Reload is distinct from termination: never interrupt interactive Codex.
-            // That child is awaited above this loop; mutations must also settle first.
-            if reload_requested && relink_task.is_none() && folder_task.is_none()
+            // Background terminals and mutations must also settle first.
+            if reload_requested && view.terminals.borrow().is_empty() && relink_task.is_none() && folder_task.is_none()
                 && !view.worktree_create.as_ref().is_some_and(|modal| modal.executing) {
                 reloading = true;
                 break;
@@ -3583,15 +3643,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     if selected.as_ref().is_some_and(|k|browser.visible().iter().any(|s|&s.key==k)){browser.selected=selected;}
                 }
                 if let Some(p)=relocated.take(){browser.open_folder(p.target);browser.selected=Some(p.key);}
-                if let Some((source, path, before)) = created.take() {
-                    if let Some(session) = browser.visible().into_iter().find(|s| {
-                        s.key.source_id == source
-                            && s.cwd.as_ref() == Some(&path)
-                            && !before.contains(&s.key)
-                    }) {
-                        browser.selected = Some(session.key);
-                    }
-                }
+
             }
             if let Some(modal)=view.relink.as_mut(){
                 if !modal.busy && modal.preview.is_none(){if let Some(picker)=modal.picker.as_mut(){picker.tick(&mut modal.input);}}
@@ -3626,35 +3678,11 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                 command.cwd.display()
                             ));
                         } else {
-                            discovery.close(&mut browser).await;
-                            // Discard pending metadata events before starting a fresh generation.
-                            while discovery.rx.try_recv().is_ok() {}
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
-                            git_watch.stop();
-                            status_monitor.shutdown().await;
-                            git_discovery.shutdown().await;
-                            view.history.shutdown().await;
-                            crate::git::drain_reads().await;
-                            guard.suspend()?;
-                            let result = crate::resume::run(&command, &signals.terminate).await;
-                            signals
-                                .interrupt
-                                .store(false, std::sync::atomic::Ordering::Relaxed);
-                            guard.activate()?;
-                            terminal.clear()?;
-                            terminal.autoresize()?;
-                            view.message = match result {
-                                Ok(status) if status.success() => view.message.take(),
-                                Ok(status) => Some(format!(
-                                    "Codex exited with {status}. You can retry or refresh."
-                                )),
-                                Err(error) => Some(format!("Could not resume Codex: {error}")),
-                            };
-                            browser.invalidate_git(); discovery.refresh(&mut browser);
-                            // Drop queued key repeats so one Enter cannot launch a second child.
-                            while event::poll(Duration::ZERO)? {
-                                let _ = event::read()?;
-                            }
+                            let result = view.terminals.borrow_mut().launch(&command.launch, Some(command.session.key.clone()), command.session.title.clone());
+                            view.focus = 1;
+                            view.git_focus = false;
+                            if let Err(error) = result { view.message = Some(format!("Could not resume Codex: {error}")); }
                         }
                     }
                     Ok(Err(error)) => view.message = Some(error),
@@ -3667,10 +3695,10 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             view.help_page_size =
                 usize::from(size.height.saturating_sub(2).min(22).saturating_sub(7))
                     / if size.width < 58 { 2 } else { 1 };
-            terminal.draw(|frame| draw(frame, &browser, &view))?;
+            terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame); })?;
             idle.deadline = next_age_update(&browser, &view, size.height);
             }
-            let busy = browser.loading() || git_discovery.pending() || view.history.loading() || pending.is_some() || relink_task.is_some() || folder_task.is_some()
+            let busy = !view.terminals.borrow().is_empty() || browser.loading() || git_discovery.pending() || view.history.loading() || pending.is_some() || relink_task.is_some() || folder_task.is_some()
                 || view.relink.is_some() || view.folder_move.is_some() || view.worktree_create.is_some()
                 || view.error_dialog.as_ref().is_some_and(|dialog| dialog.copy_task.is_some())
                 || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.is_some());
@@ -3682,6 +3710,23 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if event::poll(wait)? {
                 idle.wake();
                 let incoming=event::read()?;
+                let previous_terminal = view.terminals.borrow().active;
+                let terminal_overlay = view.terminals.borrow().has_overlay();
+                let terminal_input = if terminal_overlay || view.terminal_focused() {
+                    view.terminals.borrow_mut().input(&incoming)
+                } else { Ok(crate::inline_terminal::Input::Pass) };
+                match terminal_input {
+                    Ok(crate::inline_terminal::Input::Quit) => break,
+                    Ok(crate::inline_terminal::Input::Consumed) => {
+                        let active = view.terminals.borrow().active;
+                        if previous_terminal != active || (terminal_overlay && active.is_some() && matches!(&incoming, Event::Key(key) if key.code == KeyCode::Enter)) {
+                            view.focus = 1; view.git_focus = false;
+                        }
+                        continue;
+                    },
+                    Ok(crate::inline_terminal::Input::Pass) => (),
+                    Err(error) => { view.message = Some(error.to_string()); continue; }
+                }
                 if let Event::Paste(text)=&incoming {
                     if let Some(modal)=view.worktree_create.as_mut(){modal.paste(text);}
                     if let Some(modal)=view.folder_move.as_mut(){modal.paste(text);}
@@ -3820,7 +3865,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                 relink_task=Some(tokio::spawn(async move {RelinkResult::Applied(crate::relocation::execute_with_progress(&binary,&source,&state,p,recovery,Some(tx)).await)}));
                             }
                         }
-                        Action::Quit => break,
+                        Action::Quit => { if view.terminals.borrow_mut().request_quit() { break; } },
                         Action::Refresh => {
                             view.message = None;
                             refresh_recovery(relocation_state.as_deref(), &mut view);
@@ -3848,39 +3893,15 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                     continue;
                                 }
                             };
-                            let Some(source_id) = spec.creation_source_id().cloned() else { continue; };
-                            created = Some((
-                                source_id,
-                                path,
-                                browser.all().into_iter().map(|s| s.key).collect(),
-                            ));
-                            discovery.close(&mut browser).await;
-                            while discovery.rx.try_recv().is_ok() {}
+                            let title = format!("New session · {}", path.display());
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
-                            git_watch.stop();
-                            status_monitor.shutdown().await;
-                            git_discovery.shutdown().await;
-                            view.history.shutdown().await;
-                            crate::git::drain_reads().await;
-                            guard.suspend()?;
-                            let result = crate::resume::run(&command, &signals.terminate).await;
-                            signals
-                                .interrupt
-                                .store(false, std::sync::atomic::Ordering::Relaxed);
-                            guard.activate()?;
-                            terminal.clear()?;
-                            terminal.autoresize()?;
-                            view.message = match result {
-                                Ok(status) if status.success() => view.message.take(),
-                                Ok(status) => Some(format!("Harness exited with {status}.")),
-                                Err(error) => Some(format!("Could not start session: {error}")),
-                            };
-                            browser.invalidate_git(); discovery.refresh(&mut browser);
-                            while event::poll(Duration::ZERO)? {
-                                let _ = event::read()?;
-                            }
+                            let result = view.terminals.borrow_mut().launch(&command, None, title);
+                            view.focus = 1;
+                            view.git_focus = false;
+                            if let Err(error) = result { view.message = Some(format!("Could not start session: {error}")); }
                         }
                         Action::ResumeSelected => {
+                            if browser.selected.as_ref().is_some_and(|key| view.terminals.borrow_mut().attach(key)) { view.focus = 1; view.git_focus = false; continue; }
                             if let Some(session) = browser
                                 .visible()
                                 .into_iter()
@@ -3922,6 +3943,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         Ok(())
     }
     .await;
+    view.terminals.get_mut().shutdown().await;
     git_watch.stop();
     view.history.shutdown().await;
     status_monitor.shutdown().await;
@@ -4571,7 +4593,10 @@ mod cleanup_tests {
         }
         browser.ownership.get_mut(&path).unwrap().outcome = Some(repository.clone());
         open_help(&browser, &mut view);
-        press(&mut browser, &mut view, KeyCode::End);
+        view.help_selected = menu_entries(&browser, &view)
+            .iter()
+            .position(|entry| entry.command == Command::CreateWorktree)
+            .unwrap();
         assert_eq!(
             menu_entries(&browser, &view)[view.help_selected].command,
             Command::CreateWorktree
