@@ -209,7 +209,7 @@ impl Modal {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let notes = "Committed content only; uncommitted changes stay in the source.\nEnables relative links: this repository will require Git 2.48+.\nIn-project destinations are ignored locally; outside paths stay separate.";
+        let notes = "Committed content only; uncommitted changes stay in the source.\nIn-project destinations are ignored locally; outside paths stay separate.";
         let notes_height = Paragraph::new(notes)
             .wrap(Wrap { trim: false })
             .line_count(sections.body.width) as u16;

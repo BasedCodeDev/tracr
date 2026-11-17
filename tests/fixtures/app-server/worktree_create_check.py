@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         open_worktree(t)
         t.send(b'feature/from-folder\r\r')
         t.expect('>[ Create worktree ]')
-        t.expect('this repository will require Git 2.48+')
+        assert 'this repository will require Git' not in t.text()
         t.resize(22, 70)
         t.expect('>[ Create worktree ]')
         t.send(b'\r')
