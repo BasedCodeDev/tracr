@@ -2090,6 +2090,12 @@ async fn focused_folder_ui_shows_scope_and_blocks_navigation_above_root() {
         &mut view,
         KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
     );
+    assert!(browser.focus_root.is_none()); // Alt+F is no longer folder zoom.
+    handle_key(
+        &mut browser,
+        &mut view,
+        KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT),
+    );
     for _ in 0..3 {
         handle_key(
             &mut browser,
@@ -2125,7 +2131,7 @@ async fn focused_folder_ui_shows_scope_and_blocks_navigation_above_root() {
     handle_key(
         &mut browser,
         &mut view,
-        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
+        KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT),
     );
     assert!(browser.focus_root.is_some()); // Dialog input must not toggle focus.
     handle_key(
@@ -2136,7 +2142,7 @@ async fn focused_folder_ui_shows_scope_and_blocks_navigation_above_root() {
     handle_key(
         &mut browser,
         &mut view,
-        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
+        KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT),
     );
     assert!(browser.focus_root.is_none());
 }

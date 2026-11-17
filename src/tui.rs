@@ -320,6 +320,7 @@ fn restore() {
     let _ = terminal::disable_raw_mode();
     let _ = execute!(
         io::stdout(),
+        event::DisableMouseCapture,
         event::DisableBracketedPaste,
         LeaveAlternateScreen,
         crossterm::cursor::Show
@@ -362,8 +363,20 @@ impl Drop for ShutdownSignals {
 
 struct TerminalGuard {
     active: bool,
+    mouse: bool,
 }
 impl TerminalGuard {
+    fn mouse_capture(&mut self, enabled: bool) -> io::Result<()> {
+        if enabled != self.mouse {
+            if enabled {
+                execute!(io::stdout(), event::EnableMouseCapture)?;
+            } else {
+                execute!(io::stdout(), event::DisableMouseCapture)?;
+            }
+            self.mouse = enabled;
+        }
+        Ok(())
+    }
     fn activate(&mut self) -> io::Result<()> {
         terminal::enable_raw_mode()?;
         self.active = true;
@@ -377,11 +390,13 @@ impl TerminalGuard {
         terminal::disable_raw_mode()?;
         execute!(
             io::stdout(),
+            event::DisableMouseCapture,
             event::DisableBracketedPaste,
             LeaveAlternateScreen,
             crossterm::cursor::Show
         )?;
         self.active = false;
+        self.mouse = false;
         Ok(())
     }
 }
@@ -614,7 +629,7 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
                 || "Keyboard input goes to the terminal".into(),
                 |root| {
                     format!(
-                        "Keyboard input goes to the terminal · Focused: {} · Alt+F in Folders clears focus",
+                        "Keyboard input goes to the terminal · Focused: {} · Alt+Z in Folders zooms out",
                         safe_text(&root.display().to_string())
                     )
                 },
@@ -681,7 +696,7 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
         };
     let message = if let Some(root) = &browser.focus_root {
         format!(
-            "{}Focused: {} · Alt+F in Folders clears focus",
+            "{}Focused: {} · Alt+Z in Folders zooms out",
             if message.is_empty() {
                 String::new()
             } else {
@@ -785,6 +800,7 @@ fn git_session_spans(
 }
 
 pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
+    view.terminals.borrow_mut().visible = false;
     if let Some(dialog) = &view.terminal_recovery {
         dialog.draw(frame);
         return;
@@ -1422,6 +1438,7 @@ enum Command {
     FolderRight,
     Resume,
     ResumeFullscreen,
+    ToggleTerminalFullscreen,
     Info,
     Relink,
     MoveFolder,
@@ -1770,13 +1787,21 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             Some(("b Terminals", "b Terminals")),
         ));
         entries.push((CloseTerminal, "Terminals", "x", "Close terminal", None));
-        if view.context() == 1 {
+        if view.terminals.borrow().active.is_some() {
+            entries.push((
+                ToggleTerminalFullscreen,
+                "Terminals",
+                "Alt+F",
+                "Toggle terminal full-screen",
+                Some(("Alt+F Full-screen", "Alt+F Full")),
+            ));
+        } else if view.context() == 1 {
             entries.push((
                 ResumeFullscreen,
                 "Sessions",
-                "Alt+F",
+                "",
                 "Open session full-screen",
-                Some(("Alt+F Full-screen", "Alt+F Full")),
+                None,
             ));
         }
     }
@@ -1790,13 +1815,13 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             (
                 FolderFocus,
                 "Folders",
-                "Alt+F",
+                "Alt+Z",
                 if browser.focus_root.is_some() {
-                    "Clear folder focus"
+                    "Zoom out of folder"
                 } else {
-                    "Focus selected folder"
+                    "Zoom into selected folder"
                 },
-                Some(("Alt+F Focus", "Alt+F Focus")),
+                Some(("Alt+Z Zoom", "Alt+Z Zoom")),
             ),
         );
     }
@@ -2827,6 +2852,15 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
     if key.kind == KeyEventKind::Release {
         return Action::Continue;
     }
+    if key.modifiers == KeyModifiers::ALT && key.code == KeyCode::Char('f') {
+        if key.kind == KeyEventKind::Press
+            && !view.modal_open()
+            && !view.terminals.borrow().has_overlay()
+        {
+            return execute_command(Command::ToggleTerminalFullscreen, browser, view);
+        }
+        return Action::Continue;
+    }
     if key.modifiers == KeyModifiers::ALT {
         let command = match key.code {
             KeyCode::Up => Some(Command::PaneUp),
@@ -3196,17 +3230,11 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         {
             Command::Create
         }
-        KeyCode::Char('f') if key.modifiers == KeyModifiers::ALT && view.context() == 0 => {
+        KeyCode::Char('z') if key.modifiers == KeyModifiers::ALT && view.context() == 0 => {
             if key.kind != KeyEventKind::Press {
                 return Action::Continue;
             }
             Command::FolderFocus
-        }
-        KeyCode::Char('f') if key.modifiers == KeyModifiers::ALT && view.context() == 1 => {
-            if key.kind != KeyEventKind::Press {
-                return Action::Continue;
-            }
-            Command::ResumeFullscreen
         }
         KeyCode::Enter => Command::Resume,
         _ => return Action::Continue,
@@ -3216,6 +3244,14 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
 
 fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> Action {
     match command {
+        Command::ToggleTerminalFullscreen => {
+            let mut terminals = view.terminals.borrow_mut();
+            if terminals.active.is_some() {
+                terminals.fullscreen = !terminals.fullscreen;
+                view.focus = 1;
+                view.git_focus = false;
+            }
+        }
         Command::GitSelectWorktree => {
             if view.git_hidden || view.git_size_limited {
                 return Action::Continue;
@@ -3521,7 +3557,10 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("interactive browsing requires a terminal; use 'tracr list'".into());
     }
-    let mut guard = TerminalGuard { active: false };
+    let mut guard = TerminalGuard {
+        active: false,
+        mouse: false,
+    };
     guard.activate()?;
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -3856,6 +3895,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 usize::from(size.height.saturating_sub(2).min(22).saturating_sub(7))
                     / if size.width < 58 { 2 } else { 1 };
             terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame); })?;
+            guard.mouse_capture(view.terminals.borrow().active.is_some())?;
             idle.deadline = next_age_update(&browser, &view, size.height);
             }
             let busy = !view.terminals.borrow().is_empty() || browser.loading() || git_discovery.pending() || view.history.loading() || pending.is_some() || relink_task.is_some() || folder_task.is_some()
@@ -3870,6 +3910,14 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if event::poll(wait)? {
                 idle.wake();
                 let incoming=event::read()?;
+                if let Event::Mouse(mouse) = &incoming {
+                    if !view.modal_open() {
+                        if let Err(error) = view.terminals.borrow_mut().wheel(*mouse) {
+                            view.message = Some(error.to_string());
+                        }
+                    }
+                    continue;
+                }
                 let previous_terminal = view.terminals.borrow().active;
                 let terminal_overlay = view.terminals.borrow().has_overlay();
                 let terminal_input = if terminal_overlay || view.terminal_focused() {
@@ -4867,6 +4915,46 @@ mod cleanup_tests {
         );
     }
 
+    #[test]
+    fn alt_f_only_toggles_a_displayed_terminal_from_any_pane() {
+        for (focus, git_focus) in [(0, false), (1, false), (0, true), (1, true)] {
+            let mut browser = Browser::new(vec![]);
+            let mut view = View {
+                focus,
+                git_focus,
+                ..View::default()
+            };
+            let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT);
+            let following = view.history.following;
+            assert!(matches!(
+                handle_key(&mut browser, &mut view, key),
+                Action::Continue
+            ));
+            assert!(!view.terminals.borrow().fullscreen);
+            assert_eq!((view.focus, view.git_focus), (focus, git_focus));
+            assert_eq!(view.history.following, following);
+            view.terminals.borrow_mut().active = Some(1);
+            view.help = true;
+            handle_key(&mut browser, &mut view, key);
+            assert!(!view.terminals.borrow().fullscreen);
+            view.help = false;
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent {
+                    kind: KeyEventKind::Repeat,
+                    ..key
+                },
+            );
+            assert!(!view.terminals.borrow().fullscreen);
+            handle_key(&mut browser, &mut view, key);
+            assert!(view.terminals.borrow().fullscreen);
+            assert_eq!((view.focus, view.git_focus), (1, false));
+            handle_key(&mut browser, &mut view, key);
+            assert!(!view.terminals.borrow().fullscreen);
+        }
+    }
+
     #[tokio::test]
     async fn alt_arrows_follow_layout_without_changing_selection_or_scrolling() {
         for has_git in [false, true] {
@@ -5323,7 +5411,10 @@ mod cleanup_tests {
     #[ignore]
     fn guard_child() {
         let result = std::panic::catch_unwind(|| -> io::Result<()> {
-            let mut guard = TerminalGuard { active: false };
+            let mut guard = TerminalGuard {
+                active: false,
+                mouse: false,
+            };
             guard.activate()?;
             if std::env::var("TRACR_TEST_CLEANUP").as_deref() == Ok("panic") {
                 panic!("simulated failure after terminal activation");

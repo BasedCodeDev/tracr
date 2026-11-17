@@ -81,8 +81,17 @@ if len(sys.argv) > 1 and sys.argv[1] in ('resume', '--cd'):
     (home / 'launch.json').write_text(json.dumps(dict(
         args=sys.argv[1:], cwd=os.getcwd(), home=os.environ['CODEX_HOME'],
         foreground=os.tcgetpgrp(0) == os.getpgrp(), pid=os.getpid())))
+    if settings.get('scroll_fixture'):
+        height = os.get_terminal_size(0).lines
+        os.write(1, f'\x1b[{height-1};1HCOMPOSER\x1b[1;{height-2}r\x1b[{height-2};1H'.encode())
+        for index in range(200):
+            os.write(1, f'\r\n\x1b[31mHISTORY-{index:04}\x1b[0m'.encode())
+        os.write(1, f'\x1b[r\x1b[{height-1};9H'.encode())
     while True:
         key = os.read(0, 1)
+        if settings.get('scroll_fixture'):
+            with (home/'terminal-input.bin').open('ab') as inputs:
+                inputs.write(key)
         if key == b'\x03':
             os.kill(os.getpid(), signal.SIGINT)
         if key == b'x':

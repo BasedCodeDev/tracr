@@ -1,6 +1,8 @@
 //! Owned PTYs. Output is parsed, never written to the outer terminal.
 use crate::domain::{LaunchCommand, SessionKey};
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+};
 use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use ratatui::{
     Frame,
@@ -43,6 +45,7 @@ struct Session {
     output: mpsc::Receiver<Vec<u8>>,
     parser: vt100::Parser,
     queries: vte::Parser,
+    alternate_scroll: bool,
     pid: Option<u32>,
     size: (u16, u16),
     stopping: Option<Instant>,
@@ -181,6 +184,7 @@ pub struct Manager {
     selected: usize,
     confirmation: Option<Confirmation>,
     pub area: Rect,
+    pub visible: bool,
 }
 enum Confirmation {
     Quit,
@@ -345,6 +349,7 @@ impl Manager {
             output,
             parser: vt100::Parser::new(rows, cols, 2000),
             queries: vte::Parser::new(),
+            alternate_scroll: true,
             pid,
             size: (rows, cols),
             stopping: None,
@@ -374,8 +379,10 @@ impl Manager {
                     let mut queries = Queries {
                         cursor: s.parser.screen().cursor_position(),
                         replies: Vec::new(),
+                        alternate_scroll: s.alternate_scroll,
                     };
                     s.queries.advance(&mut queries, byte);
+                    s.alternate_scroll = queries.alternate_scroll;
                     for reply in queries.replies {
                         let _ = s.write(reply);
                     }
@@ -474,6 +481,48 @@ impl Manager {
     pub fn has_overlay(&self) -> bool {
         self.picker || self.confirmation.is_some()
     }
+    pub fn wheel(&mut self, mouse: MouseEvent) -> io::Result<Input> {
+        if !self.visible
+            || self.has_overlay()
+            || !self.area.contains((mouse.column, mouse.row).into())
+        {
+            return Ok(Input::Pass);
+        }
+        let up = match mouse.kind {
+            MouseEventKind::ScrollUp => true,
+            MouseEventKind::ScrollDown => false,
+            _ => return Ok(Input::Pass),
+        };
+        let Some(s) = self.sessions.iter_mut().find(|s| Some(s.id) == self.active) else {
+            return Ok(Input::Pass);
+        };
+        let screen = s.parser.screen();
+        if screen.mouse_protocol_mode() != vt100::MouseProtocolMode::None {
+            let bytes = encode_wheel(mouse, self.area, screen.mouse_protocol_encoding());
+            if !bytes.is_empty() {
+                s.write(bytes)?;
+            }
+        } else if screen.alternate_screen() {
+            if s.alternate_scroll {
+                let code = if up { KeyCode::Up } else { KeyCode::Down };
+                s.write(
+                    encode_key(
+                        KeyEvent::new(code, KeyModifiers::NONE),
+                        screen.application_cursor(),
+                    )
+                    .repeat(3),
+                )?;
+            }
+        } else {
+            let offset = screen.scrollback();
+            s.parser.set_scrollback(if up {
+                offset.saturating_add(3)
+            } else {
+                offset.saturating_sub(3)
+            });
+        }
+        Ok(Input::Consumed)
+    }
     pub fn input(&mut self, event: &Event) -> io::Result<Input> {
         if let Some(confirmation) = &self.confirmation {
             if let Event::Key(key) = event {
@@ -552,7 +601,7 @@ impl Manager {
             self.active = None;
             return Ok(Input::Consumed);
         }
-        if let Some(s) = self.sessions.iter().find(|s| s.id == id) {
+        if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             let bytes = match event {
                 Event::Key(key) => encode_key(*key, s.parser.screen().application_cursor()),
                 Event::Paste(text) => {
@@ -566,6 +615,7 @@ impl Manager {
             };
             if !bytes.is_empty() {
                 s.write(bytes)?;
+                s.parser.set_scrollback(0);
             }
         }
         Ok(Input::Consumed)
@@ -612,6 +662,7 @@ impl Manager {
             s.parser.set_size(inner.height, inner.width);
             s.size = (inner.height, inner.width);
         }
+        self.visible = true;
         let screen = s.parser.screen();
         for y in 0..inner.height {
             for x in 0..inner.width {
@@ -644,7 +695,20 @@ impl Manager {
             }
         }
         let (row, col) = screen.cursor_position();
-        if focused && !screen.hide_cursor() && row < inner.height && col < inner.width {
+        if screen.scrollback() > 0 {
+            let label = format!(" ↑ {} lines · type to return ", screen.scrollback());
+            let width = (label.len() as u16).min(area.width);
+            frame.render_widget(
+                Paragraph::new(label).style(Style::default().fg(Color::Yellow).bg(Color::Black)),
+                Rect::new(area.right().saturating_sub(width), area.y, width, 1),
+            );
+        }
+        if focused
+            && screen.scrollback() == 0
+            && !screen.hide_cursor()
+            && row < inner.height
+            && col < inner.width
+        {
             frame.set_cursor_position((inner.x + col, inner.y + row));
         }
         true
@@ -716,6 +780,56 @@ fn color(c: vt100::Color) -> Color {
     }
 }
 
+fn encode_wheel(mouse: MouseEvent, area: Rect, encoding: vt100::MouseProtocolEncoding) -> Vec<u8> {
+    let button = if mouse.kind == MouseEventKind::ScrollUp {
+        64u16
+    } else {
+        65
+    } + if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+        4
+    } else {
+        0
+    } + if mouse.modifiers.contains(KeyModifiers::ALT) {
+        8
+    } else {
+        0
+    } + if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+        16
+    } else {
+        0
+    };
+    let x = mouse.column - area.x + 1;
+    let y = mouse.row - area.y + 1;
+    match encoding {
+        vt100::MouseProtocolEncoding::Sgr => format!("\x1b[<{button};{x};{y}M").into_bytes(),
+        vt100::MouseProtocolEncoding::Default => {
+            if x > 223 || y > 223 {
+                return vec![];
+            }
+            vec![
+                27,
+                b'[',
+                b'M',
+                (button + 32) as u8,
+                (x + 32) as u8,
+                (y + 32) as u8,
+            ]
+        }
+        vt100::MouseProtocolEncoding::Utf8 => {
+            if x > 2015 || y > 2015 {
+                return vec![];
+            }
+            format!(
+                "\x1b[M{}{}{}",
+                char::from_u32(u32::from(button) + 32).unwrap(),
+                char::from_u32(u32::from(x) + 32).unwrap(),
+                char::from_u32(u32::from(y) + 32).unwrap()
+            )
+            .into_bytes()
+        }
+    }
+}
+
 fn encode_key(key: KeyEvent, application: bool) -> Vec<u8> {
     if key.kind == KeyEventKind::Release {
         return vec![];
@@ -777,11 +891,26 @@ fn encode_key(key: KeyEvent, application: bool) -> Vec<u8> {
     text
 }
 struct Queries {
+    alternate_scroll: bool,
     cursor: (u16, u16),
     replies: Vec<Vec<u8>>,
 }
 impl vte::Perform for Queries {
+    fn esc_dispatch(&mut self, _: &[u8], _: bool, byte: u8) {
+        if byte == b'c' {
+            self.alternate_scroll = true;
+        }
+    }
     fn csi_dispatch(&mut self, params: &vte::Params, intermediates: &[u8], _: bool, action: char) {
+        if intermediates == b"?"
+            && matches!(action, 'h' | 'l')
+            && params.iter().any(|p| p == [1007])
+        {
+            self.alternate_scroll = action == 'h';
+        }
+        if intermediates == b"!" && action == 'p' {
+            self.alternate_scroll = true;
+        }
         let first = params
             .iter()
             .next()
@@ -897,6 +1026,170 @@ mod tests {
         assert_eq!(manager.active_folder(), Some(a));
     }
 
+    fn history(parser: &mut vt100::Parser, count: usize) {
+        // Codex-style history above a two-line composer: scroll top region only.
+        parser.process(b"\x1b[5;1HINPUT\x1b[1;4r\x1b[4;1H");
+        for n in 0..count {
+            parser.process(format!("\r\n\x1b[31mrow{n:04}界\x1b[0m").as_bytes());
+        }
+        parser.process(b"\x1b[r\x1b[5;6H");
+    }
+
+    #[test]
+    fn partial_region_history_is_retained_without_composer_duplicates() {
+        let mut parser = vt100::Parser::new(6, 24, 2000);
+        history(&mut parser, 30);
+        assert!(parser.screen().contents().contains("INPUT"));
+        parser.set_scrollback(10);
+        assert!(!parser.screen().contents().contains("INPUT"));
+        assert!(parser.screen().contents().contains("row0016界"));
+        assert_eq!(
+            parser.screen().cell(0, 0).unwrap().fgcolor(),
+            vt100::Color::Idx(1)
+        );
+        let before = parser.screen().contents();
+        parser.process(b"\x1b[1;4r\x1b[4;1H\r\nnew\x1b[r");
+        assert_eq!(parser.screen().contents(), before);
+        assert_eq!(parser.screen().scrollback(), 11);
+        parser.set_scrollback(0);
+        history(&mut parser, 2100);
+        parser.set_scrollback(usize::MAX);
+        assert_eq!(parser.screen().scrollback(), 2000);
+        parser.set_size(8, 30);
+        assert_eq!(parser.screen().scrollback(), 2000);
+        parser.set_scrollback(0);
+        parser.process(b"\x1b[?1049h");
+        history(&mut parser, 20);
+        parser.set_scrollback(100);
+        assert_eq!(parser.screen().scrollback(), 0);
+        parser.process(b"\x1b[?1049l");
+        parser.set_scrollback(usize::MAX);
+        assert_eq!(parser.screen().scrollback(), 2000);
+        let mut interior = vt100::Parser::new(6, 24, 2000);
+        interior.process(b"\x1b[2;4r\x1b[4;1H");
+        interior.process(b"x\r\n".repeat(20).as_slice());
+        interior.set_scrollback(100);
+        assert_eq!(interior.screen().scrollback(), 0);
+    }
+
+    #[test]
+    fn wheel_scrolls_history_without_child_keys_and_preserves_folder_position() {
+        let mut manager = Manager {
+            area: Rect::new(10, 2, 24, 6),
+            ..Manager::default()
+        };
+        manager
+            .launch(
+                &command("import time; time.sleep(60)"),
+                None,
+                "scroll".into(),
+            )
+            .unwrap();
+        let folder = manager.active_folder().unwrap();
+        manager.sync_folder(Some(&folder));
+        manager.visible = true;
+        history(&mut manager.sessions[0].parser, 30);
+        let (writer, input) = mpsc::sync_channel(16);
+        manager.sessions[0].writer = writer;
+        let mouse = MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 12,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        };
+        manager.wheel(mouse).unwrap();
+        assert_eq!(manager.sessions[0].parser.screen().scrollback(), 3);
+        manager.sync_folder(None);
+        manager.sync_folder(Some(&folder));
+        assert_eq!(manager.sessions[0].parser.screen().scrollback(), 3);
+        manager.wheel(MouseEvent { column: 1, ..mouse }).unwrap();
+        assert_eq!(manager.sessions[0].parser.screen().scrollback(), 3);
+        manager.picker = true;
+        manager.wheel(mouse).unwrap();
+        assert_eq!(manager.sessions[0].parser.screen().scrollback(), 3);
+        manager.picker = false;
+        manager
+            .wheel(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                ..mouse
+            })
+            .unwrap();
+        assert_eq!(manager.sessions[0].parser.screen().scrollback(), 0);
+        manager.wheel(mouse).unwrap();
+        assert!(input.try_recv().is_err()); // Wheel browsing sends no child input.
+        manager.input(&Event::Paste("hello".into())).unwrap();
+        assert_eq!(input.try_recv().unwrap(), b"hello");
+        assert_eq!(manager.sessions[0].parser.screen().scrollback(), 0);
+        manager.wheel(mouse).unwrap();
+        manager
+            .input(&key(KeyCode::Char('a'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(manager.sessions[0].parser.screen().scrollback(), 0);
+        assert_eq!(input.try_recv().unwrap(), b"a");
+        manager.sessions[0]
+            .parser
+            .process(b"\x1b[?1000h\x1b[?1006h");
+        manager.wheel(mouse).unwrap();
+        assert_eq!(input.try_recv().unwrap(), b"\x1b[<64;3;2M");
+        manager.sessions[0]
+            .parser
+            .process(b"\x1b[?1000l\x1b[?1049h");
+        manager.sessions[0].alternate_scroll = false;
+        manager.wheel(mouse).unwrap();
+        assert!(input.try_recv().is_err());
+        manager.sessions[0].alternate_scroll = true;
+        manager.wheel(mouse).unwrap();
+        assert_eq!(input.try_recv().unwrap(), b"\x1b[A\x1b[A\x1b[A");
+    }
+
+    #[test]
+    fn wheel_protocol_coordinates_modifiers_and_alternate_scroll_modes() {
+        let area = Rect::new(10, 4, 400, 20);
+        let mouse = MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 12,
+            row: 5,
+            modifiers: KeyModifiers::CONTROL,
+        };
+        assert_eq!(
+            encode_wheel(mouse, area, vt100::MouseProtocolEncoding::Sgr),
+            b"\x1b[<80;3;2M"
+        );
+        assert_eq!(
+            encode_wheel(mouse, area, vt100::MouseProtocolEncoding::Default),
+            b"\x1b[Mp#\""
+        );
+        assert_eq!(
+            encode_wheel(mouse, area, vt100::MouseProtocolEncoding::Utf8),
+            b"\x1b[Mp#\""
+        );
+        assert!(
+            encode_wheel(
+                MouseEvent {
+                    column: 300,
+                    ..mouse
+                },
+                area,
+                vt100::MouseProtocolEncoding::Default
+            )
+            .is_empty()
+        );
+        let mut parser = vte::Parser::new();
+        let mut queries = Queries {
+            alternate_scroll: true,
+            cursor: (0, 0),
+            replies: vec![],
+        };
+        for byte in b"\x1b[?1007l" {
+            parser.advance(&mut queries, *byte);
+        }
+        assert!(!queries.alternate_scroll);
+        for byte in b"\x1b[?1;1007h" {
+            parser.advance(&mut queries, *byte);
+        }
+        assert!(queries.alternate_scroll);
+    }
+
     #[test]
     fn keys_preserve_child_controls() {
         for (code, mods, expected) in [
@@ -923,6 +1216,7 @@ mod tests {
     fn terminal_queries_fragmented_and_confined() {
         let mut parser = vte::Parser::new();
         let mut queries = Queries {
+            alternate_scroll: true,
             cursor: (3, 7),
             replies: vec![],
         };

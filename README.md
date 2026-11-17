@@ -366,13 +366,16 @@ Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
 Enter opens sessions inside the Sessions pane, with the rest of tracr still visible.
-**Alt+F** from the session list opens the session full-screen. Inside a session,
-Alt+F toggles between inline and full-screen without restarting it; **Ctrl+B** returns to the list, and **Alt+arrow keys**
+**Alt+F** toggles the displayed terminal between inline and full-screen from
+Sessions, Folders, or Git history, focusing the terminal without restarting it.
+It does nothing while the session selector is displayed. Enter opens a session;
+then Alt+F can maximize it. The action menu also offers Open session full-screen.
+**Ctrl+B** returns to the list, and **Alt+arrow keys**
 restore the panels and move focus. Alt+Enter inside Codex is forwarded to Codex.
-In Folders, **Alt+F** focuses the selected folder as the tree root, hiding ancestors
+In Folders, **Alt+Z** zooms into the selected folder as the tree root, hiding ancestors
 and unrelated branches. Its descendants and displayed worktrees remain navigable,
 including worktrees outside that directory. Search is restricted to this context;
-the search dialog and footer show the focused path. Press Alt+F in Folders again
+the search dialog and footer show the focused path. Press Alt+Z in Folders again
 to clear focus without changing the current selection. Navigation outside the
 context through another panel clears focus with a notice.
 
@@ -384,6 +387,13 @@ the full tree. Clearing focus is remembered too.
 At 100 columns and above, Folders fits the expanded tree up to 40% of the
 window width; Sessions uses the remaining space. Narrower windows show the
 focused panel. Scrolling or changing selection does not move the divider.
+The mouse wheel over a visible terminal scrolls its output history, even when
+Folders has keyboard focus. Up to 2,000 lines are kept per terminal. New output
+keeps your reading position; typing or pasting returns to the live screen. An
+indicator appears while viewing older output. CLIs that request mouse reporting
+receive wheel events themselves; their alternate-screen behavior is respected.
+Tracr dialogs block scrolling into the terminal behind them.
+
 Each folder remembers its Sessions panel for the current Tracr run. Navigating to
 another folder shows that folder's session list or its last displayed terminal;
 returning restores the same running process inline without changing keyboard focus.

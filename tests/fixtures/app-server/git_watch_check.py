@@ -48,7 +48,7 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
     try:
         t.expect('Watch second'); t.expect('[HEAD]'); settle()
         # Cross-repository search below intentionally uses the global scope.
-        t.send(b'\x1b[1;3D\x1bf\x1b[1;3C')
+        t.send(b'\x1b[1;3D\x1bz\x1b[1;3C')
         t.wait(lambda: 'Folders · Focused' not in t.text())
         commit('Watch external'); t.expect('Watch external'); t.expect('[HEAD]')
         git('tag', 'watch-tag'); t.expect('tag: watch-tag')
