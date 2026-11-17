@@ -70,6 +70,14 @@ if len(sys.argv) > 1 and sys.argv[1] in ('resume', '--cd'):
     if settings.get('ignore_term'):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     tty.setraw(0)
+    def report_size(*_):
+        if settings.get('report_size'):
+            size = os.get_terminal_size(0)
+            record = home / 'terminal-size.tmp'
+            record.write_text(json.dumps(dict(columns=size.columns, rows=size.lines, pid=os.getpid())))
+            record.replace(home / 'terminal-size.json')
+    signal.signal(signal.SIGWINCH, report_size)
+    report_size()
     (home / 'launch.json').write_text(json.dumps(dict(
         args=sys.argv[1:], cwd=os.getcwd(), home=os.environ['CODEX_HOME'],
         foreground=os.tcgetpgrp(0) == os.getpgrp(), pid=os.getpid())))

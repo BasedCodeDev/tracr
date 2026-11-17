@@ -914,7 +914,13 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     if area.width >= 100 {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints([
+                Constraint::Length(folder_pane_width(
+                    content.width,
+                    &folder_tree_labels(&browser.folder_rows()),
+                )),
+                Constraint::Min(0),
+            ])
             .split(content);
         for (index, pane) in panes.iter().enumerate() {
             draw_pane(frame, *pane, index, browser, view);
@@ -2117,6 +2123,16 @@ fn graph_viewport(spans: Vec<Span<'static>>, offset: usize, width: usize) -> Lin
         }
     }
     Line::from(clipped)
+}
+
+/// Fit the expanded tree while reserving at least 60% for Sessions.
+fn folder_pane_width(available: u16, labels: &[String]) -> u16 {
+    use unicode_width::UnicodeWidthStr;
+    // Measure every expanded row, not just the viewport or selected row.
+    let content = labels.iter().map(|label| label.width()).max().unwrap_or(0);
+    let desired = content.saturating_add(4).max("Folders".width() + 2);
+    let cap = usize::from(available) * 40 / 100;
+    desired.min(cap) as u16
 }
 
 /// Draw connectors from the complete displayed hierarchy, including projected
@@ -4956,6 +4972,53 @@ mod cleanup_tests {
         assert!(!view.git_hidden);
     }
 
+    #[test]
+    fn folder_width_fits_display_columns_and_caps_long_labels() {
+        assert_eq!(folder_pane_width(160, &[]), 9);
+        assert_eq!(folder_pane_width(160, &["project (2)".into()]), 15);
+        assert_eq!(folder_pane_width(160, &["├─ 界e\u{301} (12)".into()]), 15);
+        assert_eq!(folder_pane_width(160, &["◇ project * (2)".into()]), 19);
+        assert_eq!(folder_pane_width(101, &["x".repeat(100)]), 40);
+        let labels = vec!["short".into(), "x".repeat(80)];
+        assert_eq!(folder_pane_width(160, &labels), 64);
+        assert_eq!(folder_pane_width(240, &labels), 84);
+        assert_eq!(folder_pane_width(240, &labels[..1]), 9);
+    }
+
+    #[test]
+    fn folder_layout_reacts_to_expansion_but_not_selection_or_viewport() {
+        let mut browser = Browser::new(vec![]);
+        let path = std::path::PathBuf::from(format!("/parent/{}", "long-folder-".repeat(8)));
+        browser.open_folder(path.clone());
+        let mut view = View {
+            focus: 0,
+            ..View::default()
+        };
+        let divider = |browser: &Browser, view: &View, width, height| {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw(frame, browser, view)).unwrap();
+            (0..width)
+                .find(|&x| terminal.backend().buffer()[(x, 0)].symbol() == "┓")
+                .unwrap()
+                + 1
+        };
+        assert_eq!(divider(&browser, &view, 99, 20), 99);
+        assert_eq!(divider(&browser, &view, 100, 20), 40);
+        assert_eq!(divider(&browser, &view, 160, 20), 64);
+        browser.folder = FolderFilter::Unlinked;
+        assert_eq!(divider(&browser, &view, 160, 6), 64);
+        browser.expanded.remove(std::path::Path::new("/parent"));
+        let collapsed = divider(&browser, &view, 160, 20);
+        assert!(collapsed < 64);
+        browser.expanded.insert("/parent".into());
+        assert_eq!(divider(&browser, &view, 160, 20), 64);
+        view.focus = 1;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(99, 20)).unwrap();
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        assert_eq!(terminal.backend().buffer()[(98, 0)].symbol(), "┓");
+    }
+
     #[tokio::test]
     async fn git_strip_layout_and_focus_rendering() {
         let browser = Browser::new(vec![]);
@@ -4974,7 +5037,8 @@ mod cleanup_tests {
             let buffer = terminal.backend().buffer();
             assert_eq!(buffer[(0, 0)].fg, Color::DarkGray);
             if width >= 100 {
-                assert_eq!(buffer[(60, 0)].fg, Color::DarkGray);
+                let divider = folder_pane_width(width, &folder_tree_labels(&browser.folder_rows()));
+                assert_eq!(buffer[(divider, 0)].fg, Color::DarkGray);
             }
             let text = buffer
                 .content

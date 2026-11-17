@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
     executable = home / 'fake'
     shutil.copyfile(Path(__file__).with_name('fake.py'), executable)
     executable.chmod(0o755)
-    (home/'fake.json').write_text('{}')
+    (home/'fake.json').write_text(json.dumps({'report_size': True}))
     (home/'resume').mkdir()
     (home/'listed').mkdir()
     command = [binary, '--codex-home', directory, '--codex-bin', str(executable), str(home/'listed')]
@@ -27,6 +27,19 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.expect('Ctrl+B background')
         assert 'Folders' in terminal.text()
         assert os.tcgetpgrp(terminal.master) == terminal.child.pid
+        def size():
+            return json.loads((home/'terminal-size.json').read_text())
+        terminal.wait(lambda: (home/'terminal-size.json').exists())
+        initial_columns = size()['columns']
+        assert initial_columns > 240 // 2, size()
+        terminal.resize(40, 160)
+        terminal.wait(lambda: size()['columns'] < initial_columns)
+        assert size()['columns'] >= 160 - 160 * 40 // 100 - 2, size()
+        assert size()['pid'] == first['pid']
+        terminal.resize(40, 99)
+        terminal.wait(lambda: size()['columns'] == 97)
+        terminal.resize(80, 240)
+        terminal.wait(lambda: size()['columns'] == initial_columns)
         # Pane navigation stays in tracr, with the same PTY still displayed.
         terminal.send(b'\x1b[1;3D')
         terminal.expect('Enter Sessions')

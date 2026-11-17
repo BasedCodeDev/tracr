@@ -366,6 +366,9 @@ Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
 Sessions open inside the Sessions pane, with the rest of tracr still visible.
+At 100 columns and above, Folders fits the expanded tree up to 40% of the
+window width; Sessions uses the remaining space. Narrower windows show the
+focused panel. Scrolling or changing selection does not move the divider.
 **Ctrl+B** backgrounds the terminal and returns to the session list; selecting an
 open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Alt+arrow keys** move focus between panels
 without backgrounding the terminal; input goes to whichever panel is focused.

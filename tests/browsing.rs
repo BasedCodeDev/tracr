@@ -1851,7 +1851,12 @@ async fn folder_pane_scrolls_whole_tree_and_resets_for_short_selection_and_resiz
         let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
         let pane_width = if width >= 100 {
-            width * 50 / 100
+            let divider = (0..width)
+                .find(|x| terminal.backend().buffer()[(*x, 0)].symbol() == "┓")
+                .unwrap()
+                + 1;
+            assert!(divider <= width * 40 / 100);
+            divider
         } else {
             width
         };
