@@ -807,10 +807,10 @@ impl Manager {
             }
             return Ok(Input::Consumed);
         }
-        // Pane navigation belongs to tracr even while the child has input focus.
-        if matches!(event, Event::Key(key) if key.modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down))
+        // Inline sessions retain pane navigation; fullscreen sessions receive these keys.
+        if !self.fullscreen
+            && matches!(event, Event::Key(key) if key.modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down))
         {
-            self.fullscreen = false;
             return Ok(Input::Pass);
         }
         let Some(id) = self.active else {
@@ -1848,6 +1848,23 @@ time.sleep(60)
             )))
             .unwrap();
         assert!(manager.fullscreen);
+        for (direction, expected) in [
+            (KeyCode::Left, "1b5b313b3344"),
+            (KeyCode::Right, "1b5b313b3343"),
+            (KeyCode::Up, "1b5b313b3341"),
+            (KeyCode::Down, "1b5b313b3342"),
+        ] {
+            assert!(matches!(
+                manager.input(&key(direction, KeyModifiers::ALT)).unwrap(),
+                Input::Consumed
+            ));
+            assert!(manager.fullscreen);
+            assert!(manager.active.is_some());
+            assert_eq!(manager.sessions[0].pid, pid);
+            wait(&mut manager, |m| {
+                m.sessions[0].parser.screen().contents().contains(expected)
+            });
+        }
         manager
             .input(&key(KeyCode::Char('f'), KeyModifiers::ALT))
             .unwrap();
@@ -1861,6 +1878,10 @@ time.sleep(60)
             assert!(manager.active.is_some());
         }
 
+        manager
+            .input(&key(KeyCode::Char('f'), KeyModifiers::ALT))
+            .unwrap();
+        assert!(manager.fullscreen);
         assert!(matches!(
             manager
                 .input(&key(KeyCode::Char('b'), KeyModifiers::CONTROL))
@@ -1868,6 +1889,7 @@ time.sleep(60)
             Input::Consumed
         ));
         assert_eq!(manager.active, None);
+        assert!(!manager.fullscreen);
         wait(&mut manager, |m| {
             m.sessions[0]
                 .parser

@@ -377,8 +377,9 @@ Enter opens sessions inside the Sessions pane, with the rest of tracr still visi
 Sessions, Folders, or Git history, focusing the terminal without restarting it.
 It does nothing while the session selector is displayed. Enter opens a session;
 then Alt+F can maximize it. The action menu also offers Open session full-screen.
-**Ctrl+B** returns to the list, and **Alt+arrow keys**
-restore the panels and move focus. Alt+Enter inside Codex is forwarded to Codex.
+**Ctrl+B** returns to the list. **Alt+arrow keys** move panel focus in inline mode.
+In full-screen mode, they are forwarded to the session without revealing panels
+or leaving full-screen. Alt+Enter inside Codex is forwarded to Codex.
 In Folders, **Alt+Z** zooms into the selected folder as the tree root, hiding ancestors
 and unrelated branches. Its descendants and displayed worktrees remain navigable,
 including worktrees outside that directory. Search is restricted to this context;
@@ -424,7 +425,7 @@ Parent folders and worktrees have independent views. If a terminal exits, its
 folder returns to the session list. Choosing an open terminal from the terminal
 picker navigates to its folder.
 **Ctrl+B** backgrounds the terminal and remembers the session-list view for that folder; selecting an
-open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Alt+arrow keys** move focus between panels
+open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Alt+arrow keys** in inline mode move focus between panels
 without backgrounding the terminal; input goes to whichever panel is focused.
 From the browser, press **b** for Open terminals (including newly started sessions),
 or **x** in Sessions to close a terminal. Closure requires confirmation.

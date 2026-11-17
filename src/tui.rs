@@ -1498,6 +1498,7 @@ fn available_when_folders_hidden(command: Command) -> bool {
     matches!(
         command,
         Command::FolderToggle
+            | Command::ToggleTerminalFullscreen
             | Command::Help
             | Command::Quit
             | Command::Refresh
@@ -5028,11 +5029,18 @@ mod cleanup_tests {
 
     #[test]
     fn alt_f_only_toggles_a_displayed_terminal_from_any_pane() {
-        for (focus, git_focus) in [(0, false), (1, false), (0, true), (1, true)] {
+        for (focus, git_focus, folders_hidden) in [
+            (0, false, false),
+            (1, false, false),
+            (0, true, false),
+            (1, true, false),
+            (0, false, true),
+        ] {
             let mut browser = Browser::new(vec![]);
             let mut view = View {
                 focus,
                 git_focus,
+                folders_hidden,
                 ..View::default()
             };
             let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT);
