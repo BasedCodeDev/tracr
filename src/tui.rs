@@ -1498,6 +1498,7 @@ fn available_when_folders_hidden(command: Command) -> bool {
     matches!(
         command,
         Command::FolderToggle
+            | Command::OpenTerminals
             | Command::ToggleTerminalFullscreen
             | Command::Help
             | Command::Quit
@@ -1639,16 +1640,16 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         entries.push((
             FolderToggle,
             "Folders",
-            "g",
+            "b",
             if view.folders_hidden {
                 "Expand Folders pane"
             } else {
                 "Collapse Folders pane"
             },
             Some(if view.folders_hidden {
-                ("g Expand", "g Expand")
+                ("b Expand", "b Expand")
             } else {
-                ("g Collapse", "g Collapse")
+                ("b Collapse", "b Collapse")
             }),
         ));
         entries.extend([
@@ -1746,16 +1747,16 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         entries.push((
             GitToggle,
             "Git",
-            "g",
+            "b",
             if view.git_hidden {
                 "Expand Git history"
             } else {
                 "Collapse Git history"
             },
             Some(if view.git_hidden {
-                ("g Expand", "g Expand")
+                ("b Expand", "b Expand")
             } else {
-                ("g Collapse", "g Collapse")
+                ("b Collapse", "b Collapse")
             }),
         ));
         if !view.git_hidden && !view.git_size_limited {
@@ -1865,9 +1866,9 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         entries.push((
             OpenTerminals,
             "Terminals",
-            "b",
+            "g",
             "Open terminals",
-            Some(("b Terminals", "b Terminals")),
+            Some(("g Terminals", "g Terminals")),
         ));
         entries.push((CloseTerminal, "Terminals", "x", "Close terminal", None));
         if view.terminals.borrow().active.is_some() {
@@ -3256,9 +3257,9 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
     }
     if view.git_focus {
         let command = match key.code {
-            KeyCode::Char('g') => Command::GitToggle,
+            KeyCode::Char('b') => Command::GitToggle,
             KeyCode::Esc => Command::GitReturn,
-            KeyCode::Char('b') => Command::OpenTerminals,
+            KeyCode::Char('g') => Command::OpenTerminals,
             KeyCode::Char('x') if view.focus == 1 => Command::CloseTerminal,
             KeyCode::Char('q') => Command::Quit,
             KeyCode::Char('r') => Command::Refresh,
@@ -3291,7 +3292,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                 .unwrap_or(0);
             return Action::Continue;
         }
-        KeyCode::Char('b') => Command::OpenTerminals,
+        KeyCode::Char('g') => Command::OpenTerminals,
         KeyCode::Char('x') if view.focus == 1 => Command::CloseTerminal,
         KeyCode::Char('q') => Command::Quit,
         KeyCode::Char('/') => Command::Search,
@@ -3299,7 +3300,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('i') if !view.git_focus => Command::Info,
         KeyCode::Char('n') if view.focus == 1 => Command::Create,
         KeyCode::Char('R') if view.focus == 1 => Command::Relink,
-        KeyCode::Char('g') if view.focus == 0 => Command::FolderToggle,
+        KeyCode::Char('b') if view.focus == 0 => Command::FolderToggle,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
         KeyCode::Char('w') if view.focus == 0 => Command::CreateWorktree,
         KeyCode::Char('u') => Command::Recover,
@@ -4006,7 +4007,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             view.help_page_size =
                 usize::from(size.height.saturating_sub(2).min(22).saturating_sub(7))
                     / if size.width < 58 { 2 } else { 1 };
-            terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame); })?;
+            terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame, &browser); })?;
             guard.mouse_capture(view.terminals.borrow().active.is_some())?;
             idle.deadline = next_age_update(&browser, &view, size.height);
             }
@@ -5314,6 +5315,24 @@ mod cleanup_tests {
         }
     }
 
+    #[test]
+    fn g_opens_navigator_from_each_pane_including_collapsed_ones() {
+        for (focus, git_focus) in [(0, false), (1, false), (0, true)] {
+            let mut browser = Browser::new(vec![]);
+            let mut view = View {
+                focus,
+                git_focus,
+                folders_hidden: true,
+                git_hidden: true,
+                ..View::default()
+            };
+            press(&mut browser, &mut view, KeyCode::Char('g'));
+            assert!(view.terminals.borrow().picker);
+            assert!(view.folders_hidden && view.git_hidden);
+            assert_eq!((view.focus, view.git_focus), (focus, git_focus));
+        }
+    }
+
     #[tokio::test]
     async fn git_context_collapse_and_focus_transitions() {
         let mut browser = Browser::new(vec![]);
@@ -5328,7 +5347,7 @@ mod cleanup_tests {
         let press = |browser: &mut Browser, view: &mut View, code| {
             handle_key(browser, view, KeyEvent::new(code, KeyModifiers::NONE));
         };
-        press(&mut browser, &mut view, KeyCode::Char('g'));
+        press(&mut browser, &mut view, KeyCode::Char('b'));
         assert!(!view.git_hidden);
         press(&mut browser, &mut view, KeyCode::Tab);
         assert_eq!(view.context(), 2);
@@ -5345,13 +5364,13 @@ mod cleanup_tests {
         )));
         view.history.selected = 7;
         view.history.horizontal.set(3);
-        press(&mut browser, &mut view, KeyCode::Char('g'));
+        press(&mut browser, &mut view, KeyCode::Char('b'));
         assert!(view.git_hidden);
         assert_eq!(view.context(), 2);
         assert!(
             footer_shortcuts(100, &browser, &view)
                 .1
-                .contains("g Expand")
+                .contains("b Expand")
         );
         assert!(
             !menu_entries(&browser, &view)
@@ -5385,7 +5404,7 @@ mod cleanup_tests {
                 .any(|e| e.command == Command::GitLeft)
         );
         view.git_size_limited = false;
-        press(&mut browser, &mut view, KeyCode::Char('g'));
+        press(&mut browser, &mut view, KeyCode::Char('b'));
         press(&mut browser, &mut view, KeyCode::BackTab);
         assert_eq!(view.context(), 1);
         assert!(view.git_hidden);
@@ -5408,14 +5427,14 @@ mod cleanup_tests {
         let folder = browser.folder.clone();
         let expanded = browser.expanded.clone();
         let selected = browser.selected.clone();
-        press(&mut browser, &mut view, KeyCode::Char('g'));
+        press(&mut browser, &mut view, KeyCode::Char('b'));
         assert!(view.folders_hidden);
         assert!(!view.git_hidden);
         assert_eq!(view.context(), 0);
         assert!(
             footer_shortcuts(100, &browser, &view)
                 .1
-                .contains("g Expand")
+                .contains("b Expand")
         );
         for code in [
             KeyCode::Char('h'),
@@ -5447,13 +5466,13 @@ mod cleanup_tests {
             .unwrap();
         press(&mut browser, &mut view, KeyCode::Enter);
         assert!(!view.folders_hidden && !view.help);
-        press(&mut browser, &mut view, KeyCode::Char('g'));
+        press(&mut browser, &mut view, KeyCode::Char('b'));
         press(&mut browser, &mut view, KeyCode::Tab);
         assert!(view.folders_hidden);
-        press(&mut browser, &mut view, KeyCode::Char('g'));
+        press(&mut browser, &mut view, KeyCode::Char('b'));
         assert!(view.folders_hidden && !view.git_hidden);
         press(&mut browser, &mut view, KeyCode::Tab);
-        press(&mut browser, &mut view, KeyCode::Char('g'));
+        press(&mut browser, &mut view, KeyCode::Char('b'));
         assert!(view.folders_hidden && view.git_hidden);
         press(&mut browser, &mut view, KeyCode::Tab);
         assert_eq!(view.context(), 0);
@@ -5463,13 +5482,13 @@ mod cleanup_tests {
             Command::PaneLeft,
             Command::CyclePaneBack,
         ] {
-            press(&mut browser, &mut view, KeyCode::Char('g'));
+            press(&mut browser, &mut view, KeyCode::Char('b'));
             execute_command(Command::PaneRight, &mut browser, &mut view);
             execute_command(command, &mut browser, &mut view);
             assert_eq!(view.context(), 0);
             assert!(!view.folders_hidden);
         }
-        press(&mut browser, &mut view, KeyCode::Char('g'));
+        press(&mut browser, &mut view, KeyCode::Char('b'));
         execute_command(Command::PaneDown, &mut browser, &mut view);
         execute_command(Command::GitReturn, &mut browser, &mut view);
         assert!(!view.folders_hidden);
@@ -5596,7 +5615,7 @@ mod cleanup_tests {
                 .collect::<String>();
             assert!(text.contains("Git Worktrees"));
             assert!(!text.contains("Git history"));
-            assert!(text.contains("g Expand"));
+            assert!(text.contains("b Expand"));
             let divider = buffer
                 .content
                 .iter()

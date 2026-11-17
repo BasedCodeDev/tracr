@@ -282,7 +282,7 @@ def run_new_case(binary, codex, home):
         result['phases'].append({'phase': 'new-session-directory', 'status': 'passed'})
         terminal.send(b'\x02')
         terminal.expect('Folders')
-        terminal.send(b'b')
+        terminal.send(b'g')
         terminal.expect('Open terminals')
         terminal.send(b'x')
         terminal.expect('Close this terminal?')

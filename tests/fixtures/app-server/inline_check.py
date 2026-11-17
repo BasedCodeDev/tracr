@@ -91,6 +91,9 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.wait(lambda: size()['columns'] == 240 and size()['rows'] == 80)
         terminal.resize(45, 150)
         terminal.wait(lambda: size()['columns'] == 150 and size()['rows'] == 45)
+        # Fullscreen owns Alt+arrows; explicitly return inline before navigating.
+        terminal.send(b'\x1bf')
+        terminal.expect('Ctrl+B background')
         terminal.send(b'\x1b[1;3D')
         terminal.expect('Enter Sessions')
         terminal.expect('Ctrl+B background')
@@ -123,7 +126,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.wait(lambda: 'Folders' not in terminal.text())
         terminal.send(b'\x02')
         terminal.expect('Open here')
-        terminal.send(b'b')
+        terminal.send(b'g')
         terminal.expect('Open terminals')
         terminal.expect('#1 Task')
         terminal.expect('#2 Task')

@@ -6,9 +6,9 @@ use crossterm::event::{
 use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Row, Table, TableState},
 };
 use std::{
     fs::{File, OpenOptions},
@@ -785,9 +785,11 @@ impl Manager {
                     return Ok(Input::Consumed);
                 }
                 match key.code {
-                    KeyCode::Esc | KeyCode::Char('b') => self.picker = false,
-                    KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-                    KeyCode::Down => {
+                    KeyCode::Esc | KeyCode::Char('g') => self.picker = false,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        self.selected = self.selected.saturating_sub(1)
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
                         self.selected =
                             (self.selected + 1).min(self.sessions.len().saturating_sub(1))
                     }
@@ -971,8 +973,124 @@ impl Manager {
         }
         true
     }
-    pub fn draw_overlay(&self, frame: &mut Frame<'_>) {
+    fn draw_navigator(&self, frame: &mut Frame<'_>, browser: &crate::browser::Browser) {
+        let screen = frame.area();
+        let width = screen
+            .width
+            .saturating_sub(4)
+            .min(110)
+            .max(screen.width.min(12));
+        let height = (self.sessions.len().saturating_add(4).min(u16::MAX as usize) as u16)
+            .max(5)
+            .min(screen.height.saturating_sub(2).max(screen.height.min(3)));
+        let area = Rect::new(
+            screen.x + (screen.width - width) / 2,
+            screen.y + (screen.height - height) / 2,
+            width,
+            height,
+        );
+        let accent = Color::Rgb(215, 164, 226);
+        frame.render_widget(Clear, area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(accent))
+            .title(format!(" Open terminals ({}) ", self.sessions.len()));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let rows_area = Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
+        if self.sessions.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No open terminals").style(Style::default().fg(Color::DarkGray)),
+                rows_area,
+            );
+        } else {
+            let rows = self.sessions.iter().enumerate().map(|(index, s)| {
+                let branch = if index + 1 == self.sessions.len() {
+                    "└─"
+                } else {
+                    "├─"
+                };
+                let marker = if self.active == Some(s.id) {
+                    "◆"
+                } else {
+                    "○"
+                };
+                let title = format!(
+                    "{branch} {marker} #{} {}",
+                    s.id,
+                    crate::browser::safe_text(&s.title)
+                );
+                let provider = s
+                    .key
+                    .as_ref()
+                    .map_or("terminal", |key| key.provider.0.as_str());
+                let status = if s.stopping.is_some() {
+                    "closing"
+                } else {
+                    match s.key.as_ref().map(|key| browser.runtime_status(key)) {
+                        Some(crate::domain::RuntimeStatus::Idle) => "idle",
+                        Some(crate::domain::RuntimeStatus::Running) => "working",
+                        Some(crate::domain::RuntimeStatus::Waiting { .. }) => "waiting",
+                        Some(crate::domain::RuntimeStatus::Error) => "error",
+                        _ => "open",
+                    }
+                };
+                let cells = if inner.width >= 45 {
+                    vec![
+                        title,
+                        crate::browser::safe_text(provider),
+                        status.to_owned(),
+                    ]
+                } else {
+                    vec![title]
+                };
+                Row::new(cells)
+            });
+            let widths = if inner.width >= 45 {
+                vec![
+                    Constraint::Min(1),
+                    Constraint::Length(12),
+                    Constraint::Length(8),
+                ]
+            } else {
+                vec![Constraint::Min(1)]
+            };
+            let table = Table::new(rows, widths)
+                .column_spacing(2)
+                .style(Style::default().fg(accent))
+                .row_highlight_style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(accent)
+                        .add_modifier(Modifier::BOLD),
+                );
+            frame.render_stateful_widget(
+                table,
+                rows_area,
+                &mut TableState::default().with_selected(Some(self.selected)),
+            );
+        }
+        if inner.height > 0 {
+            frame.render_widget(
+                Paragraph::new("↑/↓ j/k Select · Enter Attach · x Close · g/Esc Back")
+                    .style(Style::default().fg(Color::DarkGray)),
+                Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+            );
+        }
+    }
+
+    pub fn draw_overlay(&self, frame: &mut Frame<'_>, browser: &crate::browser::Browser) {
         if !self.picker && self.confirmation.is_none() {
+            return;
+        }
+        if self.confirmation.is_none() {
+            self.draw_navigator(frame, browser);
             return;
         }
         let area = frame.area();
@@ -992,8 +1110,6 @@ impl Manager {
                 Confirmation::Close(_) => "Close this terminal? Running work will stop.".into(),
             });
             lines.push("y Confirm · Esc Cancel".into());
-        } else {
-            lines.push("Enter Attach · x Close terminal · Esc Back".into());
         }
         for (index, s) in self.sessions.iter().enumerate() {
             if matches!(&self.confirmation, Some(Confirmation::Close(id)) if *id != s.id) {
@@ -1013,12 +1129,6 @@ impl Manager {
         }
         if self.sessions.is_empty() {
             lines.push("No open terminals".into());
-        }
-        let offset = self
-            .selected
-            .saturating_sub(usize::from(area.height.saturating_sub(5)));
-        if self.confirmation.is_none() && offset > 0 {
-            lines.drain(1..=offset);
         }
         frame.render_widget(
             Paragraph::new(lines.join("\n")).block(
@@ -1814,6 +1924,76 @@ time.sleep(60)
         assert_eq!(queries.replies[1], b"\x1b]11;rgb:0000/0000/0000\x1b\\");
         assert_eq!(queries.replies[2], b"\x1b[?0u");
     }
+    #[test]
+    fn navigator_highlights_scrolls_and_keeps_close_confirmation() {
+        let browser = crate::browser::Browser::new(vec![]);
+        let mut manager = Manager {
+            picker: true,
+            ..Manager::default()
+        };
+        for title in ["First", "Second", "Last 界"] {
+            manager
+                .launch(&command("import time; time.sleep(30)"), None, title.into())
+                .unwrap();
+        }
+        manager
+            .input(&key(KeyCode::Char('j'), KeyModifiers::NONE))
+            .unwrap();
+        manager
+            .input(&key(KeyCode::Char('j'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(manager.selected, 2);
+        for (width, height) in [(100, 12), (35, 7), (12, 5), (1, 1)] {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| manager.draw_overlay(frame, &browser))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            if width >= 35 {
+                let text = buffer
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>();
+                assert!(text.contains("Last 界"));
+                let highlighted: Vec<_> = buffer
+                    .content
+                    .iter()
+                    .filter(|cell| cell.bg == Color::Rgb(215, 164, 226))
+                    .collect();
+                assert!(!highlighted.is_empty());
+                assert!(highlighted.iter().all(|cell| cell.fg == Color::Black));
+                if width >= 100 {
+                    assert!(text.contains("terminal"));
+                    assert!(text.contains("open"));
+                }
+            }
+        }
+        manager
+            .input(&key(KeyCode::Char('k'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(manager.selected, 1);
+        manager
+            .input(&key(KeyCode::Char('x'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(manager.confirmation, Some(Confirmation::Close(_))));
+        manager
+            .input(&key(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        assert!(manager.confirmation.is_none() && manager.picker);
+        manager
+            .input(&key(KeyCode::Char('g'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!manager.picker);
+        manager.picker = true;
+        manager
+            .input(&key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(manager.active, Some(manager.sessions[1].id));
+        assert!(!manager.picker);
+    }
+
     #[test]
     fn background_output_reattach_input_resize_and_render() {
         let mut manager = Manager {

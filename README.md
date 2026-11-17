@@ -226,8 +226,8 @@ when Folders is collapsed: its two-column strip sits beside Sessions.
   it focuses Sessions for that folder. Left / `h` collapses the folder or selects
   its displayed parent. Enter focuses Sessions directly; Escape or Backspace
   returns to Folders. Left / Right and `h/l` do nothing in Sessions.
-- `g` in Folders collapses the entire pane to a two-column strip with a vertical line and no label,
-  giving Sessions the remaining width. Focus stays on the line; `g` expands it.
+- `b` in Folders collapses the entire pane to a two-column strip with a vertical line and no label,
+  giving Sessions the remaining width. Focus stays on the line; `b` expands it.
   Folder selection and expanded tree nodes are preserved. Hidden folder actions
   are disabled; pane navigation, help, refresh, and quit remain available.
   Leaving preserves the collapsed state; returning through pane navigation
@@ -245,7 +245,7 @@ when Folders is collapsed: its two-column strip sits beside Sessions.
 - In Git history, Home / End selects the first / last loaded commit or session; approaching
   the end loads more history. Left / Right or `h/l` scrolls horizontally. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
-  root follows HEAD automatically. `g` collapses or expands history while Git has
+  root follows HEAD automatically. `b` collapses or expands history while Git has
   focus. Collapse leaves a focused
   strip with an Expand action; Escape returns focus to the upper pane from which
   Git was entered. Leaving Git keeps its expanded/collapsed state, remembered
@@ -428,8 +428,10 @@ picker navigates to its folder.
 **Ctrl+B** backgrounds the terminal and remembers the session-list view for that folder; selecting an
 open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Alt+arrow keys** in inline mode move focus between panels
 without backgrounding the terminal; input goes to whichever panel is focused.
-From the browser, press **b** for Open terminals (including newly started sessions),
-or **x** in Sessions to close a terminal. Closure requires confirmation.
+From the browser, press **g** for Open terminals (including newly started sessions).
+The navigator lists open terminals with aligned provider and status columns; use
+↑/↓ or j/k to select, Enter to attach, and g or Escape to return.
+Use **x** in Sessions or the navigator to close a terminal. Closure requires confirmation.
 New terminals keep their own entries until closed; tracr does not infer their
 Codex session identity from timing or directory names.
 
