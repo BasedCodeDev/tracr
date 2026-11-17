@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 enum ResultStage {
     Context(Context),
-    Preview(Plan),
+    Prepared(Plan),
     Created(PathBuf),
 }
 pub struct Modal {
@@ -20,15 +20,11 @@ pub struct Modal {
     pub branch: String,
     pub destination: String,
     pub focus: usize,
-    pub plan: Option<Plan>,
     pub error: Option<String>,
     pub executing: bool,
     task: Option<tokio::task::JoinHandle<Result<ResultStage, String>>>,
     edited_destination: bool,
     caret: [usize; 2],
-    scroll: u16,
-    preview_focus: usize,
-    scroll_limit: std::cell::Cell<u16>,
 }
 impl Drop for Modal {
     fn drop(&mut self) {
@@ -46,14 +42,10 @@ impl Modal {
             branch: String::new(),
             destination: String::new(),
             focus: 0,
-            plan: None,
             error: None,
             executing: false,
             edited_destination: false,
             caret: [0, 0],
-            scroll: 0,
-            preview_focus: 1,
-            scroll_limit: std::cell::Cell::new(0),
             task: Some(tokio::spawn(async move {
                 backend::context(&origin, commit.as_deref())
                     .await
@@ -80,10 +72,11 @@ impl Modal {
                 self.caret[1] = self.destination.len();
                 self.context = Some(context);
             }
-            Ok(ResultStage::Preview(plan)) => {
-                self.plan = Some(plan);
-                self.preview_focus = 1;
-                self.scroll = 0;
+            Ok(ResultStage::Prepared(plan)) => {
+                self.executing = true;
+                self.task = Some(tokio::spawn(async move {
+                    backend::execute(plan).await.map(ResultStage::Created)
+                }));
             }
             Ok(ResultStage::Created(path)) => {
                 self.executing = false;
@@ -92,7 +85,6 @@ impl Modal {
             Err(error) => {
                 if self.executing {
                     self.executing = false;
-                    self.plan = None;
                     return Some(Err(error));
                 }
                 self.error = Some(error);
@@ -114,7 +106,7 @@ impl Modal {
         }
     }
     pub fn paste(&mut self, text: &str) {
-        if self.task.is_some() || self.plan.is_some() || self.focus > 1 {
+        if self.task.is_some() || self.focus > 1 {
             return;
         }
         let input = if self.focus == 0 {
@@ -136,10 +128,6 @@ impl Modal {
             return false;
         }
         if key.code == KeyCode::Esc {
-            if self.plan.take().is_some() {
-                self.scroll = 0;
-                return false;
-            }
             return true;
         }
         if self.task.is_some() || self.context.is_none() {
@@ -147,36 +135,6 @@ impl Modal {
                 self.focus = 2;
             }
             return self.focus == 2 && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '));
-        }
-        if let Some(plan) = &self.plan {
-            match key.code {
-                KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
-                    &mut self.preview_focus,
-                    &[true, true],
-                    key.code == KeyCode::BackTab,
-                ),
-                KeyCode::Enter | KeyCode::Char(' ') if key.kind != KeyEventKind::Repeat => {
-                    if self.preview_focus == 0 {
-                        self.plan = None;
-                        return false;
-                    }
-                    let plan = plan.clone();
-                    self.executing = true;
-                    self.task = Some(tokio::spawn(async move {
-                        backend::execute(plan).await.map(ResultStage::Created)
-                    }));
-                }
-                KeyCode::Down | KeyCode::PageDown => {
-                    self.scroll = self.scroll.saturating_add(1).min(self.scroll_limit.get())
-                }
-                KeyCode::Up | KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(1),
-                KeyCode::Home => self.scroll = 0,
-                _ => {}
-            }
-            return false;
-        }
-        if self.context.is_none() {
-            return false;
         }
         match key.code {
             KeyCode::Tab => crate::modal::cycle(&mut self.focus, &[true, true, true, true], false),
@@ -200,7 +158,7 @@ impl Modal {
                         self.task = Some(tokio::spawn(async move {
                             backend::prepare(context, branch, destination)
                                 .await
-                                .map(ResultStage::Preview)
+                                .map(ResultStage::Prepared)
                         }));
                     }
                     Err(error) => self.error = Some(error),
@@ -226,16 +184,7 @@ impl Modal {
             frame.render_widget(Paragraph::new("Create worktree: enlarge terminal"), area);
             return;
         }
-        let inner = crate::modal::shell(
-            frame,
-            if self.plan.is_some() {
-                "Review new worktree"
-            } else {
-                "Create worktree"
-            },
-            96,
-            28,
-        );
+        let inner = crate::modal::shell(frame, "Create worktree", 96, 28);
         let sections = crate::modal::regions(inner);
         let mut lines = vec![];
         if let Some(context) = &self.context {
@@ -250,28 +199,6 @@ impl Modal {
             )));
             lines.push(Line::from(""));
         }
-        if let Some(plan) = &self.plan {
-            let portability = if plan.outside {
-                "This destination is outside the project. Moving the project alone will not move this worktree."
-            } else {
-                "Move the whole main checkout to keep these relative Git links intact. External moves do not update Codex session paths."
-            };
-            let exclusion = plan.exclusion.as_ref().map_or_else(
-                || "No new local exclusion is needed.".to_owned(),
-                |pattern| format!("Add local exclusion {pattern} to {}. Tracked .gitignore files stay unchanged.", plan.context.common.join("info/exclude").display()),
-            );
-            let details = [
-                format!("New branch: {}", plan.branch),
-                format!("Destination: {}", plan.destination.display()),
-                String::new(),
-                "Starts from committed content; uncommitted changes stay in the source checkout.".into(),
-                "Relative Git links require Git 2.48+ and compatible tools. Git enables a repository extension; older Git cannot open this repository.".into(),
-                portability.into(), exclusion,
-            ];
-            for line in details {
-                lines.push(Line::from(crate::browser::safe_text(&line)));
-            }
-        }
         let summary = lines
             .iter()
             .map(|line| {
@@ -282,50 +209,48 @@ impl Modal {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        if self.plan.is_some() {
-            self.scroll_limit.set(crate::modal::body(
-                frame,
-                sections.body,
-                summary,
-                self.scroll,
-            ));
-        } else {
-            let gap = u16::from(sections.body.height >= 12);
-            let summary_height = Paragraph::new(summary.clone())
-                .wrap(Wrap { trim: false })
-                .line_count(sections.body.width)
-                .min(4) as u16;
-            let summary_height =
-                summary_height.min(sections.body.height.saturating_sub(6 + 2 * gap));
-            let fields = Layout::vertical([
-                Constraint::Length(summary_height),
-                Constraint::Length(gap),
-                Constraint::Length(3),
-                Constraint::Length(gap),
-                Constraint::Length(3),
-                Constraint::Min(0),
-            ])
-            .split(sections.body);
-            crate::modal::body(frame, fields[0], summary, 0);
-            crate::modal::text_field(
-                frame,
-                fields[2],
-                "New branch",
-                &self.branch,
-                self.caret[0],
-                self.focus == 0,
-                self.task.is_none(),
-            );
-            crate::modal::text_field(
-                frame,
-                fields[4],
-                "Destination",
-                &self.destination,
-                self.caret[1],
-                self.focus == 1,
-                self.task.is_none(),
-            );
+        let notes = "Committed content only; uncommitted changes stay in the source.\nEnables relative links: this repository will require Git 2.48+.\nIn-project destinations are ignored locally; outside paths stay separate.";
+        let notes_height = Paragraph::new(notes)
+            .wrap(Wrap { trim: false })
+            .line_count(sections.body.width) as u16;
+        let gap = u16::from(sections.body.height >= 12 + notes_height);
+        let summary_height = Paragraph::new(summary.clone())
+            .wrap(Wrap { trim: false })
+            .line_count(sections.body.width)
+            .min(4) as u16;
+        if sections.body.height < summary_height + 6 + 2 * gap + notes_height {
+            frame.render_widget(Paragraph::new("Create worktree: enlarge terminal"), area);
+            return;
         }
+        let fields = Layout::vertical([
+            Constraint::Length(summary_height),
+            Constraint::Length(gap),
+            Constraint::Length(3),
+            Constraint::Length(gap),
+            Constraint::Length(3),
+            Constraint::Min(notes_height),
+        ])
+        .split(sections.body);
+        crate::modal::body(frame, fields[0], summary, 0);
+        crate::modal::text_field(
+            frame,
+            fields[2],
+            "New branch",
+            &self.branch,
+            self.caret[0],
+            self.focus == 0,
+            self.task.is_none(),
+        );
+        crate::modal::text_field(
+            frame,
+            fields[4],
+            "Destination",
+            &self.destination,
+            self.caret[1],
+            self.focus == 1,
+            self.task.is_none(),
+        );
+        crate::modal::body(frame, fields[5], notes, 0);
         let status = if self.executing {
             "Creating worktree… Please wait. Cancellation is disabled."
         } else if self.task.is_some() {
@@ -349,37 +274,20 @@ impl Modal {
         let buttons = [
             Button {
                 action: 0,
-                label: if self.plan.is_some() {
-                    "Back"
-                } else {
-                    "Cancel"
-                },
+                label: "Cancel",
                 enabled: !self.executing,
                 primary: false,
             },
             Button {
                 action: 1,
-                label: if self.plan.is_some() {
-                    "Create worktree"
-                } else {
-                    "Review"
-                },
+                label: "Create worktree",
                 enabled: self.task.is_none() && self.context.is_some(),
                 primary: true,
             },
         ];
-        crate::modal::buttons(
-            frame,
-            sections.actions,
-            &buttons,
-            if self.plan.is_some() {
-                Some(self.preview_focus)
-            } else {
-                self.focus.checked_sub(2)
-            },
-        );
+        crate::modal::buttons(frame, sections.actions, &buttons, self.focus.checked_sub(2));
         frame.render_widget(
-            Paragraph::new("Tab controls · Enter activate/next · Esc back"),
+            Paragraph::new("Tab controls · Enter activate/next · Esc cancel"),
             sections.hints,
         );
     }

@@ -585,11 +585,11 @@ For example, `feature/login` creates `.worktrees/feature/login` under the main
 checkout. The suggestion follows the branch name until you edit the destination.
 Custom paths may be absolute, `~/…`, or relative to the source checkout root.
 Tab/Shift-Tab switches controls; Ctrl-U clears a field. Enter advances from
-New branch to Destination, then focuses **Review**. Enter on **Review** opens
-the preview; Enter on **Create worktree** confirms it. Escape returns from preview to editing, then
-cancels. Creation itself cannot be cancelled through the dialog.
+New branch to Destination, then focuses **Create worktree**. Enter on
+**Create worktree** validates the inputs and creates the worktree directly.
+Escape cancels before creation starts. Creation itself cannot be cancelled through the dialog.
 
-The preview fixes the starting commit: later HEAD changes do not silently alter
+Opening the dialog fixes the starting commit: later HEAD changes do not silently alter
 it. The new checkout contains committed content; uncommitted changes remain in
 the source checkout. After success, tracr selects the new worktree in Folders.
 Switch to Sessions and use the existing New session action when ready.

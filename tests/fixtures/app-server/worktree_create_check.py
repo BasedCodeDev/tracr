@@ -12,7 +12,7 @@ from pty_support import Terminal
 binary = str(Path(sys.argv[1]).resolve())
 def open_worktree(terminal, expected='Starting commit:', menu=False):
     # Discovery can invalidate ownership between a rendered shortcut and a key.
-    # Retry only opening this non-mutating form; never retry preview or creation.
+    # Retry only opening this non-mutating form; never retry creation.
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         if menu:
@@ -66,20 +66,18 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         # Folders menu and keyboard use the same action; escape before execution is inert.
         t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, menu=True)
         t.send(b'cancelled')
-        t.send(b'\r\r\r')
-        t.expect('Review new worktree')
+        t.send(b'\r\r')
+        t.expect('>[ Create worktree ]')
         assert not (project / '.worktrees').exists()
-        t.send(b'\x1b')
-        t.wait(lambda: 'Review new worktree' not in t.text())
         t.send(b'\x1b')
         t.wait(lambda: 'Create worktree' not in t.text())
         assert not (project / '.worktrees').exists()
         open_worktree(t)
-        t.send(b'feature/from-folder\r\r\r')
-        t.expect('Review new worktree')
-        t.expect('local exclusion /.worktrees/')
+        t.send(b'feature/from-folder\r\r')
+        t.expect('>[ Create worktree ]')
+        t.expect('this repository will require Git 2.48+')
         t.resize(22, 70)
-        t.expect('Review new worktree')
+        t.expect('>[ Create worktree ]')
         t.send(b'\r')
         t.expect('Worktree created.')
         created = project / '.worktrees/feature/from-folder'
@@ -95,8 +93,6 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         open_worktree(t)
         t.expect(first[:8])
         t.send(b'from-history\r\r\r')
-        t.expect('Review new worktree')
-        t.send(b'\r')
         t.expect('Worktree created.')
         history = project / '.worktrees/from-history'
         t.wait(lambda: history.exists())

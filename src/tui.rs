@@ -3855,7 +3855,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let worktree_ready = view.worktree_create.as_ref().is_some_and(|modal| modal.ready());
             let worktree_result = if let Some(modal) = view.worktree_create.as_mut() { modal.tick().await } else { None };
             if worktree_ready {
-                // Queued Enter repeats must not accept a newly displayed preview.
+                // Discard queued input after worktree checks or creation complete.
                 while input_reader.poll(Duration::ZERO)? { let _ = input_reader.read()?; }
             }
             if let Some(result) = worktree_result {
