@@ -204,6 +204,7 @@ fn shared_session_rows_preserve_topology_across_every_fixture_and_prefix() {
                 .iter()
                 .chain(original.boundary.iter())
                 .map(|r| GraphRow {
+                    stash: None,
                     graph: r.text(),
                     graph_spans: r.spans.clone(),
                     oid: r.oid.as_ref().map(ToString::to_string),

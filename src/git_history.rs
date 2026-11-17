@@ -109,15 +109,21 @@ fn construct(records: Vec<CommitRecord>, cancel: &AtomicBool) -> Result<Option<S
         } else {
             None
         };
-        let (oid, parents, subject) = match record {
+        let (oid, parents, subject, stash) = match record {
             Some(record) => {
                 positions.insert(record.oid.clone(), rows.len());
                 selectable.push(rows.len());
-                (Some(record.oid), record.parents, record.subject)
+                (
+                    Some(record.oid),
+                    record.parents,
+                    record.subject,
+                    record.stash,
+                )
             }
-            None => (None, Vec::new(), String::new()),
+            None => (None, Vec::new(), String::new(), None),
         };
         rows.push(GraphRow {
+            stash,
             graph: rendered.text(),
             graph_spans: rendered.spans,
             oid,
@@ -361,22 +367,36 @@ impl History {
             style::{Color, Modifier, Style},
             text::Span,
         };
-        let mut spans: Vec<_> = row
-            .graph_spans
-            .iter()
-            .map(|span| {
-                let color = match span.color {
-                    Some(31) => Color::Red,
-                    Some(32) => Color::Green,
-                    Some(33) => Color::Yellow,
-                    Some(34) => Color::Blue,
-                    Some(35) => Color::Magenta,
-                    Some(36) => Color::Cyan,
-                    _ => Color::Reset,
-                };
-                Span::styled(span.text.clone(), Style::default().fg(color))
-            })
-            .collect();
+        let mut spans = Vec::new();
+        for span in &row.graph_spans {
+            let color = match span.color {
+                Some(31) => Color::Red,
+                Some(32) => Color::Green,
+                Some(33) => Color::Yellow,
+                Some(34) => Color::Blue,
+                Some(35) => Color::Magenta,
+                Some(36) => Color::Cyan,
+                _ => Color::Reset,
+            };
+            if row.stash.is_some() && span.text.contains('●') {
+                for ch in span.text.chars() {
+                    spans.push(Span::styled(
+                        if ch == '●' {
+                            "▣".into()
+                        } else {
+                            ch.to_string()
+                        },
+                        Style::default().fg(if ch == '●' {
+                            crate::git_render::STASH_COLOR
+                        } else {
+                            color
+                        }),
+                    ));
+                }
+            } else {
+                spans.push(Span::styled(span.text.clone(), Style::default().fg(color)));
+            }
+        }
         if let Some(oid) = &row.oid {
             use unicode_width::UnicodeWidthStr;
             spans.push(Span::raw(
@@ -386,6 +406,12 @@ impl History {
                 "{} ",
                 oid.chars().take(7).collect::<String>()
             )));
+            if let Some(stash) = &row.stash {
+                spans.push(Span::styled(
+                    format!("[{}] ", stash.selectors.join(", ")),
+                    Style::default().fg(crate::git_render::STASH_COLOR),
+                ));
+            }
             if self.is_head(row) {
                 spans.push(Span::styled(
                     "[HEAD] ",
@@ -447,6 +473,9 @@ impl History {
                         if let Some(oid) = &row.oid {
                             width +=
                                 8 + row.subject.width() + if self.is_head(row) { 7 } else { 0 };
+                            if let Some(stash) = &row.stash {
+                                width += stash.selectors.join(", ").width() + 3;
+                            }
                             if let Some(labels) = self.references.get(oid) {
                                 for label in labels {
                                     width += label.name.width()
@@ -597,6 +626,7 @@ impl History {
         };
         let graph: String = spans.iter().map(|s| s.text.as_str()).collect();
         let annotation = GraphRow {
+            stash: None,
             graph: graph.clone(),
             graph_spans: spans,
             oid: None,
@@ -848,6 +878,7 @@ impl History {
                                 row.oid.as_ref() == Some(&record.oid)
                                     && row.parents == record.parents
                                     && row.subject == record.subject
+                                    && row.stash == record.stash
                             }) =>
                     {
                         // Ref/HEAD-only changes reuse geometry and its row map.
@@ -984,6 +1015,7 @@ mod tests {
         rows.into_iter()
             .filter_map(|row| {
                 row.oid.map(|oid| CommitRecord {
+                    stash: row.stash,
                     oid,
                     parents: row.parents,
                     subject: row.subject,
@@ -994,6 +1026,7 @@ mod tests {
     fn rows(n: usize) -> Vec<GraphRow> {
         (0..n)
             .map(|i| GraphRow {
+                stash: None,
                 graph: "●".into(),
                 graph_spans: vec![crate::git::GraphSpan {
                     text: "●".into(),
@@ -1018,6 +1051,63 @@ mod tests {
         .await
         .unwrap();
     }
+    #[tokio::test]
+    async fn stash_labels_refresh_without_losing_selection_and_render_distinctly() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut h = History::with_backend(Arc::new(Controlled(tx)));
+        let mut input = rows(3);
+        input[0].stash = Some(crate::git::Stash {
+            selectors: vec!["stash@{1}".into()],
+            base: input[1].oid.clone().unwrap(),
+        });
+        input[0].subject = "Saved 界 e\u{301}".into();
+        tick(&mut h).await;
+        rx.recv().await.unwrap().1.send(Ok(input.clone())).unwrap();
+        finish(&mut h).await;
+        let stash_oid = input[0].oid.clone();
+        h.selected = h.rows.iter().position(|r| r.oid == stash_oid).unwrap();
+        let row = &h.rows[h.selected];
+        assert_eq!(row.parents.len(), 1);
+        let spans = h.row_spans(row);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.content == "▣" && s.style.fg == Some(crate::git_render::STASH_COLOR))
+        );
+        assert!(
+            spans.iter().any(|s| s.content == "[stash@{1}] "
+                && s.style.fg == Some(crate::git_render::STASH_COLOR))
+        );
+        assert!(spans.iter().any(|s| s.content == "Saved 界 e\u{301}"));
+        use unicode_width::UnicodeWidthStr;
+        let widest = h
+            .rows
+            .iter()
+            .map(|r| {
+                h.row_spans(r)
+                    .iter()
+                    .map(|s| s.content.width())
+                    .sum::<usize>()
+            })
+            .max()
+            .unwrap();
+        for width in [1, 12, 80] {
+            h.horizontal.set(usize::MAX);
+            h.clamp_horizontal(width);
+            assert_eq!(h.horizontal.get(), widest.saturating_sub(width));
+        }
+        input[0].stash.as_mut().unwrap().selectors = vec!["stash@{0}".into()];
+        h.refresh = true;
+        tick(&mut h).await;
+        rx.recv().await.unwrap().1.send(Ok(input)).unwrap();
+        finish(&mut h).await;
+        assert_eq!(h.rows[h.selected].oid, stash_oid);
+        assert_eq!(
+            h.rows[h.selected].stash.as_ref().unwrap().selectors,
+            ["stash@{0}"]
+        );
+    }
+
     #[tokio::test]
     async fn demand_doubles_preserves_selection_and_stops_at_exhaustion() {
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -1166,6 +1256,7 @@ mod tests {
         h.rows.insert(
             0,
             GraphRow {
+                stash: None,
                 graph: "| ".into(),
                 graph_spans: vec![],
                 oid: None,
@@ -1746,10 +1837,8 @@ mod tests {
                 .any(|s| s.content == "◇" && s.style.fg == Some(crate::git_render::WORKTREE_COLOR))
         );
         assert!(
-            spans
-                .iter()
-                .any(|s| s.content == "feature/界"
-                    && s.style.fg == Some(crate::git_render::BRANCH_COLOR))
+            spans.iter().any(|s| s.content == "feature/界"
+                && s.style.fg == Some(crate::git_render::BRANCH_COLOR))
         );
         h.clamp_horizontal(1);
         assert_eq!(h.max_width.get(), Some(original_width + 2));
@@ -1854,7 +1943,12 @@ mod tests {
         let spans = h.row_spans(&h.rows[0]);
         let text = spans.iter().map(|s| s.content.as_ref()).collect::<String>();
         assert!(text.contains("[HEAD] [main] [remote: origin/main] [tag: v1]"));
-        assert!(spans.iter().any(|s|s.content=="[main] " && s.style.fg==Some(crate::git_render::BRANCH_COLOR)));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.content == "[main] "
+                    && s.style.fg == Some(crate::git_render::BRANCH_COLOR))
+        );
         h.scroll_horizontal(true);
         h.clamp_horizontal(50);
         assert_eq!(h.horizontal.get(), 4);
@@ -1951,6 +2045,7 @@ mod tests {
         h.exhausted = true;
         // Unresolved ancestry and connectors are not selectable commits.
         h.rows.push(GraphRow {
+            stash: None,
             graph: "┊".into(),
             graph_spans: vec![],
             oid: None,

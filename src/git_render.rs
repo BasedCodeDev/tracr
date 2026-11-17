@@ -12,6 +12,8 @@ use crate::{
     git_layout::{LaneColor, Layout, LayoutRow},
 };
 
+pub const STASH_COLOR: ratatui::style::Color = ratatui::style::Color::Rgb(190, 145, 190);
+
 pub const LANE_PITCH: usize = 4;
 pub const BRIDGE: char = '⌢';
 

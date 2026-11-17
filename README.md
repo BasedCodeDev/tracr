@@ -217,6 +217,15 @@ watching fails, the footer reports it; `r`, repository re-entry or reopening his
 retries and refreshes the data. Filesystems that silently omit notifications may
 require those refresh actions. Polling fallback is not implemented yet.
 
+Saved stashes appear in Git history as `▣` nodes with muted-magenta
+`[stash@{n}]` labels. All saved stashes are included, grouped immediately above
+their original base commit, newest first within each group. A stash saved today
+against an old commit therefore appears beside that old commit. Each stash has
+one connection to its base; Git's internal index and untracked-file snapshots
+are hidden unless independently referenced by ordinary history or a checkout.
+Stash rows are read-only: Enter describes the stash, and worktree creation is
+unavailable. Creating or removing stashes refreshes the history automatically.
+
 The folder and session panes show partial results while loading.
 Terminals shorter than 24 rows show only the focused pane above the footer,
 regardless of width. Tab cycles through Folders, Sessions, and Git (when available);

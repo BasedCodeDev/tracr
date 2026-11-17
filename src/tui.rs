@@ -1792,11 +1792,25 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 "Enter",
                 if selected_git_session(browser, view).is_some() {
                     "Resume session"
+                } else if view
+                    .history
+                    .rows
+                    .get(view.history.selected)
+                    .is_some_and(|row| row.stash.is_some())
+                {
+                    "Describe saved stash"
                 } else {
                     "Select worktree folder"
                 },
                 Some(if selected_git_session(browser, view).is_some() {
                     ("Enter Resume", "Enter Resume")
+                } else if view
+                    .history
+                    .rows
+                    .get(view.history.selected)
+                    .is_some_and(|row| row.stash.is_some())
+                {
+                    ("Enter Stash", "Enter Stash")
                 } else {
                     ("Enter Folder", "Enter Folder")
                 }),
@@ -1951,6 +1965,15 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
 }
 
 fn worktree_unavailable(browser: &Browser, view: &View) -> Option<String> {
+    if view.git_focus
+        && view
+            .history
+            .rows
+            .get(view.history.selected)
+            .is_some_and(|row| row.stash.is_some())
+    {
+        return Some("Select a commit rather than a stash to create a worktree.".into());
+    }
     if view.git_focus && selected_git_session(browser, view).is_some() {
         return Some("Select a commit to create a worktree.".into());
     }
@@ -3405,6 +3428,19 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 }
                 return Action::Continue;
             }
+            if let Some(stash) = view
+                .history
+                .rows
+                .get(view.history.selected)
+                .and_then(|row| row.stash.as_ref())
+            {
+                view.message = Some(format!(
+                    "Saved stash {} · based on {} · shown read-only",
+                    stash.selectors.join(", "),
+                    &stash.base[..stash.base.len().min(7)]
+                ));
+                return Action::Continue;
+            }
             let Some(repository) = view.history.repository() else {
                 return Action::Continue;
             };
@@ -4621,6 +4657,7 @@ mod cleanup_tests {
         };
         view.history.tick(Some(repository), 0, false, 10).await;
         view.history.rows = vec![crate::git::GraphRow {
+            stash: None,
             oid: Some("selected-oid".into()),
             graph: String::new(),
             graph_spans: vec![],
@@ -4628,6 +4665,37 @@ mod cleanup_tests {
             subject: "Selected commit".into(),
         }];
         (browser, view)
+    }
+
+    #[tokio::test]
+    async fn stash_selection_is_read_only_and_cannot_create_a_worktree() {
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
+        view.history.rows[0].stash = Some(crate::git::Stash {
+            selectors: vec!["stash@{0}".into()],
+            base: "a".repeat(40),
+        });
+        assert!(
+            worktree_unavailable(&browser, &view)
+                .unwrap()
+                .contains("rather than a stash")
+        );
+        assert!(matches!(
+            execute_command(Command::GitSelectWorktree, &mut browser, &mut view),
+            Action::Continue
+        ));
+        assert!(
+            view.message
+                .as_ref()
+                .unwrap()
+                .contains("Saved stash stash@{0}")
+        );
+        assert!(view.git_focus);
+        assert!(view.worktree_picker.is_none());
+        assert!(
+            footer_shortcuts(120, &browser, &view)
+                .1
+                .contains("Enter Stash")
+        );
     }
 
     #[tokio::test]

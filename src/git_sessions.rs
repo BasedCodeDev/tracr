@@ -391,6 +391,7 @@ pub(crate) mod tests {
         history.rows = ["head", "older"]
             .into_iter()
             .map(|oid| GraphRow {
+                stash: None,
                 graph: "●".into(),
                 graph_spans: vec![crate::git::GraphSpan {
                     text: "●".into(),
@@ -419,16 +420,19 @@ pub(crate) mod tests {
         let (mut browser, mut history) = fixture().await;
         history.replace_records_for_test(vec![
             CommitRecord {
+                stash: None,
                 oid: "left".into(),
                 parents: vec!["base".into()],
                 subject: "left tip".into(),
             },
             CommitRecord {
+                stash: None,
                 oid: "right".into(),
                 parents: vec!["base".into()],
                 subject: "right tip".into(),
             },
             CommitRecord {
+                stash: None,
                 oid: "base".into(),
                 parents: vec![],
                 subject: "shared base".into(),

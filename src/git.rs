@@ -22,8 +22,16 @@ pub struct Repository {
     pub git_dir: PathBuf,
     pub worktrees: Vec<Worktree>,
 }
+/// Reflog identity and displayed ancestry; storage parents never reach the graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stash {
+    pub selectors: Vec<String>,
+    pub base: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommitRecord {
+    pub stash: Option<Stash>,
     pub oid: String,
     pub parents: Vec<String>,
     pub subject: String,
@@ -31,10 +39,11 @@ pub struct CommitRecord {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphRow {
+    pub stash: Option<Stash>,
     pub graph: String,
     pub graph_spans: Vec<GraphSpan>,
     pub oid: Option<String>,
-    /// Ordered Git parents, including IDs outside the loaded prefix.
+    /// Displayed parents, including IDs outside the loaded prefix. Stashes use only their base.
     pub parents: Vec<String>,
     pub subject: String,
 }
@@ -324,6 +333,7 @@ pub fn parse_commits(bytes: &[u8]) -> Result<Vec<CommitRecord>, String> {
                     .collect::<Result<Vec<_>, String>>()?
             };
             Ok(CommitRecord {
+                stash: None,
                 oid: String::from_utf8_lossy(fields[1]).into_owned(),
                 parents,
                 subject: crate::browser::safe_text(&String::from_utf8_lossy(fields[3])),
@@ -385,9 +395,12 @@ pub async fn history_at(
     limit: usize,
     head: Option<&str>,
 ) -> Result<Vec<CommitRecord>, String> {
-    let limit = format!("--max-count={}", limit.max(1));
+    let visible_limit = limit.max(1);
+    let stashes = stash_records(path).await?;
+    let limit = format!("--max-count={visible_limit}");
     let mut args = vec![
         "log",
+        "--exclude=refs/stash",
         "--all",
         "--topo-order",
         "--color=never",
@@ -402,8 +415,16 @@ pub async fn history_at(
         }
         args.push(oid);
     }
+    // Include bases that have become unreachable from branches, without walking
+    // the stash's index/untracked snapshot parents. stdin avoids argument limits.
+    args.push("--stdin");
     args.push("--");
-    let mut records = parse_commits(&read(path, &args).await?)?;
+    let bases = stashes
+        .iter()
+        .filter_map(|s| s.stash.as_ref())
+        .map(|s| format!("{}\n", s.base))
+        .collect::<String>();
+    let mut records = parse_commits(&read_input(path, &args, Some(bases.into_bytes())).await?)?;
     if records.iter().any(|record| record.parents.is_empty())
         && read(path, &["rev-parse", "--is-shallow-repository"]).await? == b"true\n"
     {
@@ -453,7 +474,90 @@ pub async fn history_at(
             remaining = &remaining[size + 1..];
         }
     }
+    Ok(project_stashes(records, stashes, visible_limit))
+}
+
+async fn stash_records(path: &Path) -> Result<Vec<CommitRecord>, String> {
+    // The history reader runs in the common Git directory, including bare
+    // repositories. `git stash list` requires a checkout; read its reflog directly.
+    let refs = read(path, &["for-each-ref", "--format=%(refname)", "refs/stash"]).await?;
+    if !refs
+        .split(|b| *b == b'\n')
+        .any(|name| name == b"refs/stash")
+    {
+        return Ok(Vec::new());
+    }
+    let bytes = read(
+        path,
+        &[
+            "reflog",
+            "show",
+            "--color=never",
+            "--no-show-signature",
+            "--no-notes",
+            "--format=%x00%H%x00%P%x00%gs%x00",
+            "refs/stash",
+            "--",
+        ],
+    )
+    .await?;
+    let mut records: Vec<CommitRecord> = Vec::new();
+    for (index, mut record) in parse_commits(&bytes)?.into_iter().enumerate() {
+        if record.parents.len() < 2 {
+            return Err("Malformed stash: expected base and index parents".into());
+        }
+        let selector = format!("stash@{{{index}}}");
+        if let Some(existing) = records.iter_mut().find(|s| s.oid == record.oid) {
+            existing.stash.as_mut().unwrap().selectors.push(selector);
+            continue;
+        }
+        let base = record.parents[0].clone();
+        record.parents = vec![base.clone()];
+        record.stash = Some(Stash {
+            selectors: vec![selector],
+            base,
+        });
+        records.push(record);
+    }
     Ok(records)
+}
+
+/// Insert stash leaves before their bases. This preserves the ordinary graph's
+/// topological order and stable prefixes while counting only visible nodes.
+fn project_stashes(
+    records: Vec<CommitRecord>,
+    stashes: Vec<CommitRecord>,
+    limit: usize,
+) -> Vec<CommitRecord> {
+    use std::collections::{HashMap, HashSet};
+    let by_oid: HashMap<_, _> = stashes.iter().map(|s| (s.oid.as_str(), s)).collect();
+    let mut by_base: HashMap<&str, Vec<&CommitRecord>> = HashMap::new();
+    for stash in &stashes {
+        by_base
+            .entry(&stash.stash.as_ref().unwrap().base)
+            .or_default()
+            .push(stash);
+    }
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+    for record in records {
+        if let Some(children) = by_base.get(record.oid.as_str()) {
+            for stash in children {
+                if seen.insert(stash.oid.clone()) {
+                    result.push((*stash).clone());
+                }
+            }
+        }
+        if seen.insert(record.oid.clone()) {
+            let projected = by_oid.get(record.oid.as_str()).map(|s| (*s).clone());
+            result.push(projected.unwrap_or(record));
+        }
+        if result.len() >= limit {
+            break;
+        }
+    }
+    result.truncate(limit);
+    result
 }
 
 /// Bare repositories have no checkout root.

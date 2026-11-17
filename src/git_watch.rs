@@ -59,6 +59,13 @@ fn path_change(common: &Path, path: &Path) -> Option<Change> {
             return Some(Change::Topology);
         }
     }
+    if parts[0] == "logs"
+        && (parts.len() == 1
+            || (parts.len() == 2 && parts[1] == "refs")
+            || (parts.len() == 3 && parts[1] == "refs" && parts[2] == "stash"))
+    {
+        return Some(Change::References);
+    }
     match names[0].to_str() {
         Some("HEAD" | "packed-refs" | "refs" | "reftable" | "shallow") => Some(Change::References),
         Some("config" | "config.worktree") => Some(Change::Topology),
@@ -117,6 +124,14 @@ fn subscriptions(common: &Path) -> std::io::Result<BTreeMap<PathBuf, RecursiveMo
             if path.is_dir() {
                 paths.insert(path, mode);
             }
+        }
+    }
+    // Nonrecursive parent watches discover the first stash and survive atomic
+    // reflog replacement. The event filter ignores all unrelated reflogs.
+    for name in ["logs", "logs/refs"] {
+        let path = common.join(name);
+        if path.is_dir() {
+            paths.insert(path, RecursiveMode::NonRecursive);
         }
     }
     Ok(paths)
@@ -298,6 +313,8 @@ mod tests {
             "HEAD",
             "refs/heads/main",
             "packed-refs",
+            "logs/refs",
+            "logs/refs/stash",
             "worktrees/branch/HEAD",
             "worktrees/branch/reftable/tables.list",
         ] {
@@ -310,6 +327,8 @@ mod tests {
             "HEAD.lock",
             "objects/ab/cd",
             "logs/HEAD",
+            "logs/refs/heads/main",
+            "logs/refs/stash.lock",
             "worktrees/branch/index",
             "worktrees/branch/logs/HEAD",
             "refs/heads/main.lock",
@@ -386,6 +405,33 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+    #[test]
+    fn stash_reflog_updates_include_older_deletion_and_first_creation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        git(root, &["init", "-qb", "main"]);
+        std::fs::write(root.join("tracked"), "base").unwrap();
+        git(root, &["add", "tracked"]);
+        git(root, &["commit", "-qm", "base"]);
+        let mut monitor = Monitor::default();
+        monitor.context(Some(root.join(".git")), 0, true);
+        notification(&mut monitor);
+        for message in ["first", "second"] {
+            std::fs::write(root.join("tracked"), message).unwrap();
+            git(root, &["stash", "push", "-m", message]);
+            notification(&mut monitor);
+        }
+        // Drain the burst so the next observation cannot be a delayed push event.
+        std::thread::sleep(Duration::from_millis(250));
+        monitor.poll(Instant::now(), false);
+        let latest = git(root, &["rev-parse", "refs/stash"]);
+        git(root, &["stash", "drop", "stash@{1}"]);
+        assert_eq!(git(root, &["rev-parse", "refs/stash"]), latest);
+        assert_eq!(notification(&mut monitor), Change::References);
+        git(root, &["stash", "clear"]);
+        notification(&mut monitor);
+    }
+
     #[test]
     fn native_files_and_reftables_in_main_and_bare_repositories() {
         for bare in [false, true] {
@@ -491,13 +537,13 @@ mod tests {
         assert_eq!(classify(tmp.path(), &event), Some(Change::Topology));
     }
     #[test]
-    fn subscriptions_exclude_objects_logs_and_sources() {
+    fn subscriptions_exclude_objects_and_unrelated_log_events() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         for name in [
             "refs/heads",
             "objects",
-            "logs",
+            "logs/refs",
             "worktrees/a/refs",
             "worktrees/a/logs",
             "worktrees/a/reftable",
@@ -506,8 +552,9 @@ mod tests {
         }
         let paths = subscriptions(root).unwrap();
         assert!(!paths.contains_key(&root.join("objects")));
-        assert!(!paths.contains_key(&root.join("logs")));
+        assert_eq!(paths[&root.join("logs")], RecursiveMode::NonRecursive);
         assert!(!paths.contains_key(&root.join("worktrees/a/logs")));
+        assert_eq!(paths[&root.join("logs/refs")], RecursiveMode::NonRecursive);
         assert_eq!(paths[&root.join("refs")], RecursiveMode::Recursive);
         assert_eq!(
             paths[&root.join("worktrees/a")],
