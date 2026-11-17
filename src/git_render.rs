@@ -15,6 +15,9 @@ use crate::{
 pub const LANE_PITCH: usize = 4;
 pub const BRIDGE: char = '⌢';
 
+/// Muted periwinkle distinguishes local branch labels from running activity.
+pub const BRANCH_COLOR: ratatui::style::Color = ratatui::style::Color::Rgb(163, 168, 209);
+
 /// Quiet, consistent accent for linked-worktree markers in both panes.
 pub const DIRTY_COLOR: ratatui::style::Color = ratatui::style::Color::Rgb(184, 151, 94);
 

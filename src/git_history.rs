@@ -397,7 +397,7 @@ impl History {
             if let Some(labels) = self.references.get(oid) {
                 for label in labels {
                     let (prefix, color) = match label.kind {
-                        crate::git::RefKind::Local => ("", Color::Green),
+                        crate::git::RefKind::Local => ("", crate::git_render::BRANCH_COLOR),
                         crate::git::RefKind::Remote => ("remote: ", Color::Cyan),
                         crate::git::RefKind::Tag => ("tag: ", Color::Yellow),
                     };
@@ -1749,7 +1749,7 @@ mod tests {
             spans
                 .iter()
                 .any(|s| s.content == "feature/界"
-                    && s.style.fg == Some(ratatui::style::Color::Green))
+                    && s.style.fg == Some(crate::git_render::BRANCH_COLOR))
         );
         h.clamp_horizontal(1);
         assert_eq!(h.max_width.get(), Some(original_width + 2));
@@ -1854,7 +1854,7 @@ mod tests {
         let spans = h.row_spans(&h.rows[0]);
         let text = spans.iter().map(|s| s.content.as_ref()).collect::<String>();
         assert!(text.contains("[HEAD] [main] [remote: origin/main] [tag: v1]"));
-        assert!(spans.iter().any(|s|s.content=="[main] " && s.style.fg==Some(ratatui::style::Color::Green)));
+        assert!(spans.iter().any(|s|s.content=="[main] " && s.style.fg==Some(crate::git_render::BRANCH_COLOR)));
         h.scroll_horizontal(true);
         h.clamp_horizontal(50);
         assert_eq!(h.horizontal.get(), 4);

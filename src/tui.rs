@@ -5815,7 +5815,7 @@ mod graph_viewport_tests {
         let spans = vec![
             Span::styled("| * ", Style::default().fg(Color::Cyan)),
             Span::raw("abcdef0 "),
-            Span::styled("[main] ", Style::default().fg(Color::Green)),
+            Span::styled("[main] ", Style::default().fg(crate::git_render::BRANCH_COLOR)),
             Span::styled("[remote: origin/main] ", Style::default().fg(Color::Cyan)),
             Span::styled("[tag: v1] ", Style::default().fg(Color::Yellow)),
             Span::raw("long subject 界界"),
@@ -5846,7 +5846,7 @@ mod graph_viewport_tests {
                     buffer
                         .content
                         .iter()
-                        .any(|cell| cell.symbol() == "m" && cell.fg == Color::Green)
+                        .any(|cell| cell.symbol() == "m" && cell.fg == crate::git_render::BRANCH_COLOR)
                 );
             }
             if offset == 20 {
