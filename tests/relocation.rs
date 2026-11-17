@@ -273,7 +273,7 @@ fn failure_dialog_is_explicit_scrollable_and_only_dismisses() {
             let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
             // Even a recovery result requires explicit dismissal before R can act.
             assert_eq!(
-                tui::handle_key(&mut browser, &mut view, key(KeyCode::Char('R'))),
+                tui::handle_key(&mut browser, &mut view, key(KeyCode::Char('m'))),
                 Action::Continue
             );
             for _ in 0..50 {

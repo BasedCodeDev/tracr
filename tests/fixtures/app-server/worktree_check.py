@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-worktrees-') as tmp:
     t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
     try:
         t.inspect('ID: session')
-        t.send(b'R');t.expect('[Folders] Worktrees')
+        t.send(b'm');t.expect('[Folders] Worktrees')
         t.wait(lambda:'Loading folders' not in t.text())
         t.send(b'\x1b[C');t.expect('Folders [Worktrees]')
         # The browser behind the modal can already show this branch. Wait for

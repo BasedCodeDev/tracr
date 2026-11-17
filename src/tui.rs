@@ -1137,7 +1137,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             if modal.recovery {
                 "Inspect/recover relocation"
             } else {
-                "Relink session"
+                "Move session"
             },
             84,
             28,
@@ -1160,7 +1160,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             if modal.recovery {
                 "Continue recovery"
             } else {
-                "Relink session"
+                "Move session"
             },
             if view.relink_back { 1 } else { 2 },
             !modal.busy,
@@ -1206,7 +1206,7 @@ fn draw_path_picker(frame: &mut Frame<'_>, modal: &RelinkModal) {
         modal.picker.as_ref().expect("path picker"),
         &modal.input,
         PickerText {
-            title: "Relink session",
+            title: "Move session",
             heading: &modal.session.title,
             old: &modal
                 .session
@@ -1717,9 +1717,9 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             (
                 Relink,
                 "Sessions",
-                "R",
-                "Relink session",
-                Some(("R Relink", "R Relink")),
+                "m",
+                "Move session",
+                Some(("m Move", "m Move")),
             ),
         ]);
     }
@@ -2930,7 +2930,7 @@ fn resume_hint(browser: &Browser, session: &crate::domain::SessionSummary) -> St
     }
     if is_unlinked(browser, session) {
         return relink_unavailable(browser)
-            .unwrap_or_else(|| "Folder missing — Enter or R to relink.".into());
+            .unwrap_or_else(|| "Folder missing — Enter or m to move session.".into());
     }
     "Enter opens full-screen · Alt+F opens embedded; the destination is checked again before launch.".into()
 }
@@ -3299,7 +3299,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('r') => Command::Refresh,
         KeyCode::Char('i') if !view.git_focus => Command::Info,
         KeyCode::Char('n') if view.focus == 1 => Command::Create,
-        KeyCode::Char('R') if view.focus == 1 => Command::Relink,
+        KeyCode::Char('m') if view.focus == 1 => Command::Relink,
         KeyCode::Char('b') if view.focus == 0 => Command::FolderToggle,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
         KeyCode::Char('w') if view.focus == 0 => Command::CreateWorktree,
@@ -4858,7 +4858,7 @@ mod cleanup_tests {
             Action::Continue
         );
         assert_eq!(
-            handle_key(&mut browser, &mut view, key(KeyCode::Char('R'))),
+            handle_key(&mut browser, &mut view, key(KeyCode::Char('m'))),
             Action::OpenRelink
         );
         assert_eq!(

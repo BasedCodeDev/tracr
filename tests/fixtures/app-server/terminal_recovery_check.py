@@ -14,7 +14,7 @@ for mode in ['stop','refresh','unknown','attached','cancel']:
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         def calls():return (home/'live_requests.jsonl').read_text()
         try:
-            t.inspect('ID: session');t.expect('Idle');t.send(b'R');t.expect('Use this folder')
+            t.inspect('ID: session');t.expect('Idle');t.send(b'm');t.expect('Use this folder')
             t.send(b'\x15'+str(new).encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms');t.send(b'\r')
             t.expect('Background commands block relocation');t.expect('[Cancel]')
             assert '/terminate' not in calls()

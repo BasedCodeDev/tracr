@@ -333,7 +333,7 @@ impl SessionProvider for CodexProvider {
             FolderStatus::Available => {}
             FolderStatus::Unlinked => {
                 return Err(ProviderError::Unavailable(format!(
-                    "Folder no longer exists: {}. Select Relink session (l).",
+                    "Folder no longer exists: {}. Select Move session (m).",
                     cwd.display()
                 )));
             }

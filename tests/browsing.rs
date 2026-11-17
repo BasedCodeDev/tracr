@@ -953,10 +953,8 @@ async fn unlinked_rows_use_explicit_undimmed_labels_and_footer_preserves_primary
                     line(upper + 1).contains("Enter Full"),
                     "{width}: {footer}"
                 );
-                assert!(line(upper + 1).ends_with(if width >= 80 {
-                    "R Relink"
-                } else if width >= 36 {
-                    "i Info"
+                assert!(line(upper + 1).ends_with(if width >= 36 {
+                    "m Move"
                 } else if width >= 24 {
                     "n New"
                 } else {
@@ -1106,11 +1104,11 @@ async fn footer_and_menu_follow_focus_with_stable_shared_controls() {
                     assert!(context.contains("m Move"));
                 }
             } else {
-                assert!(!context.contains("Move") && !context.contains("Toggle"));
+                assert!(!context.contains("Move folder") && !context.contains("Toggle"));
                 if width >= 80 {
                     assert!(
                         context.contains("i Info")
-                            && context.contains("R Relink")
+                            && context.contains("m Move")
                             && context.contains("n New")
                     );
                 }
@@ -1129,12 +1127,12 @@ async fn footer_and_menu_follow_focus_with_stable_shared_controls() {
                 if focus == 0 {
                     assert!(text.contains("Move folder"));
                     assert!(
-                        !text.contains("Relink session")
+                        !text.contains("Move session")
                             && !text.contains("Open session full-screen")
                             && !text.contains("Session information")
                     );
                 } else {
-                    assert!(text.contains("Relink session"));
+                    assert!(text.contains("Move session"));
                     assert!(
                         !text.contains("Move folder")
                             && !text.contains("Expand / collapse folder")

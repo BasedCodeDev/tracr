@@ -267,7 +267,7 @@ when Folders is collapsed: its two-column strip sits beside Sessions.
 - `n` in Sessions: create a new session in the selected folder.
 - `w` (shown and enabled only when the selection supports creation) in Folders or expanded Git history: create a new worktree from checkout HEAD
   or the selected commit, respectively.
-- `R` in Sessions: relink the selected session. Choose an existing destination,
+- `m` in Sessions: move the selected session. Choose an existing destination,
   press Enter to preview, then Enter again to confirm. Escape cancels before execution. If background
   commands block the move, Tracr lists them and offers **Stop listed commands and
   retry move**, Refresh, or Cancel. Cancel is selected by default. Stopping commands
@@ -491,7 +491,7 @@ their existing cancellation restrictions.
 
 ## Relink or relocate a session
 
-Select the session and press `R`, or choose **Relink session** from `?`. Supply an
+Select the session and press `m`, or choose **Move session** from `?`. Supply an
 existing directory using the folder tree or the editable **New folder** field
 (absolute, `~/…`, or relative to tracr's launch directory).
 

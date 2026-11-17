@@ -17,8 +17,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
     try:
         t.inspect('ID: session')
         t.expect('Unlinked · codex')
-        t.inspect('Folder missing — Enter or R to relink.')
-        t.expect('R Relink');assert 'u Recover' not in t.text()
+        t.inspect('Folder missing — Enter or m to move session.')
+        t.expect('m Move');assert 'u Recover' not in t.text()
         t.send(b'u?');t.expect('Actions & shortcuts')
         assert 'Inspect/recover relocation' not in t.text()
         t.send(b'\x1b');t.wait(lambda:'Actions & shortcuts' not in t.text())
@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
         t.resize(24, 36)
         t.expect('n New');t.expect('? Help · q Quit')
         t.resize(80, 240)
-        t.send(b'R');t.expect('New folder');t.expect('Use this folder')
+        t.send(b'm');t.expect('New folder');t.expect('Use this folder')
         t.wait(lambda:'Loading folders' not in t.text())
         t.send(b'\x1b[B')
         t.wait(lambda:'Loading folders' not in t.text())
@@ -84,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
     (new/'sentinel').write_text('unchanged')
     t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(new)],env)
     try:
-        t.inspect('ID: session');t.send(b'R');t.expect('New folder')
+        t.inspect('ID: session');t.send(b'm');t.expect('New folder')
         t.send(b'\x15'+str(child).encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms')
         t.expect('Project files stay where they are.')
         t.send(b'\r');t.expect('Session relinked and verified.')
@@ -112,7 +112,7 @@ for uncertain in (False, True):
         command=[binary,'--codex-home',str(home),'--codex-bin',fake,str(old)]
         t=Terminal(command,env)
         try:
-            t.inspect('ID: session');t.send(b'R');t.expect('New folder')
+            t.inspect('ID: session');t.send(b'm');t.expect('New folder')
             t.send(b'\x15'+str(new).encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r')
             if uncertain:
                 t.expect('Enter confirms');t.send(b'\r')
