@@ -117,7 +117,7 @@ def smoke(binary):
     if not result['complete'] or not result['sessions']:
         raise ValueError('release fixture inventory failed')
     run([str(binary), '--help'])
-    for helper in ('terminal_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check', 'folder_move_check', 'release_check', 'git_lifecycle_check', 'git_watch_check', 'idle_check'):
+    for helper in ('terminal_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check', 'folder_move_check', 'release_check', 'git_lifecycle_check', 'git_watch_check', 'idle_check', 'inline_check', 'scroll_check', 'focus_check', 'stash_history_check', 'worktree_create_check'):
         command = [sys.executable, str(ROOT/f'tests/fixtures/app-server/{helper}.py'), str(binary)]
         if helper == 'terminal_check':
             command.append(str(ROOT/'tests/fixtures/sessions/catalog.json'))

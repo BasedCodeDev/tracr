@@ -1,13 +1,12 @@
-# tracr 0.5.0 — worktree creation and live Git navigation
+# tracr 0.6.0 — embedded terminals and session navigation
 
-- Create reviewed Git worktrees from folders or selected history commits, with worktree creation offered only where available.
-- Browse worktrees in graph order, select their folders from history, and resume sessions directly from the Git pane.
-- See live sessions in Git history, linked worktrees marked with `◇`, and live uncommitted changes.
-- Reserve Tab and Shift+Tab for pane navigation inside Codex, including revealing panes from full-screen sessions.
-- Navigate all panes consistently with Tab, Shift-Tab, directional Alt-arrow keys, and folder tree shortcuts. Right expands folders before focusing their sessions.
-- Use clearer modal controls, Git history scroll indicators, and explicit recovery for blocked session relinks.
-- Keep the selected menu action stable while background Git discovery refreshes.
-- Development launches watch for changes and reload gracefully by default.
+- Open sessions full-screen with Enter, or embedded in the Sessions pane with Alt+F. Toggle views without restarting Codex, and use Ctrl+B to return to the list while the session stays running.
+- Keep terminal views per folder, browse other folders while sessions run, and switch between open terminals.
+- Scroll through terminal history, select text with the mouse, and copy explicitly. Preserve the child application's keyboard, paste, focus, and mouse protocols.
+- In embedded mode, Tab and Shift+Tab navigate Tracr panes. In full-screen mode, Tab, Shift+Tab, and Alt+arrow keys reach Codex; use Alt+F to return to the embedded view.
+- Focus a folder subtree with Alt+Z, collapse Folders when needed, and use layouts that adapt to narrow or short terminals. Folder selection stays centered while scrolling.
+- Browse saved stashes as single labeled Git history nodes beside their base commits.
+- Create worktrees with a single approval, and use m consistently to move either a folder or a selected session.
 
 Install or update:
 
