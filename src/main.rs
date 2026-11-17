@@ -128,7 +128,25 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
             Some(path) => config::absolute_path(path, &env.cwd)?,
             None => remembered.unwrap_or_else(|| env.cwd.clone()),
         };
-        browser.open_folder(folder);
+        let launch_folder = match path {
+            Some(path) => config::absolute_path(path, &env.cwd)?,
+            None => env.cwd.clone(),
+        };
+        let saved_focus = if fixture.is_none() {
+            match tracr::state::load_focus(&state_path, &launch_folder) {
+                Ok(focus) => focus,
+                Err(error) => {
+                    browser.state_warning = Some(error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let focus = saved_focus.unwrap_or_else(|| path.as_ref().map(|_| folder.clone()));
+        browser.open_folder(focus.clone().unwrap_or(folder));
+        browser.focus_root = focus;
+        browser.launch_folder = Some(launch_folder);
         if fixture.is_none() {
             browser.state_path = Some(state_path);
         }

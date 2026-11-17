@@ -1976,3 +1976,167 @@ async fn identical_provider_updates_do_not_invalidate_the_browser() {
     browser.apply(folder());
     assert!(!browser.update_changes(&folder()));
 }
+
+#[tokio::test]
+async fn focused_tree_and_search_follow_worktree_projection() {
+    let mut browser = loaded().await;
+    let template = browser.all()[0].clone();
+    let paths = [
+        "/project",
+        "/project/src",
+        "/external/work",
+        "/external/work/deep",
+        "/unrelated",
+        "/project/archive",
+    ];
+    let sessions: Vec<_> = paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let mut session = template.clone();
+            session.key.native_id = format!("focus-{index}");
+            session.title = format!("Focus test {index}");
+            session.cwd = Some((*path).into());
+            session.archived = index == 5;
+            session
+        })
+        .collect();
+    browser.begin_refresh();
+    browser.apply(Update::Page {
+        generation: browser.generation,
+        source: 0,
+        sessions,
+        warnings: vec![],
+    });
+    browser.apply(Update::Finished {
+        generation: browser.generation,
+        source: 0,
+        error: None,
+    });
+    let wt = |path: &str| tracr::git::Worktree {
+        path: path.into(),
+        head: None,
+        branch: None,
+        bare: false,
+        locked: false,
+        prunable: false,
+    };
+    browser.install_repository(tracr::git::Repository {
+        common_dir: "/project/.git".into(),
+        git_dir: "/project/.git".into(),
+        worktrees: vec![wt("/project"), wt("/external/work")],
+    });
+    browser.open_folder("/project".into());
+    let expanded = browser.expanded.clone();
+    browser.toggle_folder_focus();
+    assert_eq!(browser.focus_root.as_deref(), Some(Path::new("/project")));
+    let rows = browser.folder_rows();
+    assert_eq!(rows[0].filter, FolderFilter::Path("/project".into()));
+    assert_eq!(rows[0].depth, 0);
+    assert!(
+        rows.iter()
+            .any(|r| r.filter == FolderFilter::Path("/external/work".into()))
+    );
+    assert!(rows.iter().all(|r| matches!(&r.filter, FolderFilter::Path(path) if browser.path_in_subtree(path, Path::new("/project")))));
+    assert_eq!(browser.search_results("Focus").len(), 4);
+    assert_eq!(browser.visible().len(), 1);
+    browser.expanded.remove(Path::new("/project"));
+    assert_eq!(browser.folder_rows().len(), 1);
+    assert_eq!(browser.search_results("Focus").len(), 4);
+    browser.include_archived = true;
+    assert_eq!(browser.search_results("").len(), 5);
+    browser.select_folder(FolderFilter::Path("/external/work/deep".into()));
+    assert!(browser.focus_root.is_some());
+    browser.toggle_folder_focus();
+    assert_eq!(
+        browser.folder,
+        FolderFilter::Path("/external/work/deep".into())
+    );
+    assert_eq!(browser.expanded.len(), expanded.len() - 1);
+    // Focusing inside a projected worktree must reveal its root even with main
+    // checkout and physical ancestors collapsed.
+    browser.toggle_folder_focus();
+    browser.expanded.clear();
+    let rows = browser.folder_rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].filter, browser.folder);
+    assert_eq!(rows[0].depth, 0);
+    browser
+        .folders
+        .insert("/external/work/deep".into(), FolderStatus::Unlinked);
+    browser.recover_navigation(&[], None);
+    assert_eq!(
+        browser.folder,
+        FolderFilter::Path("/external/work/deep".into())
+    );
+    browser.select_folder(FolderFilter::Path("/unrelated".into()));
+    assert!(browser.focus_root.is_none());
+    assert!(browser.focus_notice.is_some());
+}
+
+#[tokio::test]
+async fn focused_folder_ui_shows_scope_and_blocks_navigation_above_root() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend};
+    use tracr::tui::{View, draw, handle_key};
+    let mut browser = loaded().await;
+    browser.open_folder("/focused/project".into());
+    let mut view = View {
+        focus: 0,
+        ..View::default()
+    };
+    handle_key(
+        &mut browser,
+        &mut view,
+        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
+    );
+    for _ in 0..3 {
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        );
+    }
+    assert_eq!(
+        browser.folder,
+        FolderFilter::Path("/focused/project".into())
+    );
+    let mut terminal = Terminal::new(TestBackend::new(160, 30)).unwrap();
+    terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+    let text = |terminal: &Terminal<TestBackend>| {
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+    };
+    assert!(text(&terminal).contains("Folders · Focused"));
+    assert!(text(&terminal).contains("Focused: /focused/project"));
+    handle_key(
+        &mut browser,
+        &mut view,
+        KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+    );
+    terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+    assert!(text(&terminal).contains("Search within folder"));
+    assert!(text(&terminal).contains("Within: /focused/project"));
+    handle_key(
+        &mut browser,
+        &mut view,
+        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
+    );
+    assert!(browser.focus_root.is_some()); // Dialog input must not toggle focus.
+    handle_key(
+        &mut browser,
+        &mut view,
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+    );
+    handle_key(
+        &mut browser,
+        &mut view,
+        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
+    );
+    assert!(browser.focus_root.is_none());
+}

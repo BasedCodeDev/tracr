@@ -84,6 +84,9 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
         terminal = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(executable), str(linked)], env)
         try:
             terminal.expect('Task first')
+            # This walkthrough exercises navigation across the complete tree.
+            terminal.send(b'\x1b[1;3D\x1bf\x1b[1;3C')
+            terminal.wait(lambda: 'Folders · Focused' not in terminal.text())
             if action == 'presentation':
                 terminal.expect('[remote: origin/main]')
                 terminal.expect('[tag: light] [tag: release]')

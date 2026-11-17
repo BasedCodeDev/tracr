@@ -369,10 +369,28 @@ Enter opens sessions inside the Sessions pane, with the rest of tracr still visi
 **Alt+F** from the session list opens the session full-screen. Inside a session,
 Alt+F toggles between inline and full-screen without restarting it; **Ctrl+B** returns to the list, and **Alt+arrow keys**
 restore the panels and move focus. Alt+Enter inside Codex is forwarded to Codex.
+In Folders, **Alt+F** focuses the selected folder as the tree root, hiding ancestors
+and unrelated branches. Its descendants and displayed worktrees remain navigable,
+including worktrees outside that directory. Search is restricted to this context;
+the search dialog and footer show the focused path. Press Alt+F in Folders again
+to clear focus without changing the current selection. Navigation outside the
+context through another panel clears focus with a notice.
+
+Focus is remembered separately for each launch folder (the explicit path, or the
+current directory for plain `tracr`). A new explicit launch path starts focused
+on that folder; a new plain-launch context restores the last visited folder with
+the full tree. Clearing focus is remembered too.
+
 At 100 columns and above, Folders fits the expanded tree up to 40% of the
 window width; Sessions uses the remaining space. Narrower windows show the
 focused panel. Scrolling or changing selection does not move the divider.
-**Ctrl+B** backgrounds the terminal and returns to the session list; selecting an
+Each folder remembers its Sessions panel for the current Tracr run. Navigating to
+another folder shows that folder's session list or its last displayed terminal;
+returning restores the same running process inline without changing keyboard focus.
+Parent folders and worktrees have independent views. If a terminal exits, its
+folder returns to the session list. Choosing an open terminal from the terminal
+picker navigates to its folder.
+**Ctrl+B** backgrounds the terminal and remembers the session-list view for that folder; selecting an
 open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Alt+arrow keys** move focus between panels
 without backgrounding the terminal; input goes to whichever panel is focused.
 From the browser, press **b** for Open terminals (including newly started sessions),

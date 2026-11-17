@@ -92,8 +92,11 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout', 'reload
                 # Wait for refreshed browser before quitting.
                 wait(lambda: b'Sessions' in output[return_mark:])
                 if action == 'normal':
-                    wait(lambda: '> Task second' in screen.text())
-                    assert 'Search sessions' not in screen.text()
+                    # The terminal belongs to its actual resume directory, whose
+                    # listing is empty in this intentionally stale-inventory fixture.
+                    wait(lambda: 'No sessions currently shown' in screen.text())
+                    os.write(master, b'/second\r')
+                    wait(lambda: '> Task second' in screen.text() and 'Search sessions' not in screen.text())
                     os.write(master,b'i')
                     wait(lambda: 'Session information' in screen.text())
                     os.write(master,b'\x1b[F')

@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
     executable = home / 'fake'
     shutil.copyfile(Path(__file__).with_name('fake.py'), executable)
     executable.chmod(0o755)
-    (home/'fake.json').write_text(json.dumps({'report_size': True}))
+    (home/'fake.json').write_text(json.dumps({'report_size': True, 'read_cwd': str(home/'listed')}))
     (home/'resume').mkdir()
     (home/'listed').mkdir()
     command = [binary, '--codex-home', directory, '--codex-bin', str(executable), str(home/'listed')]
@@ -44,6 +44,17 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.send(b'\x1b[1;3D')
         terminal.expect('Enter Sessions')
         assert 'Ctrl+B background' in terminal.text()
+        # Moving to the parent hides this terminal, then returning restores it
+        # without moving keyboard focus out of Folders or restarting Codex.
+        terminal.send(b'\x1bf\x1b[A')
+        terminal.wait(lambda: 'Ctrl+B background' not in terminal.text())
+        terminal.expect('No sessions currently shown')
+        os.kill(first['pid'], 0)
+        terminal.send(b'\x1b[B')
+        terminal.expect('Ctrl+B background')
+        terminal.expect('Enter Sessions')
+        assert json.loads((home/'launch.json').read_text())['pid'] == first['pid']
+        terminal.send(b'\x1bf')
         terminal.send(b'?')
         terminal.expect('Actions & shortcuts')
         terminal.send(b'\x1b')
@@ -52,6 +63,14 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.expect('Keyboard input goes to the terminal')
         assert json.loads((home/'launch.json').read_text())['pid'] == first['pid']
         terminal.send(b'\x02')
+        terminal.expect('Open here')
+        # Explicit backgrounding keeps the list when returning to this folder.
+        terminal.send(b'\x1b[1;3D\x1bf\x1b[A')
+        terminal.expect('No sessions currently shown')
+        terminal.send(b'\x1b[B')
+        terminal.expect('Task first')
+        assert 'Ctrl+B background' not in terminal.text()
+        terminal.send(b'\x1bf\x1b[1;3C')
         terminal.expect('Open here')
         os.kill(first['pid'], 0)
         terminal.send(b'\x1bf')

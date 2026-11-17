@@ -36,6 +36,7 @@ struct Session {
     id: u64,
     key: Option<SessionKey>,
     title: String,
+    folder: std::path::PathBuf,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     writer: mpsc::SyncSender<Vec<u8>>,
@@ -171,6 +172,8 @@ fn session_lock(command: &LaunchCommand, key: &SessionKey) -> io::Result<Session
 #[derive(Default)]
 pub struct Manager {
     sessions: Vec<Session>,
+    folder_views: std::collections::BTreeMap<std::path::PathBuf, u64>,
+    displayed_folder: Option<std::path::PathBuf>,
     next_id: u64,
     pub active: Option<u64>,
     pub fullscreen: bool,
@@ -200,10 +203,31 @@ impl Manager {
     pub fn owns(&self, key: &SessionKey) -> bool {
         self.sessions.iter().any(|s| s.key.as_ref() == Some(key))
     }
+    /// Restore a folder's view without moving keyboard focus or restarting its PTY.
+    pub fn sync_folder(&mut self, folder: Option<&std::path::Path>) {
+        let next = folder.and_then(|path| self.folder_views.get(path)).copied();
+        if self.displayed_folder.as_deref() != folder || self.active != next {
+            self.fullscreen = false;
+        }
+        self.displayed_folder = folder.map(std::path::Path::to_owned);
+        self.active = next;
+    }
+    pub fn active_folder(&self) -> Option<std::path::PathBuf> {
+        self.sessions
+            .iter()
+            .find(|s| Some(s.id) == self.active)
+            .map(|s| s.folder.clone())
+    }
+    fn activate(&mut self, id: u64) {
+        if let Some(s) = self.sessions.iter().find(|s| s.id == id) {
+            self.folder_views.insert(s.folder.clone(), id);
+            self.fullscreen = false;
+            self.active = Some(id);
+        }
+    }
     pub fn attach(&mut self, key: &SessionKey) -> bool {
         if let Some(s) = self.sessions.iter().find(|s| s.key.as_ref() == Some(key)) {
-            self.fullscreen = false;
-            self.active = Some(s.id);
+            self.activate(s.id);
             true
         } else {
             false
@@ -309,10 +333,12 @@ impl Manager {
         self.next_id += 1;
         self.fullscreen = false;
         self.active = Some(self.next_id);
+        self.folder_views.insert(command.cwd.clone(), self.next_id);
         self.sessions.push(Session {
             id: self.next_id,
             key,
             title,
+            folder: command.cwd.clone(),
             master: pair.master,
             child,
             writer: input,
@@ -412,6 +438,8 @@ impl Manager {
                 Ok(None) => true,
             }
         });
+        self.folder_views
+            .retain(|_, id| self.sessions.iter().any(|s| s.id == *id));
         self.selected = self.selected.min(self.sessions.len().saturating_sub(1));
         (changed || !exited.is_empty(), exited)
     }
@@ -484,8 +512,7 @@ impl Manager {
                     }
                     KeyCode::Enter => {
                         if let Some(s) = self.sessions.get(self.selected) {
-                            self.fullscreen = false;
-                            self.active = Some(s.id);
+                            self.activate(s.id);
                             self.picker = false;
                         }
                     }
@@ -518,6 +545,9 @@ impl Manager {
 
         if matches!(event, Event::Key(k) if k.kind != KeyEventKind::Release && k.code == KeyCode::Char('b') && k.modifiers.contains(KeyModifiers::CONTROL))
         {
+            if let Some(folder) = self.active_folder() {
+                self.folder_views.remove(&folder);
+            }
             self.fullscreen = false;
             self.active = None;
             return Ok(Input::Consumed);
@@ -802,6 +832,71 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+    #[test]
+    fn folder_views_keep_processes_and_explicit_background_choices() {
+        let temp = tempfile::tempdir().unwrap();
+        let a = temp.path().join("a");
+        let b = temp.path().join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let mut manager = Manager {
+            area: Rect::new(0, 0, 40, 10),
+            ..Manager::default()
+        };
+        let mut launch = command("import time; print('READY', flush=True); time.sleep(60)");
+        launch.cwd = a.clone();
+        manager.sync_folder(Some(&a));
+        manager.launch(&launch, None, "A".into()).unwrap();
+        let first = manager.active.unwrap();
+        let pid = manager.sessions[0].pid;
+        manager.sync_folder(Some(&b));
+        assert_eq!(manager.active, None);
+        wait(&mut manager, |m| {
+            m.sessions[0].parser.screen().contents().contains("READY")
+        });
+        launch.cwd = b.clone();
+        manager.launch(&launch, None, "B".into()).unwrap();
+        let second = manager.active;
+        manager.sync_folder(Some(&a));
+        assert_eq!(manager.active, Some(first));
+        assert_eq!(manager.sessions[0].pid, pid);
+        manager
+            .input(&key(KeyCode::Char('b'), KeyModifiers::CONTROL))
+            .unwrap();
+        manager.sync_folder(Some(&b));
+        assert_eq!(manager.active, second);
+        manager.sync_folder(Some(&a));
+        assert_eq!(manager.active, None); // Ctrl+B is remembered.
+        manager.activate(first);
+        manager.fullscreen = true;
+        manager.sync_folder(Some(&a));
+        assert!(manager.fullscreen); // Merely staying in a folder changes nothing.
+        manager.sync_folder(None);
+        assert_eq!(manager.active, None);
+        manager.sync_folder(Some(&a));
+        assert_eq!(manager.active, Some(first));
+        assert!(!manager.fullscreen);
+        // A delayed launch in B must not replace A's view.
+        manager.launch(&launch, None, "B newer".into()).unwrap();
+        let newer = manager.active;
+        manager.sync_folder(Some(&a));
+        assert_eq!(manager.active, Some(first));
+        manager.sync_folder(Some(&b));
+        assert_eq!(manager.active, newer);
+        manager.sessions.last_mut().unwrap().stop();
+        wait(&mut manager, |m| m.sessions.len() == 2);
+        manager.sync_folder(Some(&a));
+        manager.sync_folder(Some(&b));
+        assert_eq!(manager.active, None); // Do not pick another terminal after exit.
+        // The running-terminal picker explicitly restores its owner's view.
+        manager.picker = true;
+        manager.selected = 0;
+        manager
+            .input(&key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(manager.active_folder(), Some(a));
+    }
+
     #[test]
     fn keys_preserve_child_controls() {
         for (code, mods, expected) in [

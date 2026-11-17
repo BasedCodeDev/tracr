@@ -187,6 +187,7 @@ pub struct Browser {
     pub worktree_status: BTreeMap<PathBuf, crate::worktree_status::Status>,
     remembered_sessions: BTreeMap<PathBuf, SessionKey>,
     pub state_path: Option<PathBuf>,
+    pub launch_folder: Option<PathBuf>,
     pub state_warning: Option<String>,
     pub generation: u64,
     pub sources: Vec<SourceState>,
@@ -194,6 +195,8 @@ pub struct Browser {
     pub folders: BTreeMap<PathBuf, FolderStatus>,
     pub folder: FolderFilter,
     pub initial_folder: Option<PathBuf>,
+    pub focus_root: Option<PathBuf>,
+    pub focus_notice: Option<String>,
     pub expanded: BTreeSet<PathBuf>,
     pub query: String,
     pub include_archived: bool,
@@ -213,6 +216,7 @@ impl Browser {
             worktree_status: BTreeMap::new(),
             remembered_sessions: BTreeMap::new(),
             state_path: None,
+            launch_folder: None,
             state_warning: None,
             generation: 0,
             sources: (0..specs.len()).map(|_| SourceState::default()).collect(),
@@ -220,6 +224,8 @@ impl Browser {
             folders: BTreeMap::new(),
             folder: FolderFilter::All,
             initial_folder: None,
+            focus_root: None,
+            focus_notice: None,
             expanded: BTreeSet::from([PathBuf::from("/")]),
             query: String::new(),
             include_archived: false,
@@ -228,6 +234,13 @@ impl Browser {
         }
     }
     pub fn select_folder(&mut self, next: FolderFilter) {
+        if self.focus_root.as_ref().is_some_and(
+            |root| !matches!(&next, FolderFilter::Path(path) if self.path_in_subtree(path, root)),
+        ) {
+            self.focus_root = None;
+            self.focus_notice =
+                Some("Folder focus cleared: navigated outside the focused folder.".into());
+        }
         if let (FolderFilter::Path(path), Some(key)) = (&self.folder, &self.selected) {
             self.remembered_sessions.insert(path.clone(), key.clone());
         }
@@ -385,7 +398,7 @@ impl Browser {
     }
     pub fn recover_navigation(&mut self, ancestors: &[FolderFilter], selected: Option<SessionKey>) {
         let missing = matches!(&self.folder, FolderFilter::Path(path)
-            if matches!(self.folders.get(path), Some(FolderStatus::Unlinked))
+            if self.focus_root.as_ref() != Some(path) && matches!(self.folders.get(path), Some(FolderStatus::Unlinked))
             && !self.repositories.values().any(|repo| repo.worktrees.iter().any(|worktree| &worktree.path == path)));
         let mut rows = self.folder_rows();
         if missing || !rows.iter().any(|r| r.filter == self.folder) {
@@ -400,7 +413,9 @@ impl Browser {
                 {
                     self.folder = target.clone();
                 } else {
-                    self.folder = if missing {
+                    self.folder = if let Some(root) = &self.focus_root {
+                        FolderFilter::Path(root.clone())
+                    } else if missing {
                         FolderFilter::Unlinked
                     } else {
                         rows.first()
@@ -426,29 +441,48 @@ impl Browser {
         let Some(cwd) = &session.cwd else {
             return self.matches_folder(session, filter);
         };
-        let linked = self.repositories.values().find_map(|repo| {
-            repo.worktrees
-                .iter()
-                .skip(1)
-                .filter(|w| cwd.starts_with(&w.path))
-                .max_by_key(|w| w.path.components().count())
-                .map(|w| (repo, w))
-        });
         match filter {
-            FolderFilter::Path(path) => {
-                if let Some((repo, worktree)) = linked {
-                    if path.starts_with(&worktree.path) {
-                        return cwd.starts_with(path);
-                    }
-                    return repo
-                        .worktrees
-                        .first()
-                        .is_some_and(|main| main.path.starts_with(path));
-                }
-                cwd.starts_with(path)
-            }
+            FolderFilter::Path(path) => self.path_in_subtree(cwd, path),
             _ => self.matches_folder(session, filter),
         }
+    }
+
+    /// Membership follows the displayed tree, including projected worktrees.
+    pub fn path_in_subtree(&self, cwd: &std::path::Path, root: &std::path::Path) -> bool {
+        let linked = self
+            .repositories
+            .values()
+            .flat_map(|repo| repo.worktrees.iter().skip(1).map(move |w| (repo, w)))
+            .filter(|(_, w)| cwd.starts_with(&w.path))
+            .max_by_key(|(_, w)| w.path.components().count());
+        if let Some((repo, worktree)) = linked {
+            if root.starts_with(&worktree.path) {
+                return cwd.starts_with(root);
+            }
+            return repo
+                .worktrees
+                .first()
+                .is_some_and(|main| main.path.starts_with(root));
+        }
+        cwd.starts_with(root)
+    }
+
+    pub fn toggle_folder_focus(&mut self) {
+        if self.focus_root.take().is_none() {
+            if let FolderFilter::Path(path) = &self.folder {
+                self.focus_root = Some(path.clone());
+            }
+        }
+        self.reconcile(0);
+    }
+
+    // Collapsed ancestors outside the focus must not suppress the focused root.
+    fn tree_expanded(&self, path: &std::path::Path) -> bool {
+        self.expanded.contains(path)
+            || self
+                .focus_root
+                .as_ref()
+                .is_some_and(|root| root != path && self.path_in_subtree(root, path))
     }
     /// Select an absolute, lexically normalized folder before discovery begins.
     pub fn open_folder(&mut self, path: PathBuf) {
@@ -575,6 +609,11 @@ impl Browser {
             .into_iter()
             .filter(|s| {
                 (self.include_archived || !s.archived)
+                    && self.focus_root.as_ref().is_none_or(|root| {
+                        s.cwd
+                            .as_ref()
+                            .is_some_and(|cwd| self.path_in_subtree(cwd, root))
+                    })
                     && if searching {
                         let text = format!(
                             "{} {} {} {} {}",
@@ -669,6 +708,9 @@ impl Browser {
         if let Some(path) = &self.initial_folder {
             paths.extend(path.ancestors().map(|p| p.to_owned()));
         }
+        if let Some(root) = &self.focus_root {
+            paths.extend(root.ancestors().map(PathBuf::from));
+        }
         for session in &sessions {
             if let Some(path) = session.cwd.as_ref().filter(|p| p.is_absolute()) {
                 paths.extend(
@@ -700,7 +742,7 @@ impl Browser {
                 .ancestors()
                 .skip(1)
                 .filter(|p| !p.as_os_str().is_empty())
-                .any(|p| !self.expanded.contains(p))
+                .any(|p| !self.tree_expanded(p))
             {
                 continue;
             }
@@ -724,7 +766,7 @@ impl Browser {
             for repo in self.repositories.values().filter(|r| {
                 r.worktrees.first().is_some_and(|w| w.path == path) && r.worktrees.len() > 1
             }) {
-                if !self.expanded.contains(&path) {
+                if !self.tree_expanded(&path) {
                     continue;
                 }
                 let depth = path.components().count();
@@ -780,7 +822,7 @@ impl Browser {
                             }
                         ),
                     });
-                    if self.expanded.contains(&worktree.path) {
+                    if self.tree_expanded(&worktree.path) {
                         for child in all_paths
                             .iter()
                             .filter(|p| **p != worktree.path && p.starts_with(&worktree.path))
@@ -789,7 +831,7 @@ impl Browser {
                                 .ancestors()
                                 .skip(1)
                                 .take_while(|p| *p != worktree.path)
-                                .any(|p| !self.expanded.contains(p))
+                                .any(|p| !self.tree_expanded(p))
                             {
                                 continue;
                             }
@@ -823,6 +865,26 @@ impl Browser {
                 {
                     row.label.push_str(" *");
                 }
+            }
+        }
+        if let Some(root) = &self.focus_root {
+            if let Some(index) = rows
+                .iter()
+                .position(|row| row.filter == FolderFilter::Path(root.clone()))
+            {
+                let depth = rows[index].depth;
+                let end = rows
+                    .iter()
+                    .enumerate()
+                    .skip(index + 1)
+                    .find(|(_, row)| row.depth <= depth)
+                    .map_or(rows.len(), |(index, _)| index);
+                rows = rows.drain(index..end).collect();
+                for row in &mut rows {
+                    row.depth -= depth;
+                }
+            } else {
+                rows.clear();
             }
         }
         rows

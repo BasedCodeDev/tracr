@@ -610,7 +610,15 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
     if view.terminal_focused() && view.terminals.borrow().active.is_some() {
         return (
             "Ctrl+B Background · Alt+F Full-screen · Ctrl+C Interrupt Codex".into(),
-            "Keyboard input goes to the terminal".into(),
+            browser.focus_root.as_ref().map_or_else(
+                || "Keyboard input goes to the terminal".into(),
+                |root| {
+                    format!(
+                        "Keyboard input goes to the terminal · Focused: {} · Alt+F in Folders clears focus",
+                        safe_text(&root.display().to_string())
+                    )
+                },
+            ),
             view.message.clone().unwrap_or_default(),
             2,
         );
@@ -671,6 +679,19 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
         } else {
             message
         };
+    let message = if let Some(root) = &browser.focus_root {
+        format!(
+            "{}Focused: {} · Alt+F in Folders clears focus",
+            if message.is_empty() {
+                String::new()
+            } else {
+                format!("{message} | ")
+            },
+            safe_text(&root.display().to_string())
+        )
+    } else {
+        message
+    };
     let (first, second) = footer_shortcuts(area.width, browser, view);
     let separate_message = !message.is_empty()
         && unicode_width::UnicodeWidthStr::width(message.as_str())
@@ -922,10 +943,10 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(folder_pane_width(
-                    content.width,
-                    &folder_tree_labels(&browser.folder_rows()),
-                )),
+                Constraint::Length(
+                    folder_pane_width(content.width, &folder_tree_labels(&browser.folder_rows()))
+                        .max(if browser.focus_root.is_some() { 19 } else { 0 }),
+                ),
                 Constraint::Min(0),
             ])
             .split(content);
@@ -1396,6 +1417,7 @@ enum Command {
     PaneRight,
     PreviousItem,
     NextItem,
+    FolderFocus,
     FolderLeft,
     FolderRight,
     Resume,
@@ -1452,7 +1474,11 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             Search,
             "General",
             "/",
-            "Search all sessions",
+            if browser.focus_root.is_some() {
+                "Search within focused folder"
+            } else {
+                "Search all sessions"
+            },
             Some(("/ Search", "/ Search")),
         ),
         (
@@ -1754,6 +1780,26 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             ));
         }
     }
+    if view.context() == 0 {
+        let index = entries
+            .iter()
+            .position(|e| e.0 == CreateWorktree)
+            .unwrap_or(entries.len());
+        entries.insert(
+            index,
+            (
+                FolderFocus,
+                "Folders",
+                "Alt+F",
+                if browser.focus_root.is_some() {
+                    "Clear folder focus"
+                } else {
+                    "Focus selected folder"
+                },
+                Some(("Alt+F Focus", "Alt+F Focus")),
+            ),
+        );
+    }
     entries
         .into_iter()
         .map(|(command, section, shortcut, label, footer)| MenuEntry {
@@ -1811,6 +1857,11 @@ fn worktree_unavailable(browser: &Browser, view: &View) -> Option<String> {
 
 fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<String> {
     match command {
+        Command::FolderFocus
+            if browser.focus_root.is_none() && !matches!(browser.folder, FolderFilter::Path(_)) =>
+        {
+            Some("Select a concrete folder first.".into())
+        }
         Command::CreateWorktree => worktree_unavailable(browser, view),
         Command::FolderLeft | Command::FolderRight
             if !matches!(browser.folder, FolderFilter::Path(_)) =>
@@ -2043,10 +2094,31 @@ fn session_title(
 }
 
 fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
-    let inner = crate::modal::shell(frame, "Search sessions", 100, 30);
+    let inner = crate::modal::shell(
+        frame,
+        if browser.focus_root.is_some() {
+            "Search within folder"
+        } else {
+            "Search sessions"
+        },
+        100,
+        30,
+    );
     let regions = crate::modal::regions(inner);
-    let sections =
-        Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).split(regions.body);
+    let scope_height = if browser.focus_root.is_some() { 3 } else { 0 };
+    let scoped = Layout::vertical([Constraint::Length(scope_height), Constraint::Min(1)])
+        .split(regions.body);
+    if let Some(root) = &browser.focus_root {
+        frame.render_widget(
+            Paragraph::new(format!(
+                "Within: {}\nIncludes descendants and displayed worktrees",
+                safe_text(&root.display().to_string())
+            ))
+            .wrap(Wrap { trim: false }),
+            scoped[0],
+        );
+    }
+    let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).split(scoped[1]);
     crate::modal::text_field(
         frame,
         sections[0],
@@ -2259,7 +2331,14 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             let mut state = ListState::default().with_selected(selected);
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(pane_block("Folders", view.context() == 0))
+                    .block(pane_block(
+                        if browser.focus_root.is_some() {
+                            "Folders · Focused"
+                        } else {
+                            "Folders"
+                        },
+                        view.context() == 0,
+                    ))
                     .highlight_style(selection_style(view.context() == pane))
                     .highlight_symbol("> "),
                 area,
@@ -2373,7 +2452,14 @@ fn draw_empty_sessions(frame: &mut Frame, area: Rect, browser: &Browser, focused
             if !browser.include_archived {
                 lines.push(Line::styled("a  Show archived sessions", muted));
             }
-            lines.push(Line::styled("/  Search all sessions", muted));
+            lines.push(Line::styled(
+                if browser.focus_root.is_some() {
+                    "/  Search within focused folder"
+                } else {
+                    "/  Search all sessions"
+                },
+                muted,
+            ));
         }
         let paragraph = Paragraph::new(lines)
             .alignment(ratatui::layout::Alignment::Center)
@@ -3008,7 +3094,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
                     if let Some(path) = session.cwd.as_ref().filter(|path| path.is_absolute()) {
                         browser.open_folder(path.clone());
                     } else {
-                        browser.folder = FolderFilter::Unknown;
+                        browser.select_folder(FolderFilter::Unknown);
                     }
                     browser.selected = Some(session.key.clone());
                     browser.reconcile(0);
@@ -3109,6 +3195,12 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             if view.focus == 1 && can_create(browser) && browser.visible().is_empty() =>
         {
             Command::Create
+        }
+        KeyCode::Char('f') if key.modifiers == KeyModifiers::ALT && view.context() == 0 => {
+            if key.kind != KeyEventKind::Press {
+                return Action::Continue;
+            }
+            Command::FolderFocus
         }
         KeyCode::Char('f') if key.modifiers == KeyModifiers::ALT && view.context() == 1 => {
             if key.kind != KeyEventKind::Press {
@@ -3341,6 +3433,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 _ => {}
             }
         }
+        Command::FolderFocus => browser.toggle_folder_focus(),
         Command::FolderLeft | Command::FolderRight => {
             let FolderFilter::Path(path) = browser.folder.clone() else {
                 return Action::Continue;
@@ -3396,6 +3489,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
 }
 
 struct PendingResume {
+    origin: FolderFilter,
     task: tokio::task::JoinHandle<Result<crate::domain::ResumeCommand, String>>,
     observed_cwd: Option<std::path::PathBuf>,
     fullscreen: bool,
@@ -3408,7 +3502,14 @@ impl Drop for PendingResume {
 
 fn save_folder(browser: &mut Browser, folder: Option<&std::path::Path>, view: &mut View) {
     if let (Some(file), Some(folder)) = (&browser.state_path, folder) {
-        if let Err(error) = crate::state::save(file, folder) {
+        if let Err(error) = crate::state::save_context(
+            file,
+            folder,
+            browser
+                .launch_folder
+                .as_deref()
+                .map(|launch| (launch, browser.focus_root.as_deref())),
+        ) {
             let warning = format!("Could not save browser state: {error}");
             view.message = Some(warning.clone());
             browser.state_warning = Some(warning);
@@ -3476,6 +3577,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     let mut folder_checks_dirty = true;
     let outcome: Result<(), Box<dyn std::error::Error>> = async {
         loop {
+            if let Some(notice) = browser.focus_notice.take() { view.message = Some(notice); idle.wake(); }
             let (terminal_changed, terminal_exits) = view.terminals.borrow_mut().poll();
             if terminal_changed { idle.wake(); }
             if !terminal_exits.is_empty() {
@@ -3729,9 +3831,13 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                 view.terminals.borrow_mut().area = Rect::new(0, 0, size.width, size.height);
                             }
                             let result = view.terminals.borrow_mut().launch(&command.launch, Some(command.session.key.clone()), command.session.title.clone());
-                            if result.is_ok() { view.terminals.borrow_mut().fullscreen = ready.fullscreen; }
-                            view.focus = 1;
-                            view.git_focus = false;
+                            if result.is_ok() && browser.folder == ready.origin {
+                                browser.open_folder(command.cwd.clone());
+                                view.terminals.borrow_mut().sync_folder(Some(&command.cwd));
+                                view.terminals.borrow_mut().fullscreen = ready.fullscreen;
+                                view.focus = 1;
+                                view.git_focus = false;
+                            }
                             if let Err(error) = result { view.message = Some(format!("Could not resume Codex: {error}")); }
                         }
                     }
@@ -3741,6 +3847,10 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
             }
+            view.terminals.borrow_mut().sync_folder(match &browser.folder {
+                FolderFilter::Path(path) => Some(path.as_path()),
+                _ => None,
+            });
             let size = terminal.size()?;
             view.help_page_size =
                 usize::from(size.height.saturating_sub(2).min(22).saturating_sub(7))
@@ -3770,6 +3880,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     Ok(crate::inline_terminal::Input::Consumed) => {
                         let active = view.terminals.borrow().active;
                         if previous_terminal != active || (terminal_overlay && active.is_some() && matches!(&incoming, Event::Key(key) if key.code == KeyCode::Enter)) {
+                            if let Some(folder) = view.terminals.borrow().active_folder() {
+                                browser.open_folder(folder);
+                            }
                             view.focus = 1; view.git_focus = false;
                         }
                         continue;
@@ -3952,7 +4065,14 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                         }
                         Action::ResumeSelected | Action::ResumeSelectedFullscreen => {
                             let fullscreen = action == Action::ResumeSelectedFullscreen;
-                            if browser.selected.as_ref().is_some_and(|key| view.terminals.borrow_mut().attach(key)) { view.terminals.borrow_mut().fullscreen = fullscreen; view.focus = 1; view.git_focus = false; continue; }
+                            if browser.selected.as_ref().is_some_and(|key| view.terminals.borrow_mut().attach(key)) {
+                                if let Some(folder) = view.terminals.borrow().active_folder() { browser.open_folder(folder); }
+                                let mut terminals = view.terminals.borrow_mut();
+                                let folder = terminals.active_folder();
+                                terminals.sync_folder(folder.as_deref());
+                                terminals.fullscreen = fullscreen;
+                                view.focus = 1; view.git_focus = false; continue;
+                            }
                             if let Some(session) = browser
                                 .visible()
                                 .into_iter()
@@ -3974,6 +4094,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                         view.preparing = true;
                                         view.message = None;
                                         pending = Some(PendingResume {
+                                            origin: browser.folder.clone(),
                                             fullscreen,
                                             observed_cwd,
                                             task: tokio::spawn(async move {
