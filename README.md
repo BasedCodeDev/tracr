@@ -218,13 +218,20 @@ retries and refreshes the data. Filesystems that silently omit notifications may
 require those refresh actions. Polling fallback is not implemented yet.
 
 The folder and session panes show partial results while loading.
-Terminals narrower than 100 columns show the focused pane full-width.
+Terminals narrower than 100 columns show the focused pane full-width, except
+when Folders is collapsed: its two-column strip sits beside Sessions.
 
 - Up / Down or `k/j`: select the previous / next item. In Folders, Right / `l`
   expands a collapsed folder without changing selection; when already expanded,
   it focuses Sessions for that folder. Left / `h` collapses the folder or selects
   its displayed parent. Enter focuses Sessions directly; Escape or Backspace
   returns to Folders. Left / Right and `h/l` do nothing in Sessions.
+- `g` in Folders collapses the entire pane to a two-column strip with a vertical line and no label,
+  giving Sessions the remaining width. Focus stays on the line; `g` expands it.
+  Folder selection and expanded tree nodes are preserved. Hidden folder actions
+  are disabled; pane navigation, help, refresh, and quit remain available.
+  Leaving preserves the collapsed state; returning through pane navigation
+  expands Folders. This state lasts for the current run.
 - Alt+Left focuses Folders; Alt+Right focuses Sessions, including from the bottom
   Git Worktrees pane. Alt+Down focuses Git Worktrees and expands it if collapsed;
   Alt+Up returns to the last focused
@@ -386,7 +393,8 @@ the full tree. Clearing focus is remembered too.
 
 At 100 columns and above, Folders fits the expanded tree up to 40% of the
 window width; Sessions uses the remaining space. Narrower windows show the
-focused panel. Scrolling or changing selection does not move the divider.
+focused panel unless Folders is collapsed, when its two-column strip remains
+beside Sessions. Scrolling or changing selection does not move the divider.
 The mouse wheel over a visible terminal scrolls its output history, even when
 Folders has keyboard focus. Up to 2,000 lines are kept per terminal. New output
 keeps your reading position; typing or pasting returns to the live screen. An
