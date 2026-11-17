@@ -1663,6 +1663,16 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         ),
     };
     entries.insert(navigation_index, directional);
+    if view.context() == 2 {
+        entries.insert(
+            navigation_index + 1,
+            (PaneLeft, "Navigation", "Alt+Left", "Focus Folders", None),
+        );
+        entries.insert(
+            navigation_index + 2,
+            (PaneRight, "Navigation", "Alt+Right", "Focus Sessions", None),
+        );
+    }
     if view.context() != 2 && view.history.present() {
         entries.insert(
             navigation_index + 1,
@@ -3176,14 +3186,12 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
         }
         Command::PaneLeft => {
-            if !view.git_focus {
-                view.focus = 0;
-            }
+            view.git_focus = false;
+            view.focus = 0;
         }
         Command::PaneRight => {
-            if !view.git_focus {
-                view.focus = 1;
-            }
+            view.git_focus = false;
+            view.focus = 1;
         }
         Command::CyclePane | Command::CyclePaneBack => {
             let count = if view.history.present() { 3 } else { 2 };
@@ -4679,30 +4687,32 @@ mod cleanup_tests {
             let folder = browser.folder.clone();
             let expanded = browser.expanded.clone();
             let selected = browser.selected.clone();
-            for limited in [false, true] {
+            for (limited, hidden) in [(false, false), (false, true), (true, false), (true, true)] {
                 view.git_size_limited = limited;
                 for upper in [0, 1] {
                     for in_git in [false, true].into_iter().filter(|g| !g || has_git) {
                         for key in [KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right] {
                             view.focus = upper;
                             view.git_focus = in_git;
-                            view.git_hidden = true;
+                            view.git_hidden = hidden;
                             handle_key(
                                 &mut browser,
                                 &mut view,
                                 KeyEvent::new(key, KeyModifiers::ALT),
                             );
                             let expected = match (in_git, key) {
+                                (_, KeyCode::Left) => 0,
+                                (_, KeyCode::Right) => 1,
                                 (true, KeyCode::Up) => upper,
                                 (true, _) => 2,
                                 (false, KeyCode::Down) if has_git => 2,
-                                (false, KeyCode::Left) => 0,
-                                (false, KeyCode::Right) => 1,
                                 _ => upper,
                             };
                             assert_eq!(view.context(), expected);
                             if !in_git && key == KeyCode::Down && has_git {
                                 assert!(!view.git_hidden);
+                            } else {
+                                assert_eq!(view.git_hidden, hidden);
                             }
                             assert_eq!(browser.folder, folder);
                             assert_eq!(browser.selected, selected);
@@ -4713,6 +4723,24 @@ mod cleanup_tests {
                             assert!(view.history.following);
                         }
                     }
+                }
+            }
+            if has_git {
+                for (command, focus) in [(Command::PaneLeft, 0), (Command::PaneRight, 1)] {
+                    view.git_focus = true;
+                    view.help = true;
+                    view.help_control = 0;
+                    view.help_selected = menu_entries(&browser, &view)
+                        .iter()
+                        .position(|entry| entry.command == command)
+                        .unwrap();
+                    handle_key(
+                        &mut browser,
+                        &mut view,
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                    );
+                    assert!(!view.help);
+                    assert_eq!(view.context(), focus);
                 }
             }
             view.focus = 1;
