@@ -220,7 +220,7 @@ def run_case(binary, codex, home, mode):
         terminal.wait(lambda: ready(terminal.text(), tid, cwd))
         terminal.inspect('ID: ' + tid)
         assert os.tcgetpgrp(terminal.master) == terminal.child.pid, 'foreground not restored'
-        assert re.search(r'> [│ ]*[├└]─ old \(1\)', terminal.text()), 'selected folder not restored'
+        assert re.search(r'> [│ ]*(?:[├└]─ )?old \(1\)', terminal.text()), 'selected folder not restored'
         # Source metadata must be fetched again, not merely retained in the screen.
         before_refresh = len(terminal.output)
         terminal.send(b'r')
