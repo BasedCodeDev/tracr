@@ -56,6 +56,16 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         launch = json.loads((home/'launch.json').read_text())
         assert launch['args'] == ['resume', '--cd', str(linked), '--', 'first'], launch
         assert launch['cwd'] == str(linked) and launch['foreground'], launch
+        t.expect('Ctrl+B background')
+        t.send(b'\x1bf')
+        t.wait(lambda: 'Folders' not in t.text())
+        t.send(b'\t')  # Full-screen Sessions -> inline Git.
+        t.expect('Folders')
+        t.expect('Enter Resume')
+        assert 'Keyboard input goes to the terminal' not in t.text()
+        t.send(b'\x1b[Z')  # Git -> the same running session.
+        t.expect('Keyboard input goes to the terminal')
+        assert json.loads((home/'launch.json').read_text())['pid'] == launch['pid']
         t.send(b'x')
         t.expect('i Info')
         t.inspect('ID: first')

@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.resize(80, 240)
         terminal.wait(lambda: size()['columns'] == initial_columns)
         # Pane navigation stays in tracr, with the same PTY still displayed.
-        terminal.send(b'\x1b[1;3D')
+        terminal.send(b'\x1b[Z')
         terminal.expect('Enter Sessions')
         assert 'Ctrl+B background' in terminal.text()
         # Moving to the parent hides this terminal, then returning restores it
@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.expect('Actions & shortcuts')
         terminal.send(b'\x1b')
         terminal.wait(lambda: 'Actions & shortcuts' not in terminal.text())
-        terminal.send(b'\x1b[1;3C')
+        terminal.send(b'\t')
         terminal.expect('Keyboard input goes to the terminal')
         assert json.loads((home/'launch.json').read_text())['pid'] == first['pid']
         terminal.send(b'\x02')
@@ -84,20 +84,20 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.wait(lambda: size()['columns'] == 240 and size()['rows'] == 80)
         terminal.wait(lambda: 'Folders' not in terminal.text() and 'Ctrl+B background' not in terminal.text())
         assert size()['pid'] == first['pid']
-        terminal.send(b'\x1bf')
+        terminal.send(b'\t')
         terminal.expect('Ctrl+B background')
+        terminal.expect('Enter Sessions')
         terminal.wait(lambda: size()['columns'] == initial_columns)
         terminal.send(b'\x1b[1;3B\x1bf')
         terminal.wait(lambda: size()['columns'] == 240 and size()['rows'] == 80)
         terminal.resize(45, 150)
         terminal.wait(lambda: size()['columns'] == 150 and size()['rows'] == 45)
-        # Fullscreen owns Alt+arrows; explicitly return inline before navigating.
-        terminal.send(b'\x1bf')
+        # Shift+Tab reveals the panes and moves from Sessions to Folders.
+        terminal.send(b'\x1b[Z')
         terminal.expect('Ctrl+B background')
-        terminal.send(b'\x1b[1;3D')
         terminal.expect('Enter Sessions')
         terminal.expect('Ctrl+B background')
-        terminal.send(b'\x1b[1;3C')
+        terminal.send(b'\t')
         terminal.send(b'\x02')
         terminal.expect('Open here')
         terminal.resize(80, 240)

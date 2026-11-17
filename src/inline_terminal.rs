@@ -809,6 +809,18 @@ impl Manager {
             }
             return Ok(Input::Consumed);
         }
+        // Tab belongs to Tracer, including when the terminal fills the screen.
+        if let Event::Key(key) = event {
+            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+                && (key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT)
+            {
+                if key.kind == KeyEventKind::Release {
+                    return Ok(Input::Consumed);
+                }
+                self.fullscreen = false;
+                return Ok(Input::Pass);
+            }
+        }
         // Inline sessions retain pane navigation; fullscreen sessions receive these keys.
         if !self.fullscreen
             && matches!(event, Event::Key(key) if key.modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down))
@@ -883,7 +895,7 @@ impl Manager {
             } else {
                 Color::DarkGray
             }))
-            .title(" Codex · Ctrl+B background · Alt+arrows panels · Alt+C copy ");
+            .title(" Codex · Ctrl+B background · Tab/Shift+Tab panels · Alt+C copy ");
         self.area = if self.fullscreen {
             area
         } else {
@@ -1992,6 +2004,79 @@ time.sleep(60)
             .unwrap();
         assert_eq!(manager.active, Some(manager.sessions[1].id));
         assert!(!manager.picker);
+    }
+
+    #[test]
+    fn tabs_leave_fullscreen_without_reaching_the_child() {
+        let mut manager = Manager {
+            area: Rect::new(0, 0, 80, 24),
+            ..Manager::default()
+        };
+        let script = "import os,tty\ntty.setraw(0)\nprint('READY',flush=True)\nbuf=b''\nwhile True:\n b=os.read(0,1)\n buf+=b\n if b==b'\\r':\n  os.write(1,buf.hex().encode()+b'\\r\\n')\n  buf=b''";
+        manager
+            .launch(&command(script), None, "test".into())
+            .unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0].parser.screen().contents().contains("READY")
+        });
+        let active = manager.active;
+        let pid = manager.sessions[0].pid;
+        manager.input(&Event::Paste("draft".into())).unwrap();
+        for fullscreen in [false, true] {
+            for (code, modifiers) in [
+                (KeyCode::Tab, KeyModifiers::NONE),
+                (KeyCode::Tab, KeyModifiers::SHIFT),
+                (KeyCode::BackTab, KeyModifiers::SHIFT),
+                (KeyCode::BackTab, KeyModifiers::NONE),
+            ] {
+                for kind in [
+                    KeyEventKind::Release,
+                    KeyEventKind::Press,
+                    KeyEventKind::Repeat,
+                ] {
+                    manager.fullscreen = fullscreen;
+                    let result = manager
+                        .input(&Event::Key(KeyEvent::new_with_kind(code, modifiers, kind)))
+                        .unwrap();
+                    if kind == KeyEventKind::Release {
+                        assert!(matches!(result, Input::Consumed));
+                        assert_eq!(manager.fullscreen, fullscreen);
+                    } else {
+                        assert!(matches!(result, Input::Pass));
+                        assert!(!manager.fullscreen);
+                    }
+                    assert_eq!(manager.active, active);
+                    assert_eq!(manager.sessions[0].pid, pid);
+                }
+            }
+        }
+        manager
+            .input(&key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0]
+                .parser
+                .screen()
+                .contents()
+                .contains("64726166740d")
+        });
+        for modifiers in [KeyModifiers::CONTROL, KeyModifiers::ALT] {
+            manager.fullscreen = true;
+            assert!(matches!(
+                manager.input(&key(KeyCode::Tab, modifiers)).unwrap(),
+                Input::Consumed
+            ));
+            assert!(manager.fullscreen);
+        }
+        manager.picker = true;
+        assert!(matches!(
+            manager
+                .input(&key(KeyCode::Tab, KeyModifiers::NONE))
+                .unwrap(),
+            Input::Consumed
+        ));
+        assert!(manager.picker);
+        assert!(manager.fullscreen);
     }
 
     #[test]

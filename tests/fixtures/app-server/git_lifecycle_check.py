@@ -188,7 +188,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.resize(80, 240)
                 terminal.expect('Lifecycle root')
                 terminal.send(b'\t')
-                terminal.send(b'\x1b');terminal.expect('Enter Sessions')
+                terminal.expect('Enter Sessions')  # Tab already focuses Folders.
                 terminal.send(b'\x1b[A')
                 terminal.wait(lambda: re.search(r'> [│ ]*[├└]─ project', terminal.text()) is not None)
                 terminal.send(b'\x1b[B\r')
