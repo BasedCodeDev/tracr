@@ -2489,17 +2489,31 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                     ))
                 })
                 .collect();
-            let mut state = ListState::default().with_selected(selected);
+            // Folder rows occupy one line each. Keep the selection centered,
+            // clamping at the ends so the viewport stays filled.
+            let block = pane_block(
+                if browser.focus_root.is_some() {
+                    "Folders · Focused"
+                } else {
+                    "Folders"
+                },
+                view.context() == 0,
+            );
+            let visible_rows = usize::from(block.inner(area).height);
+            let top = selected
+                .filter(|_| visible_rows > 0)
+                .map(|index| {
+                    index
+                        .saturating_sub(visible_rows / 2)
+                        .min(folders.len().saturating_sub(visible_rows))
+                })
+                .unwrap_or(0);
+            let mut state = ListState::default()
+                .with_offset(top)
+                .with_selected(selected);
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(pane_block(
-                        if browser.focus_root.is_some() {
-                            "Folders · Focused"
-                        } else {
-                            "Folders"
-                        },
-                        view.context() == 0,
-                    ))
+                    .block(block)
                     .highlight_style(selection_style(view.context() == pane))
                     .highlight_symbol("> "),
                 area,
@@ -5796,6 +5810,89 @@ mod cleanup_tests {
         assert_eq!(git.unwrap().height, 1);
         assert!(!visible);
         assert!(git_regions(area, 23, &view, false).1.is_none());
+    }
+
+    #[test]
+    fn folder_selection_stays_centered_in_both_directions() {
+        let mut browser = Browser::new(vec![]);
+        let path = format!(
+            "/{}",
+            (0..20)
+                .map(|i| format!("node{i:02}"))
+                .collect::<Vec<_>>()
+                .join("/")
+        );
+        browser.open_folder(path.into());
+        let view = View::default();
+        let rows = browser.folder_rows();
+        let last = rows.len() - 1;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(160, 9)).unwrap();
+        // Six interior rows: the lower middle is screen row five. At the end,
+        // moving up reaches the middle before the viewport starts scrolling.
+        for (selected, top, cursor) in [
+            (0, 0, 2),
+            (3, 0, 5),
+            (10, 7, 5),
+            (11, 8, 5),
+            (10, 7, 5),
+            (last, last - 5, 7),
+            (last - 1, last - 5, 6),
+            (last - 2, last - 5, 5),
+            (last - 3, last - 6, 5),
+        ] {
+            browser.folder = rows[selected].filter.clone();
+            terminal
+                .draw(|frame| draw_pane(frame, frame.area(), 0, &browser, &view))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(1, cursor)].symbol(), ">");
+            let first: String = (0..160).map(|x| buffer[(x, 2)].symbol()).collect();
+            assert!(first.contains(&rows[top].label), "{first}");
+            assert_eq!(browser.folder, rows[selected].filter);
+        }
+        // Resize the same selection, including zero/one usable row.
+        browser.folder = rows[10].filter.clone();
+        for (height, cursor) in [
+            (8, Some(4)),
+            (13, Some(7)),
+            (5, Some(3)),
+            (4, Some(2)),
+            (3, None),
+            (9, Some(5)),
+        ] {
+            terminal.backend_mut().resize(160, height);
+            terminal.resize(Rect::new(0, 0, 160, height)).unwrap();
+            terminal
+                .draw(|frame| draw_pane(frame, frame.area(), 0, &browser, &view))
+                .unwrap();
+            if let Some(y) = cursor {
+                assert_eq!(terminal.backend().buffer()[(1, y)].symbol(), ">");
+            }
+            assert_eq!(browser.folder, rows[10].filter);
+        }
+        // Collapsing the selected ancestor shortens the tree; expanding it
+        // restores centering without retaining an obsolete viewport offset.
+        if let FolderFilter::Path(path) = &browser.folder {
+            browser.expanded.remove(path);
+        }
+        terminal
+            .draw(|frame| draw_pane(frame, frame.area(), 0, &browser, &view))
+            .unwrap();
+        assert_eq!(terminal.backend().buffer()[(1, 7)].symbol(), ">");
+        if let FolderFilter::Path(path) = &browser.folder {
+            browser.expanded.insert(path.clone());
+        }
+        terminal
+            .draw(|frame| draw_pane(frame, frame.area(), 0, &browser, &view))
+            .unwrap();
+        assert_eq!(terminal.backend().buffer()[(1, 5)].symbol(), ">");
+        // A short list fits without artificial empty space above its rows.
+        browser.expanded.clear();
+        browser.folder = FolderFilter::Unlinked;
+        terminal
+            .draw(|frame| draw_pane(frame, frame.area(), 0, &browser, &view))
+            .unwrap();
+        assert_eq!(terminal.backend().buffer()[(1, 2)].symbol(), ">");
     }
 
     #[test]
