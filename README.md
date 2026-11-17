@@ -175,8 +175,10 @@ folder immediately, showing only sessions recorded directly there. The session
 pane starts focused: choose a session and press Enter to resume. Without a path, tracr restores the last visited folder; the first launch starts in your current directory. You can
 navigate to other folders or search globally; selecting a result opens its folder.
 
-In Sessions, press **n** or choose **Create new session** from `?` to start a
-new session in the selected folder, including folders with existing sessions.
+In Folders or Sessions, press **n** or choose **Create new session** from `?` to
+start a new session in the selected folder, including folders with existing
+sessions. From Folders, the new session opens full-screen; from Sessions, it
+opens embedded.
 When no sessions are shown, Enter also creates a session; otherwise Enter resumes
 the selected session.
 This opens Codex interactively in that folder and returns to tracr when you exit.

@@ -1703,6 +1703,13 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         ));
         entries.extend([
             (
+                CreateFullscreen,
+                "Folders",
+                "n",
+                "Create new session",
+                Some(("n New session", "n New")),
+            ),
+            (
                 FolderLeft,
                 "Folders",
                 "← / h",
@@ -3395,6 +3402,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('r') => Command::Refresh,
         KeyCode::Char('i') if !view.git_focus => Command::Info,
         KeyCode::Char('n') if view.focus == 1 => Command::Create,
+        KeyCode::Char('n') if view.focus == 0 => Command::CreateFullscreen,
         KeyCode::Char('m') if view.focus == 1 => Command::Relink,
         KeyCode::Char('b') if view.focus == 0 => Command::FolderToggle,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
@@ -4502,6 +4510,107 @@ mod cleanup_tests {
             view,
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         )
+    }
+
+    #[test]
+    fn folder_new_session_shortcut_and_menu_ignore_session_count() {
+        for count in 0..=2 {
+            let mut browser = entry_fixture(count, 1);
+            let mut view = View::default();
+            let entry = menu_entries(&browser, &view)
+                .into_iter()
+                .find(|entry| entry.command == Command::CreateFullscreen)
+                .unwrap();
+            assert_eq!(entry.shortcut, "n");
+            assert_eq!(entry.label, "Create new session");
+            assert!(
+                footer_shortcuts(240, &browser, &view)
+                    .1
+                    .contains("n New session")
+            );
+            assert_eq!(
+                handle_key(
+                    &mut browser,
+                    &mut view,
+                    KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)
+                ),
+                Action::CreateNewFullscreen(0)
+            );
+            assert_eq!(view.focus, 1);
+            assert_eq!(
+                handle_key(
+                    &mut browser,
+                    &mut view,
+                    KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)
+                ),
+                Action::CreateNew(0)
+            );
+
+            view.focus = 0;
+            open_help(&browser, &mut view);
+            view.help_selected = menu_entries(&browser, &view)
+                .iter()
+                .position(|entry| entry.command == Command::CreateFullscreen)
+                .unwrap();
+            assert_eq!(
+                enter(&mut browser, &mut view),
+                Action::CreateNewFullscreen(0)
+            );
+        }
+    }
+
+    #[test]
+    fn folder_new_session_selects_source_and_cancels() {
+        let mut browser = entry_fixture(2, 2);
+        let mut view = View::default();
+        press(&mut browser, &mut view, KeyCode::Char('n'));
+        assert_eq!(view.source_picker, Some(0));
+        press(&mut browser, &mut view, KeyCode::Down);
+        assert_eq!(
+            enter(&mut browser, &mut view),
+            Action::CreateNewFullscreen(1)
+        );
+
+        view.focus = 0;
+        press(&mut browser, &mut view, KeyCode::Char('n'));
+        assert_eq!(
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+            ),
+            Action::Continue
+        );
+        assert!(view.source_picker.is_none());
+    }
+
+    #[test]
+    fn folder_new_session_respects_unavailable_states() {
+        for mode in 0..3 {
+            let mut browser = entry_fixture(1, 1);
+            match mode {
+                0 => browser.sources[0].loading = true,
+                1 => browser.specs.clear(),
+                _ => browser.folder = FolderFilter::Unknown,
+            }
+            let mut view = View::default();
+            assert!(unavailable(Command::CreateFullscreen, &browser, &view).is_some());
+            assert!(
+                menu_entries(&browser, &view)
+                    .iter()
+                    .any(|entry| entry.command == Command::CreateFullscreen)
+            );
+            assert_eq!(
+                handle_key(
+                    &mut browser,
+                    &mut view,
+                    KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)
+                ),
+                Action::Continue
+            );
+            assert!(view.message.is_some());
+            assert!(view.source_picker.is_none());
+        }
     }
 
     #[test]

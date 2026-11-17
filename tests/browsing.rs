@@ -845,7 +845,7 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let mut view = View {
             help: true,
-            help_selected: if width >= 160 { 14 } else { 15 },
+            help_selected: if width >= 160 { 15 } else { 16 },
             ..View::default()
         };
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
@@ -1106,6 +1106,7 @@ async fn footer_and_menu_follow_focus_with_stable_shared_controls() {
                 );
                 if width >= 80 {
                     assert!(context.contains("m Move"));
+                    assert!(context.contains("n New"));
                 }
             } else {
                 assert!(!context.contains("Move folder") && !context.contains("Toggle"));
@@ -1119,7 +1120,11 @@ async fn footer_and_menu_follow_focus_with_stable_shared_controls() {
             }
             if width >= 80 {
                 view.help = true;
-                view.help_selected = 10;
+                view.help_selected = if focus == 0 {
+                    if width >= 160 { 15 } else { 16 }
+                } else {
+                    10
+                };
                 terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
                 let text = terminal
                     .backend()
