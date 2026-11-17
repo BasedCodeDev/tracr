@@ -1001,12 +1001,11 @@ impl Manager {
             width,
             height,
         );
-        let accent = Color::Rgb(215, 164, 226);
         frame.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(accent))
+            .border_type(BorderType::Thick)
+            .border_style(Style::default().fg(Color::Cyan))
             .title(format!(" Open terminals ({}) ", self.sessions.len()));
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -1075,13 +1074,8 @@ impl Manager {
             };
             let table = Table::new(rows, widths)
                 .column_spacing(2)
-                .style(Style::default().fg(accent))
-                .row_highlight_style(
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(accent)
-                        .add_modifier(Modifier::BOLD),
-                );
+                .highlight_symbol("> ")
+                .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
             frame.render_stateful_widget(
                 table,
                 rows_area,
@@ -1972,10 +1966,30 @@ time.sleep(60)
                 let highlighted: Vec<_> = buffer
                     .content
                     .iter()
-                    .filter(|cell| cell.bg == Color::Rgb(215, 164, 226))
+                    .filter(|cell| cell.modifier.contains(Modifier::BOLD))
                     .collect();
                 assert!(!highlighted.is_empty());
-                assert!(highlighted.iter().all(|cell| cell.fg == Color::Black));
+                assert!(highlighted.iter().all(|cell| cell.fg == Color::Reset));
+                assert!(highlighted.iter().any(|cell| cell.symbol() == ">"));
+                assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
+                assert!(
+                    buffer.content.iter().all(|cell| matches!(
+                        cell.fg,
+                        Color::Reset | Color::Cyan | Color::DarkGray
+                    ))
+                );
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .any(|cell| cell.symbol() == "┏" && cell.fg == Color::Cyan)
+                );
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .any(|cell| cell.symbol() == "┓" && cell.fg == Color::Cyan)
+                );
                 if width >= 100 {
                     assert!(text.contains("terminal"));
                     assert!(text.contains("open"));
