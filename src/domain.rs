@@ -151,7 +151,8 @@ pub fn resume_blocker(session: &SessionSummary) -> Option<&'static str> {
 }
 
 /// Ephemeral provider runtime state, deliberately separate from session history.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum RuntimeStatus {
     #[default]
     Unknown,

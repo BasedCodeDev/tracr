@@ -28,6 +28,14 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Report worktrees and live agent activity as JSON.
+    Worktrees {
+        #[arg(value_name = "PATH", value_parser = clap::builder::OsStringValueParser::new().try_map(parse_folder))]
+        path: Option<PathBuf>,
+        /// Print a human-readable table instead of JSON.
+        #[arg(long)]
+        text: bool,
+    },
     /// Browse sessions in the terminal.
     Browse {
         #[arg(value_name = "PATH", value_parser = clap::builder::OsStringValueParser::new().try_map(parse_folder))]
@@ -80,7 +88,19 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
         fixture: None,
         include_archived: false,
     });
+    if let Command::Worktrees { path, text } = &command {
+        let path = config::absolute_path(path.as_deref().unwrap_or(&env.cwd), &env.cwd)?;
+        let binary = if cli.codex_bin.components().count() > 1 {
+            config::absolute_path(&cli.codex_bin, &env.cwd)?
+        } else {
+            cli.codex_bin
+        };
+        let report = tracr::worktree_report::collect(&path, &binary, config.codex_sources).await;
+        report.print(*text)?;
+        return Ok(if report.complete { 0 } else { 1 });
+    }
     let (fixture, include_archived) = match &command {
+        Command::Worktrees { .. } => unreachable!(),
         Command::Browse {
             fixture,
             include_archived,
@@ -152,6 +172,7 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
         }
     }
     match command {
+        Command::Worktrees { .. } => unreachable!(),
         Command::Browse { .. } => {
             tracr::tui::run(browser).await?;
             Ok(tracr::dev_reload::exit_code())
@@ -259,10 +280,18 @@ async fn main() -> ExitCode {
             .error(clap::error::ErrorKind::ArgumentConflict, message)
             .exit();
     }
+    let worktree_text = match &cli.command {
+        Some(Command::Worktrees { text, .. }) => Some(*text),
+        _ => None,
+    };
     match run(cli).await {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
-            eprintln!("tracr: {}", tracr::browser::safe_text(&error.to_string()));
+            if let Some(text) = worktree_text {
+                let _ = tracr::worktree_report::Report::failure(error.to_string()).print(text);
+            } else {
+                eprintln!("tracr: {}", tracr::browser::safe_text(&error.to_string()));
+            }
             ExitCode::from(1)
         }
     }

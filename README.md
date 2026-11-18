@@ -164,6 +164,44 @@ per-source diagnostics in `sources`. Text output escapes terminal controls.
 On a later-page error the command retains accumulated results and exits with 1.
 Invalid arguments exit with 2; configuration/provider errors exit with 1.
 
+## Agent activity from the command line
+
+Run `tracr worktrees [PATH]` to get a one-shot JSON snapshot of a repository's
+registered worktrees and loaded Codex agents. PATH defaults to the current
+folder; main checkouts, linked worktrees, and their subfolders resolve to the
+same repository. Tracr's UI does not need to be running.
+
+```sh
+tracr worktrees
+tracr worktrees /path/to/repository
+tracr worktrees --text
+tracr --codex-home ~/.codex worktrees
+```
+
+JSON has `schema_version: 1`, `repository` (the absolute common Git directory),
+`worktrees`, `complete`, `error`, and per-source diagnostics in `sources`.
+Each worktree has `path`, `branch` (a full ref or null), `head`, `bare`, `locked`,
+`prunable`, and `agents`. Agents include their composite `key` (provider, source,
+native ID), `title`, `cwd`, and structured `status`, for example
+`{"status":"running"}` or
+`{"status":"waiting","approval":true,"input":false}`. Idle, error, and unknown
+loaded sessions are included; unloaded history and guardian sessions are omitted.
+Worktrees are sorted by path and agents by key. The calling agent is included if
+visible to the configured sources.
+
+The command queries existing Codex daemons passively, without resuming sessions,
+starting turns, or answering approvals. Existing `--config`, `--codex-home`, and
+`--codex-bin` options apply. Independently hosted agents and older Codex versions
+without daemon support may not be observable.
+
+Always check `complete` before interpreting an empty agent array. Source failures,
+timeouts, or unresolved session directories produce an incomplete report while
+preserving available results. Exit codes are 0 for a complete snapshot, 1 for
+incomplete results or operational errors, and 2 for invalid arguments. Operational
+errors in JSON mode use the same envelope. `--text` prints a readable table and
+reports failures on stderr. This snapshot is an observation, not a worktree lock
+or reservation; activity can change immediately after it is read.
+
 ## Terminal browsing
 
 `tracr` and `tracr browse` launch the terminal interface. Use

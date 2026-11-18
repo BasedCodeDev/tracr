@@ -42,6 +42,7 @@ if sys.argv[1:] == ['app-server', 'proxy']:
             log.write(json.dumps(request)+'\n')
             settings = json.loads((home/'fake.json').read_text())
             if settings.get('live_disconnect'): break
+            if settings.get('live_delay'): time.sleep(settings['live_delay'])
             method = request['method']
             assert method in ('initialize', 'initialized', 'thread/loaded/list', 'thread/read'), method
             if method == 'initialized': continue
@@ -57,7 +58,7 @@ if sys.argv[1:] == ['app-server', 'proxy']:
             else:
                 assert params['includeTurns'] is False
                 tid = params['threadId']
-                result = {'thread':{'id':tid, 'status':threads[tid], 'source':settings.get('live_source', 'cli')}}
+                result = {'thread':{'id':tid, 'status':threads[tid], 'source':settings.get('live_source', 'cli'), **settings.get('live_metadata', {}).get(tid, {})}}
             response = json.dumps({'id':request['id'], 'result':result}).encode()
             prefix = bytes([129, len(response)]) if len(response) < 126 else bytes([129,126])+struct.pack('!H',len(response))
             sys.stdout.buffer.write(prefix+response)

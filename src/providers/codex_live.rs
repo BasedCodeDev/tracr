@@ -8,7 +8,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashSet},
-    path::Path,
+    path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
 };
@@ -23,6 +23,13 @@ use tokio_tungstenite::{
 };
 
 type Socket = WebSocketStream<Join<ChildStdout, ChildStdin>>;
+#[derive(Clone, Debug)]
+pub struct LiveSession {
+    pub title: String,
+    pub cwd: Option<PathBuf>,
+    pub status: RuntimeStatus,
+}
+
 pub struct LiveClient {
     socket: Socket,
     // kill_on_drop affects only our byte proxy, never the shared daemon.
@@ -128,11 +135,20 @@ impl LiveClient {
         Err("live status connection closed".into())
     }
     pub async fn snapshot(&mut self) -> Result<BTreeMap<SessionKey, RuntimeStatus>, String> {
+        Ok(self
+            .session_snapshot()
+            .await?
+            .into_iter()
+            .map(|(key, session)| (key, session.status))
+            .collect())
+    }
+    /// Read loaded session metadata without loading history or resuming a thread.
+    pub async fn session_snapshot(&mut self) -> Result<BTreeMap<SessionKey, LiveSession>, String> {
         timeout(Duration::from_secs(20), self.read_snapshot())
             .await
             .map_err(|_| "live status poll timed out".to_owned())?
     }
-    async fn read_snapshot(&mut self) -> Result<BTreeMap<SessionKey, RuntimeStatus>, String> {
+    async fn read_snapshot(&mut self) -> Result<BTreeMap<SessionKey, LiveSession>, String> {
         let mut ids = HashSet::new();
         let mut cursors = HashSet::new();
         let mut cursor = None;
@@ -180,9 +196,24 @@ impl LiveClient {
                 SessionKey {
                     provider: ProviderId("codex".into()),
                     source_id: self.source.id.clone(),
-                    native_id: id,
+                    native_id: id.clone(),
                 },
-                status,
+                LiveSession {
+                    title: thread
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| {
+                            thread
+                                .get("preview")
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.trim().is_empty())
+                        })
+                        .unwrap_or(&id)
+                        .to_owned(),
+                    cwd: thread.get("cwd").and_then(Value::as_str).map(PathBuf::from),
+                    status,
+                },
             );
         }
         Ok(result)

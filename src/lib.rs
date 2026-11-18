@@ -60,3 +60,5 @@ pub mod inline_terminal;
 pub mod terminal_input;
 
 mod terminal_selection;
+
+pub mod worktree_report;
