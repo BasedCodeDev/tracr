@@ -89,6 +89,7 @@ if len(sys.argv) > 1 and sys.argv[1] in ('resume', '--cd'):
         args=sys.argv[1:], cwd=os.getcwd(), home=os.environ['CODEX_HOME'],
         foreground=os.tcgetpgrp(0) == os.getpgrp(), pid=os.getpid())))
     launch_record.replace(home / 'launch.json')
+    os.write(1, b'FAKE CODING SESSION\r\n')
     if settings.get('scroll_fixture'):
         height = os.get_terminal_size(0).lines
         os.write(1, f'\x1b[{height-1};1HCOMPOSER\x1b[1;{height-2}r\x1b[{height-2};1H'.encode())

@@ -17,13 +17,13 @@ class AcceptanceTests(unittest.TestCase):
             def __init__(self): self.sent = []; self.state = ''
             def send(self, data):
                 self.sent.append(data)
-                self.state = {b'\x02': 'Open here', b'\x1bf': 'Ctrl+B background', b'x': 'Close this terminal?', b'y': 'Sessions'}[data]
+                self.state = {b'\x02': 'Open here', b'\r': 'Coding session', b'x': 'Close this terminal?', b'y': 'Sessions'}[data]
             def expect(self, text): assert text in self.state
             def text(self): return self.state
             def wait(self, predicate): assert predicate()
         terminal = ExitTerminal()
         live.return_to_browser(terminal)
-        self.assertEqual(terminal.sent, [b'\x02', b'\x1bf', b'\x02', b'x', b'y'])
+        self.assertEqual(terminal.sent, [b'\x02', b'\r', b'\x02', b'x', b'y'])
 
     def test_history_uses_fixture_messages_not_turn_completion_marker(self):
         expected = ['Remember the project.', 'The project is here.']
@@ -183,9 +183,9 @@ class SimulatedFlowTests(unittest.TestCase):
                 def text(self):
                     return self.state
                 def send(self, data):
-                    if data == b'\x1bf':
-                        self.state = browser + ' Ctrl+B background'
-                        self.output.extend(b'Ctrl+B background')
+                    if data == b'\r':
+                        self.state = 'Coding session'
+                        self.output.extend(b'Coding session')
                         message = ('app-server socket: Operation not permitted' if scenario == 'blocked' else 'Synthetic fixture complete.')
                         if scenario == 'timeout': message = 'No recognized startup state'
                         self.output.extend(message.encode())

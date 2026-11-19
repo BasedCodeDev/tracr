@@ -215,8 +215,7 @@ navigate to other folders or search globally; selecting a result opens its folde
 
 In Folders or Sessions, press **n** or choose **Create new session** from `?` to
 start a new session in the selected folder, including folders with existing
-sessions. From Folders, the new session opens full-screen; from Sessions, it
-opens embedded.
+sessions. Closing the drawer gives the coding session the entire screen.
 When no sessions are shown, Enter also creates a session; otherwise Enter resumes
 the selected session.
 This opens Codex interactively in that folder and returns to tracr when you exit.
@@ -283,7 +282,7 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   drawer restores input to the session list or coding terminal.
 - Up / Down or `k/j` selects items. In Folders, Right / `l` expands a folder;
   Left / `h` collapses it or selects its displayed parent.
-- Enter opens the only session embedded, or starts creation when a folder has no
+- Enter opens the only session, or starts creation when a folder has no
   sessions. With multiple sessions, the main view shows the list. The drawer
   remains open in all cases; Alt+backtick returns to the main view. Incomplete discovery
   does not start a session automatically.
@@ -447,16 +446,15 @@ If the destination changed since it was displayed, review it and press Enter aga
 Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
-Enter opens the selected session embedded in the Sessions workspace, keeping
-other panels visible when space permits. **Alt+F** on a highlighted session opens
-it full-screen. The open-terminals picker uses the same shortcuts when reattaching
-a running terminal.
-Once a terminal is displayed, **Alt+F** toggles embedded and full-screen coding.
-Opening the drawer temporarily shows the drawer layout; closing it restores the
-terminal's full-screen preference. **Ctrl+B** returns to the session list.
-**Tab / Shift+Tab** and **Alt+arrow keys** reach Codex in both embedded and
-full-screen modes when the drawer is closed. Tracr dialogs retain their own
-Tab navigation. Alt+Enter inside Codex is forwarded to Codex.
+Enter opens the selected session. The open-terminals picker also uses Enter to
+reattach a running terminal. With the drawer closed, coding fills the screen
+without Tracr borders or a footer. Opening the drawer shows the coding pane
+beside it on wide terminals, or just the drawer on smaller terminals.
+**Ctrl+B** backgrounds the displayed session without stopping it. From the drawer,
+this keeps the drawer open and preserves its focus; from coding, it returns to
+the session list. Dialogs retain input priority.
+**Alt+F**, **Tab / Shift+Tab**, **Alt+arrow keys**, and **Alt+Enter** reach Codex
+when coding owns input. Tracr dialogs retain their own Tab navigation.
 In Folders, **Alt+Z** zooms into the selected folder as the tree root, hiding ancestors
 and unrelated branches. Its descendants and displayed worktrees remain navigable,
 including worktrees outside that directory. Search is restricted to this context;

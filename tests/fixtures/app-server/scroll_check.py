@@ -39,7 +39,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-scroll-') as directory:
         t.resize(80, 180)
         t.expect('60 lines')
         t.send(b'a')
-        t.expect('COMPOSER')
+        # The static fixture does not redraw its composer after a height change.
+        t.wait(lambda: 'type to return' not in t.text())
         t.wait(lambda: (home/'terminal-input.bin').exists())
         assert (home/'terminal-input.bin').read_bytes() == b'a'
         t.send(b'\x1b[<64;160;10M')
@@ -47,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-scroll-') as directory:
         t.send(b'\x1b[<65;160;10M')
         t.wait(lambda: '3 lines' not in t.text())
         t.send(b'x')
-        t.wait(lambda: 'Ctrl+B background' not in t.text())
+        t.expect('Enter Open')
         t.finish()
         assert b'\x1b[?1006l' in t.output
     finally:

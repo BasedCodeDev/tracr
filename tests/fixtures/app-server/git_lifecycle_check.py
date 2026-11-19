@@ -171,9 +171,9 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.send(b'\t')
                 terminal.expect('i Commit info')
                 terminal.send(b'\x1b`')
-                terminal.expect('Enter Embedded')
+                terminal.expect('Enter Open')
                 terminal.send(b'?')
-                terminal.expect('Open session embedded')
+                terminal.expect('Open session')
                 terminal.send(b'?')
                 terminal.wait(lambda: 'Actions & shortcuts' not in terminal.text())
                 terminal.send(b'\x1b`')
@@ -194,7 +194,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 assert launch['cwd'] == str(linked), launch
                 assert launch['foreground'], launch
                 # Inline sessions keep discovery and filesystem monitoring alive.
-                terminal.expect('Ctrl+B background')
+                terminal.expect('FAKE CODING SESSION')
                 terminal.send(b'\x1b`')
                 terminal.expect('Enter Sessions')
                 assert os.tcgetpgrp(terminal.master) == terminal.child.pid

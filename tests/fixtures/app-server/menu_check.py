@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-menu-') as tmp:
         t.expect('Actions & shortcuts')
         t.expect('Enter activate')
         t.send(b'\x1b[F')  # The last entry is a session action, with no folder actions.
-        t.expect('Open session full-screen')
+        t.expect('Close terminal')
         assert not (home/'launch.json').exists()
         t.send(b'\x1b')
         t.wait(lambda: 'Actions & shortcuts' not in t.text())
@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-menu-') as tmp:
         t.expect('Actions & shortcuts')
         t.resize(15, 36)
         t.send(b'\x1b[F')
-        t.expect('Open session full-screen')
+        t.expect('Close terminal')
         t.send(b'\x1b[H')
         t.expect('Help / actions')
         t.resize(40, 160)
@@ -42,11 +42,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-menu-') as tmp:
         t.expect('Task second')
         t.send(b'\x1b')
         t.wait(lambda: 'Search within folder' not in t.text())
-        t.action('Open session embedded')  # Resume explicitly through menu.
+        t.action('Open session')  # Resume explicitly through menu.
         t.wait(lambda: (home/'launch.json').exists())
         assert json.loads((home/'launch.json').read_text())['args'][-1] == 'first'
         t.send(b'x')
-        t.wait(lambda: 'Ctrl+B background' not in t.text())
+        t.wait(lambda: 'FAKE CODING SESSION' not in t.text())
         t.expect('No sessions currently shown')
         t.send(b'?')
         t.expect('Actions & shortcuts')

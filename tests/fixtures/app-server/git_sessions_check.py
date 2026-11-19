@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.expect('Enter Resume')
         assert 'Keyboard input goes to the terminal' not in t.text()
         t.send(b'\x1b`')  # Drawer -> the same running session.
-        t.expect('Keyboard input goes to the terminal')
+        t.expect('FAKE CODING SESSION')
         assert json.loads((home/'launch.json').read_text())['pid'] == launch['pid']
         t.send(b'x')
         t.expect('i Info')

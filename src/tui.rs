@@ -270,7 +270,6 @@ pub struct AreaDialogs {
     pub message: Option<String>,
     pub preparing: bool,
     pub source_picker: Option<usize>,
-    pub source_fullscreen: bool,
     pub creation_folder: Option<std::path::PathBuf>,
     pub worktree_picker: Option<WorktreePicker>,
     pub relink: Option<RelinkModal>,
@@ -319,7 +318,6 @@ pub struct View {
     pub message: Option<String>,
     pub preparing: bool,
     pub source_picker: Option<usize>,
-    pub source_fullscreen: bool,
     pub creation_folder: Option<std::path::PathBuf>,
     pub worktree_picker: Option<WorktreePicker>,
     pub relink: Option<RelinkModal>,
@@ -367,7 +365,6 @@ impl Default for View {
             message: Default::default(),
             preparing: Default::default(),
             source_picker: Default::default(),
-            source_fullscreen: Default::default(),
             creation_folder: Default::default(),
             worktree_picker: Default::default(),
             relink: Default::default(),
@@ -447,10 +444,6 @@ impl View {
         std::mem::swap(
             &mut self.source_picker,
             &mut self.hidden_dialogs.source_picker,
-        );
-        std::mem::swap(
-            &mut self.source_fullscreen,
-            &mut self.hidden_dialogs.source_fullscreen,
         );
         std::mem::swap(
             &mut self.creation_folder,
@@ -890,6 +883,9 @@ fn footer_shortcuts(width: u16, browser: &Browser, view: &View) -> (String, Stri
     } else {
         "Alt+` Drawer (below Esc)".to_owned()
     };
+    if view.drawer_open && view.terminals.borrow().active.is_some() {
+        shared = "Alt+` / Esc Close · Ctrl+B Background".into();
+    }
     if view.recovery_available {
         if unicode_width::UnicodeWidthStr::width(shared.as_str()) + 12 > usize::from(width) {
             shared = "Alt+` Drawer".into();
@@ -974,7 +970,7 @@ fn session_metadata(
 fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String, String, u16) {
     if view.terminal_focused() && view.terminals.borrow().active.is_some() {
         return (
-            "Alt+` Drawer · Ctrl+B Background · Alt+F Full-screen".into(),
+            "Alt+` Drawer · Ctrl+B Background".into(),
             browser.focus_root.as_ref().map_or_else(
                 || "Keyboard input goes to the terminal".into(),
                 |root| {
@@ -1179,12 +1175,8 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     let area = frame.area();
     view.layout_mode
         .set(LayoutMode::for_size(area.width, area.height));
-    if !view.drawer_open
-        && view.terminals.borrow().fullscreen
-        && view.terminals.borrow().active.is_some()
-        && !view.modal_open()
-    {
-        view.terminals.borrow_mut().draw(frame, area, true);
+    if !view.drawer_open && view.terminals.borrow().active.is_some() && !view.modal_open() {
+        view.terminals.borrow_mut().draw(frame, area, true, false);
         return;
     }
     if area.width < 12 || area.height < 4 {
@@ -1784,15 +1776,13 @@ enum Command {
     FolderLeft,
     FolderRight,
     Resume,
-    ResumeFullscreen,
-    ToggleTerminalFullscreen,
+    BackgroundTerminal,
     Info,
     CommitInfo,
     Relink,
     MoveFolder,
     Recover,
     Create,
-    CreateFullscreen,
     Archives,
     Search,
     Refresh,
@@ -1803,7 +1793,7 @@ fn available_when_folders_hidden(command: Command) -> bool {
         command,
         Command::FolderToggle
             | Command::OpenTerminals
-            | Command::ToggleTerminalFullscreen
+            | Command::BackgroundTerminal
             | Command::Help
             | Command::Quit
             | Command::Refresh
@@ -1961,7 +1951,7 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         ));
         entries.extend([
             (
-                CreateFullscreen,
+                Create,
                 "Folders",
                 "n",
                 "Create new session",
@@ -2003,8 +1993,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 Resume,
                 "Sessions",
                 "Enter",
-                "Open session embedded",
-                Some(("Enter Embedded", "Enter Open")),
+                "Open session",
+                Some(("Enter Open", "Enter Open")),
             )
         });
         if !browser.visible().is_empty() || !can_create(browser) {
@@ -2144,6 +2134,18 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         None,
     ));
     entries.retain(|entry| !matches!(entry.0, PreviousPane | FolderToggle | GitToggle));
+    if view.drawer_open && view.terminals.borrow().active.is_some() {
+        entries.insert(
+            0,
+            (
+                BackgroundTerminal,
+                "Terminals",
+                "Ctrl+B",
+                "Background session",
+                Some(("Ctrl+B Background session", "Ctrl+B Background")),
+            ),
+        );
+    }
     if !view.drawer_open {
         entries.retain(|entry| !matches!(entry.0, CyclePane | CyclePaneBack));
     } else if view.history.present() {
@@ -2178,23 +2180,6 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             Some(("g Terminals", "g Terminals")),
         ));
         entries.push((CloseTerminal, "Terminals", "x", "Close terminal", None));
-        if !view.drawer_open && view.terminals.borrow().active.is_some() {
-            entries.push((
-                ToggleTerminalFullscreen,
-                "Terminals",
-                "Alt+F",
-                "Toggle terminal full-screen",
-                Some(("Alt+F Full-screen", "Alt+F Full")),
-            ));
-        } else if view.context() == 1 {
-            entries.push((
-                ResumeFullscreen,
-                "Sessions",
-                "Alt+F",
-                "Open session full-screen",
-                Some(("Alt+F Full-screen", "Alt+F Full")),
-            ));
-        }
     }
     if view.context() == 0 {
         let index = entries
@@ -2321,7 +2306,7 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
         }
         Command::Relink => relink_unavailable(browser),
         Command::MoveFolder => crate::folder_move_ui::unavailable(browser),
-        Command::Create | Command::CreateFullscreen => {
+        Command::Create => {
             if browser.loading() {
                 Some("Wait for discovery to finish.".into())
             } else if creation_sources(browser).is_empty() {
@@ -2332,7 +2317,7 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
                 None
             }
         }
-        Command::Resume | Command::ResumeFullscreen => {
+        Command::Resume => {
             let session = browser
                 .visible()
                 .into_iter()
@@ -2894,11 +2879,12 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             );
         }
         1 => {
-            if view
-                .terminals
-                .borrow_mut()
-                .draw(frame, area, view.terminal_focused())
-            {
+            if view.terminals.borrow_mut().draw(
+                frame,
+                area,
+                view.terminal_focused(),
+                view.drawer_open,
+            ) {
                 return;
             }
             let sessions = browser.visible();
@@ -2923,7 +2909,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                             area.width.saturating_sub(4 + right_padding),
                         ),
                         if view.terminals.borrow().owns(&s.key) {
-                            Line::from("Open here · Enter Embedded · Alt+F Full-screen · x Close terminal")
+                            Line::from("Open here · Enter Open · x Close terminal")
                         } else if browser.specs.iter().any(|spec| matches!(spec, crate::browser::SourceSpec::Codex { source, .. } if source.id == s.key.source_id && crate::inline_terminal::open_elsewhere(&source.home, &s.key))) {
                             Line::from("Open in another tracr")
                         } else {
@@ -3278,10 +3264,8 @@ pub enum Action {
     Quit,
     Refresh,
     ResumeSelected,
-    ResumeSelectedFullscreen,
     CancelResume,
     CreateNew(usize),
-    CreateNewFullscreen(usize),
 }
 
 fn selected_session(browser: &Browser) -> Option<crate::domain::SessionSummary> {
@@ -3343,15 +3327,6 @@ fn creation_sources(browser: &Browser) -> Vec<usize> {
         .filter_map(|(i, spec)| spec.creation_source_id().map(|_| i))
         .collect()
 }
-fn creation_action(source: usize, fullscreen: bool) -> Action {
-    if fullscreen {
-        Action::CreateNewFullscreen(source)
-    } else {
-        Action::CreateNew(source)
-    }
-}
-
-/// Enter only a known directory inventory, never a transient search result.
 fn enter_folder(browser: &mut Browser, view: &mut View) -> Action {
     view.focus = 1;
     view.git_focus = false;
@@ -3400,7 +3375,7 @@ fn resume_hint(browser: &Browser, session: &crate::domain::SessionSummary) -> St
         return relink_unavailable(browser)
             .unwrap_or_else(|| "Folder missing — Enter or m to move session.".into());
     }
-    "Enter opens embedded · Alt+F opens full-screen; the destination is checked again before launch.".into()
+    "Enter opens the session; the destination is checked again before launch.".into()
 }
 
 fn drawer_shortcut(key: KeyEvent) -> bool {
@@ -3428,15 +3403,13 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
     if key.kind == KeyEventKind::Release {
         return Action::Continue;
     }
-    if key.modifiers == KeyModifiers::ALT && key.code == KeyCode::Char('f') {
-        if view.drawer_open {
-            return Action::Continue;
-        }
-        if key.kind == KeyEventKind::Press
-            && !view.modal_open()
-            && !view.terminals.borrow().has_overlay()
-        {
-            return execute_command(Command::ToggleTerminalFullscreen, browser, view);
+    if key.code == KeyCode::Char('b')
+        && key.modifiers == KeyModifiers::CONTROL
+        && !view.modal_open()
+        && !view.terminals.borrow().has_overlay()
+    {
+        if key.kind == KeyEventKind::Press {
+            return execute_command(Command::BackgroundTerminal, browser, view);
         }
         return Action::Continue;
     }
@@ -3635,7 +3608,7 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
                 let source = sources.get(*selected).copied();
                 view.source_picker = None;
                 if let Some(source) = source {
-                    return creation_action(source, view.source_fullscreen);
+                    return Action::CreateNew(source);
                 }
             }
             KeyCode::Esc => view.source_picker = None,
@@ -3647,7 +3620,7 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
                 let source = sources.get(*selected).copied();
                 view.source_picker = None;
                 if let Some(source) = source {
-                    return creation_action(source, view.source_fullscreen);
+                    return Action::CreateNew(source);
                 }
             }
             _ => {}
@@ -3778,6 +3751,15 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         };
         return execute_command(command, browser, view);
     }
+    if key.code == KeyCode::Char('z') && key.modifiers == KeyModifiers::ALT && view.context() == 0 {
+        if key.kind == KeyEventKind::Press {
+            return execute_command(Command::FolderFocus, browser, view);
+        }
+        return Action::Continue;
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        return Action::Continue;
+    }
     if view.git_focus {
         let command = match key.code {
             KeyCode::Char('b') => Command::GitToggle,
@@ -3823,7 +3805,7 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         KeyCode::Char('r') => Command::Refresh,
         KeyCode::Char('i') if !view.git_focus => Command::Info,
         KeyCode::Char('n') if view.focus == 1 => Command::Create,
-        KeyCode::Char('n') if view.focus == 0 => Command::CreateFullscreen,
+        KeyCode::Char('n') if view.focus == 0 => Command::Create,
         KeyCode::Char('m') if view.focus == 1 => Command::Relink,
         KeyCode::Char('b') if view.focus == 0 => Command::FolderToggle,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
@@ -3844,12 +3826,6 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
             if view.focus == 1 && can_create(browser) && browser.visible().is_empty() =>
         {
             Command::Create
-        }
-        KeyCode::Char('z') if key.modifiers == KeyModifiers::ALT && view.context() == 0 => {
-            if key.kind != KeyEventKind::Press {
-                return Action::Continue;
-            }
-            Command::FolderFocus
         }
         KeyCode::Enter => Command::Resume,
         _ => return Action::Continue,
@@ -3883,20 +3859,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
     let previous_context = view.context();
     match command {
         Command::ToggleDrawer => view.toggle_drawer(),
-        Command::ToggleTerminalFullscreen => {
-            if view.terminals.borrow().active.is_none()
-                && view.context() == 1
-                && selected_session(browser).is_some()
-            {
-                return execute_command(Command::ResumeFullscreen, browser, view);
-            }
-            let mut terminals = view.terminals.borrow_mut();
-            if terminals.active.is_some() {
-                terminals.fullscreen = !terminals.fullscreen;
-                view.focus = 1;
-                view.git_focus = false;
-            }
-        }
+        Command::BackgroundTerminal => view.terminals.borrow_mut().background(),
         Command::GitSelectWorktree => {
             if view.git_hidden || view.git_size_limited {
                 return Action::Continue;
@@ -4149,7 +4112,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 }
             }
         }
-        Command::Create | Command::CreateFullscreen => {
+        Command::Create => {
             if let Some(reason) = unavailable(Command::Create, browser, view) {
                 view.message = Some(reason);
                 return Action::Continue;
@@ -4159,26 +4122,21 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 FolderFilter::Path(path) => Some(path.clone()),
                 _ => None,
             };
-            view.source_fullscreen = command == Command::CreateFullscreen;
             let sources = creation_sources(browser);
             if sources.len() == 1 {
-                return creation_action(sources[0], view.source_fullscreen);
+                return Action::CreateNew(sources[0]);
             }
             view.source_picker = Some(0);
             view.source_control = 0;
         }
-        Command::Resume | Command::ResumeFullscreen => {
+        Command::Resume => {
             if selected_session(browser).is_some_and(|s| {
                 crate::domain::classify_folder(s.cwd.as_deref())
                     == crate::domain::FolderStatus::Unlinked
             }) {
                 return Action::OpenRelink;
             }
-            return if command != Command::ResumeFullscreen {
-                Action::ResumeSelected
-            } else {
-                Action::ResumeSelectedFullscreen
-            };
+            return Action::ResumeSelected;
         }
     }
     if previous_context != 0 && view.context() == 0 {
@@ -4192,7 +4150,6 @@ struct PendingResume {
     origin: FolderFilter,
     task: tokio::task::JoinHandle<Result<crate::domain::ResumeCommand, String>>,
     observed_cwd: Option<std::path::PathBuf>,
-    fullscreen: bool,
 }
 impl Drop for PendingResume {
     fn drop(&mut self) {
@@ -4582,15 +4539,10 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             ));
                         } else {
                             save_folder(&mut browser, last_folder.as_deref(), &mut view);
-                            if ready.fullscreen {
-                                let size = terminal.size()?;
-                                view.terminals.borrow_mut().area = Rect::new(0, 0, size.width, size.height);
-                            }
                             let result = view.terminals.borrow_mut().launch(&command.launch, Some(command.session.key.clone()), command.session.title.clone());
                             if result.is_ok() && browser.folder == ready.origin {
                                 browser.open_folder(command.cwd.clone());
                                 view.terminals.borrow_mut().sync_folder(Some(&command.cwd));
-                                view.terminals.borrow_mut().fullscreen = ready.fullscreen;
                                 view.focus = 1;
                                 view.git_focus = false;
                             }
@@ -4673,14 +4625,12 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     },
                     Ok(crate::inline_terminal::Input::Consumed) => {
                         let active = view.terminals.borrow().active;
-                        if previous_terminal != active || (terminal_overlay && active.is_some() && !view.terminals.borrow().has_overlay() && matches!(&incoming, Event::Key(key) if key.kind == KeyEventKind::Press && (key.code == KeyCode::Enter || key.code == KeyCode::Char('f') && key.modifiers == KeyModifiers::ALT))) {
+                        if previous_terminal != active || (terminal_overlay && active.is_some() && !view.terminals.borrow().has_overlay() && matches!(&incoming, Event::Key(key) if key.kind == KeyEventKind::Press && key.code == KeyCode::Enter)) {
                             let folder = view.terminals.borrow().active_folder();
                             if let Some(folder) = folder {
                                 browser.open_folder(folder.clone());
                                 let mut terminals = view.terminals.borrow_mut();
-                                let fullscreen = terminals.fullscreen;
                                 terminals.sync_folder(Some(&folder));
-                                terminals.fullscreen = fullscreen;
                             }
                             view.focus = 1; view.git_focus = false;
                         }
@@ -4849,8 +4799,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             // Cancellation may interrupt an RPC frame. Reconnect rather than reuse it.
                             browser.invalidate_git(); discovery.refresh(&mut browser);
                         }
-                        Action::CreateNew(index) | Action::CreateNewFullscreen(index) => {
-                            let fullscreen = matches!(action, Action::CreateNewFullscreen(_));
+                        Action::CreateNew(index) => {
                             let Some(path) = view.creation_folder.take() else { continue; };
                             let spec = &browser.specs[index];
                             let command = match spec.prepare_new(&path) {
@@ -4866,18 +4815,16 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             view.focus = 1;
                             view.git_focus = false;
                             match result {
-                                Ok(()) => view.terminals.borrow_mut().fullscreen = fullscreen,
+                                Ok(()) => (),
                                 Err(error) => view.message = Some(format!("Could not start session: {error}")),
                             }
                         }
-                        Action::ResumeSelected | Action::ResumeSelectedFullscreen => {
-                            let fullscreen = action == Action::ResumeSelectedFullscreen;
+                        Action::ResumeSelected => {
                             if browser.selected.as_ref().is_some_and(|key| view.terminals.borrow_mut().attach(key)) {
                                 if let Some(folder) = view.terminals.borrow().active_folder() { browser.open_folder(folder); }
                                 let mut terminals = view.terminals.borrow_mut();
                                 let folder = terminals.active_folder();
                                 terminals.sync_folder(folder.as_deref());
-                                terminals.fullscreen = fullscreen;
                                 view.focus = 1; view.git_focus = false; continue;
                             }
                             if let Some(session) = browser
@@ -4902,7 +4849,6 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                         view.message = None;
                                         pending[usize::from(view.dialog_area)] = Some(PendingResume {
                                             origin: browser.folder.clone(),
-                                            fullscreen,
                                             observed_cwd,
                                             task: tokio::spawn(async move {
                                                 provider.prepare_resume(&session).await
@@ -5236,7 +5182,7 @@ mod cleanup_tests {
             let mut view = folder_view();
             let entry = menu_entries(&browser, &view)
                 .into_iter()
-                .find(|entry| entry.command == Command::CreateFullscreen)
+                .find(|entry| entry.command == Command::Create)
                 .unwrap();
             assert_eq!(entry.shortcut, "n");
             assert_eq!(entry.label, "Create new session");
@@ -5251,7 +5197,7 @@ mod cleanup_tests {
                     &mut view,
                     KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)
                 ),
-                Action::CreateNewFullscreen(0)
+                Action::CreateNew(0)
             );
             assert_eq!(view.focus, 0);
             view.toggle_drawer();
@@ -5268,12 +5214,9 @@ mod cleanup_tests {
             open_help(&browser, &mut view);
             view.help_selected = menu_entries(&browser, &view)
                 .iter()
-                .position(|entry| entry.command == Command::CreateFullscreen)
+                .position(|entry| entry.command == Command::Create)
                 .unwrap();
-            assert_eq!(
-                enter(&mut browser, &mut view),
-                Action::CreateNewFullscreen(0)
-            );
+            assert_eq!(enter(&mut browser, &mut view), Action::CreateNew(0));
         }
     }
 
@@ -5284,10 +5227,7 @@ mod cleanup_tests {
         press(&mut browser, &mut view, KeyCode::Char('n'));
         assert_eq!(view.source_picker, Some(0));
         press(&mut browser, &mut view, KeyCode::Down);
-        assert_eq!(
-            enter(&mut browser, &mut view),
-            Action::CreateNewFullscreen(1)
-        );
+        assert_eq!(enter(&mut browser, &mut view), Action::CreateNew(1));
 
         view.focus = 0;
         press(&mut browser, &mut view, KeyCode::Char('n'));
@@ -5312,11 +5252,11 @@ mod cleanup_tests {
                 _ => browser.folder = FolderFilter::Unknown,
             }
             let mut view = folder_view();
-            assert!(unavailable(Command::CreateFullscreen, &browser, &view).is_some());
+            assert!(unavailable(Command::Create, &browser, &view).is_some());
             assert!(
                 menu_entries(&browser, &view)
                     .iter()
-                    .any(|entry| entry.command == Command::CreateFullscreen)
+                    .any(|entry| entry.command == Command::Create)
             );
             assert_eq!(
                 handle_key(
@@ -6240,7 +6180,7 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn session_opening_shortcuts_choose_mode_and_ignore_repeats() {
+    async fn session_opening_uses_enter_and_ignores_alt_f() {
         use crate::git_sessions::tests::{add_session, fixture};
         let cwd = tempfile::tempdir().unwrap();
         let (mut browser, _) = fixture().await;
@@ -6261,39 +6201,71 @@ mod cleanup_tests {
             dialog_area: false,
             ..folder_view()
         };
-        for (code, modifiers, fullscreen) in [
-            (KeyCode::Enter, KeyModifiers::NONE, false),
-            (KeyCode::Char('f'), KeyModifiers::ALT, true),
-        ] {
-            let key = KeyEvent::new(code, modifiers);
-            let action = handle_key(&mut browser, &mut view, key);
-            assert!(if fullscreen {
-                matches!(action, Action::ResumeSelectedFullscreen)
-            } else {
-                matches!(action, Action::ResumeSelected)
-            });
-            assert!(view.terminals.borrow().active.is_none());
-            for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
-                assert!(matches!(
-                    handle_key(&mut browser, &mut view, KeyEvent { kind, ..key }),
-                    Action::Continue
-                ));
-            }
-            view.preparing = true;
-            assert!(matches!(
-                handle_key(&mut browser, &mut view, key),
+        assert_eq!(
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT)
+            ),
+            Action::Continue
+        );
+        assert_eq!(enter(&mut browser, &mut view), Action::ResumeSelected);
+        for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+            assert_eq!(
+                handle_key(
+                    &mut browser,
+                    &mut view,
+                    KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, kind)
+                ),
                 Action::Continue
-            ));
-            view.preparing = false;
+            );
         }
-        assert!(matches!(
-            execute_command(Command::Resume, &mut browser, &mut view),
-            Action::ResumeSelected
-        ));
-        assert!(matches!(
-            execute_command(Command::ResumeFullscreen, &mut browser, &mut view),
-            Action::ResumeSelectedFullscreen
-        ));
+        view.preparing = true;
+        assert_eq!(enter(&mut browser, &mut view), Action::Continue);
+    }
+
+    #[tokio::test]
+    async fn drawer_background_preserves_focus_and_respects_dialogs() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View::default();
+        view.history
+            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+            .await;
+        view.toggle_drawer();
+        let key = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
+        for git in [false, true] {
+            view.drawer_git = git;
+            view.normalize_focus();
+            view.terminals.borrow_mut().active = Some(1);
+            assert!(
+                menu_entries(&browser, &view)
+                    .iter()
+                    .any(|e| e.command == Command::BackgroundTerminal)
+            );
+            assert!(footer_shortcuts(80, &browser, &view).0.contains("Ctrl+B"));
+            view.editing = true;
+            handle_key(&mut browser, &mut view, key);
+            assert_eq!(view.terminals.borrow().active, Some(1));
+            view.editing = false;
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent {
+                    kind: KeyEventKind::Repeat,
+                    ..key
+                },
+            );
+            assert_eq!(view.terminals.borrow().active, Some(1));
+            handle_key(&mut browser, &mut view, key);
+            assert!(view.terminals.borrow().active.is_none());
+            assert!(view.drawer_open);
+            assert_eq!(view.git_focus, git);
+            assert!(
+                !menu_entries(&browser, &view)
+                    .iter()
+                    .any(|e| e.command == Command::BackgroundTerminal)
+            );
+        }
     }
 
     #[test]

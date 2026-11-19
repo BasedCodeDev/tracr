@@ -68,9 +68,9 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         launch=json.loads((homes[1]/'launch.json').read_text())
         assert launch['args']==['--cd',str(project)] and launch['cwd']==str(project)
         assert 'Choose harness' not in t.text()
-        t.send(b'x');t.wait(lambda:'exited: Success' in t.text() and 'Ctrl+B background' not in t.text())
+        t.send(b'x');t.wait(lambda:'exited: Success' in t.text() and 'FAKE CODING SESSION' not in t.text())
         t.inspect('ID: created')
-        # Folder Return resumes the sole session directly, embedded.
+        # Folder Return resumes the sole session directly.
         (homes[1]/'launch.json').unlink()
         t.send(b'\x1b`');t.expect('Enter Sessions');t.send(b'\r')
         t.wait(lambda:(homes[1]/'launch.json').exists())
@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         assert 'resume' in resumed['args'], resumed
         t.wait(lambda:'Folders' in t.text())
         t.wait(lambda:json.loads((homes[1]/'terminal-size.json').read_text())['columns']==178)
-        t.send(b'\x1b`x');t.wait(lambda:'exited: Success' in t.text() and 'Ctrl+B background' not in t.text())
+        t.send(b'\x1b`x');t.wait(lambda:'exited: Success' in t.text() and 'FAKE CODING SESSION' not in t.text())
 
         t.finish()
     finally:t.close()

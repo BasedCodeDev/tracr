@@ -948,14 +948,7 @@ async fn unlinked_rows_use_explicit_undimmed_labels_and_footer_preserves_primary
                 };
                 let footer = (21..24).map(line).collect::<Vec<_>>().join("\n");
                 let upper = (21..24).find(|&row| line(row).contains("Alt+`")).unwrap();
-                assert!(
-                    line(upper + 1).contains(if width >= 80 {
-                        "Enter Embedded"
-                    } else {
-                        "Enter Open"
-                    }),
-                    "{width}: {footer}"
-                );
+                assert!(line(upper + 1).contains("Enter Open"), "{width}: {footer}");
                 assert!(line(upper + 1).ends_with(if width >= 36 {
                     "m Move"
                 } else if width >= 24 {
