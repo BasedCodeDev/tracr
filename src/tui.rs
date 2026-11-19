@@ -933,7 +933,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         return;
     }
     if let Some(info) = &view.commit_info {
-        info.dialog.draw(frame);
+        info.draw(frame);
         return;
     }
     if let Some(info) = &view.info {
@@ -3143,8 +3143,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         return Action::Continue;
     }
     if let Some(info) = view.commit_info.as_mut() {
-        match info.dialog.key(key) {
-            crate::error_dialog::Event::Copy => info.dialog.start_copy(),
+        match info.key(key) {
+            crate::error_dialog::Event::Copy => info.copy_report(),
             crate::error_dialog::Event::Close => view.commit_info = None,
             crate::error_dialog::Event::None => {}
         }
