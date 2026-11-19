@@ -2326,9 +2326,55 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             scoped[0],
         );
     }
+    let compact = scoped[1].height < 12;
+    let mode_style = if view.search_control == 3 {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(if browser.deep_search {
+                Color::Green
+            } else {
+                Color::Yellow
+            })
+            .add_modifier(Modifier::BOLD)
+    };
+    let mut mode_lines = vec![Line::from(Span::styled(
+        if browser.deep_search {
+            "[x] Deep search: ON"
+        } else {
+            "[ ] Deep search: OFF"
+        },
+        mode_style,
+    ))];
+    if !compact {
+        mode_lines.push(Line::from(if browser.deep_search {
+            "Searching messages, plans, final replies, and metadata."
+        } else {
+            "Metadata only. Enable deep search to find conversation content."
+        }));
+    }
+    mode_lines.push(Line::from(if compact {
+        "Tab selects · Space toggles"
+    } else {
+        "Tab selects this control · Space toggles · Ctrl+D shortcut"
+    }));
+    let mut mode = Paragraph::new(mode_lines).wrap(Wrap { trim: false });
+    let mode_height = mode.line_count(
+        scoped[1]
+            .width
+            .saturating_sub(if compact { 0 } else { 2 })
+            .max(1),
+    ) as u16
+        + if compact { 0 } else { 2 };
+    if !compact {
+        mode = mode.block(block("Search mode", view.search_control == 3));
+    }
     let sections = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Length(2),
+        Constraint::Length(mode_height),
         Constraint::Min(1),
     ])
     .split(scoped[1]);
@@ -2341,19 +2387,13 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         view.search_control == 0,
         true,
     );
-    frame.render_widget(
-        Paragraph::new(format!(
-            "[{}] Deep search · Ctrl+D{}\n{}",
-            if browser.deep_search { "x" } else { " " },
-            if view.search_control == 3 { " ◀" } else { "" },
-            if browser.deep_search && !view.search_query.trim().is_empty() {
-                crate::search::progress(browser)
-            } else {
-                "Includes your messages, plans, and final replies".into()
-            }
-        )),
-        sections[1],
-    );
+    frame.render_widget(mode, sections[1]);
+    if browser.deep_search && !view.search_query.trim().is_empty() {
+        frame.render_widget(
+            Paragraph::new(crate::search::progress(browser)).wrap(Wrap { trim: false }),
+            regions.status,
+        );
+    }
     modal_actions(
         frame,
         regions.actions,
@@ -3360,11 +3400,20 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             .position(|s| Some(&s.key) == view.search_selected.as_ref())
             .unwrap_or(0);
         match key.code {
-            KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
-                &mut view.search_control,
-                &[true, true, !results.is_empty(), true],
-                key.code == KeyCode::BackTab,
-            ),
+            KeyCode::Tab | KeyCode::BackTab => {
+                // Follow the visual order: query, deep search, Cancel, Open.
+                let controls = [0, 3, 1, 2];
+                let mut index = controls
+                    .iter()
+                    .position(|c| *c == view.search_control)
+                    .unwrap_or(0);
+                crate::modal::cycle(
+                    &mut index,
+                    &[true, true, true, !results.is_empty()],
+                    key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT),
+                );
+                view.search_control = controls[index];
+            }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 browser.deep_search = !browser.deep_search;
                 view.search_selected = None;
@@ -5853,13 +5902,32 @@ mod cleanup_tests {
         );
         assert!(browser.deep_search);
         assert_eq!(view.search_query, "AltTab");
-        view.search_control = 3;
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        );
+        assert_eq!(view.search_control, 3);
         handle_key(
             &mut browser,
             &mut view,
             KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
         );
         assert!(!browser.deep_search);
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| draw_search(frame, &browser, &view))
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(screen.contains("Deep search: OFF"));
+        assert!(screen.contains("Enable deep search"));
+        assert!(screen.contains("Space toggles"));
         handle_key(
             &mut browser,
             &mut view,
@@ -5873,6 +5941,16 @@ mod cleanup_tests {
             terminal
                 .draw(|frame| draw_search(frame, &browser, &view))
                 .unwrap();
+            if width >= 40 {
+                let screen: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
+                assert!(screen.contains("Deep search: ON"));
+            }
         }
         handle_key(
             &mut browser,
@@ -5945,7 +6023,7 @@ mod cleanup_tests {
             );
             assert!(view.editing);
             assert_eq!(view.context(), 1);
-            assert_eq!(view.search_control, 1);
+            assert_eq!(view.search_control, 3);
             view.editing = false;
             // The action menu uses the same pane-cycle behavior as the key.
             view.help = true;

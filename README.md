@@ -359,9 +359,10 @@ without a recorded folder are selected under Unknown folders.
 
 **Deep search**
 
-Press `/` and enable **Deep search** with `Ctrl+D` (or Tab to the checkbox and
-press Space). Search includes your messages, proposed plans, and final Codex
-replies, alongside the usual title, folder, session ID, provider, and branch.
+Press `/` to open search. The **Search mode** panel shows **Deep search: OFF/ON**
+and explains what is being searched. Press Tab once to select the toggle, then
+Space to change it; `Ctrl+D` is also available as a shortcut. Deep search includes
+your messages, proposed plans, and final Codex replies, alongside the usual title, folder, session ID, provider, and branch.
 Tool output, reasoning, and progress updates are excluded. Older completed turns
 without final-answer markers use their last unmarked agent reply.
 
