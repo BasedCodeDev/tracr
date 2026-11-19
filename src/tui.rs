@@ -1654,7 +1654,7 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         (
             PreviousPane,
             "Navigation",
-            "Esc / Backspace",
+            "← / Esc / Backspace",
             "Select Folders",
             None,
         ),
@@ -3411,7 +3411,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Char('a') => Command::Archives,
         KeyCode::Right | KeyCode::Char('l') if view.focus == 0 => Command::FolderRight,
         KeyCode::Left | KeyCode::Char('h') if view.focus == 0 => Command::FolderLeft,
-        KeyCode::Backspace if view.focus == 1 => Command::PreviousPane,
+        KeyCode::Left | KeyCode::Backspace if view.focus == 1 => Command::PreviousPane,
         KeyCode::Esc => Command::PreviousPane,
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
@@ -5327,7 +5327,6 @@ mod cleanup_tests {
             Action::Refresh
         );
         for code in [
-            KeyCode::Left,
             KeyCode::Right,
             KeyCode::Char('h'),
             KeyCode::Char('l'),
@@ -5338,7 +5337,7 @@ mod cleanup_tests {
             );
             assert_eq!(view.focus, 1);
         }
-        for code in [KeyCode::Esc, KeyCode::Backspace] {
+        for code in [KeyCode::Left, KeyCode::Esc, KeyCode::Backspace] {
             view.focus = 1;
             handle_key(&mut browser, &mut view, key(code));
             assert_eq!(view.focus, 0);
