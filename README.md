@@ -302,6 +302,10 @@ Tab cycles through Folders, Sessions, and Git (when available); Shift+Tab revers
   across folders for this run.
   The top-right `↑` border marker indicates rows above the preview; the
   bottom-right `↓` indicates rows below it or more history available to load.
+- In Git history (WorkTrees), `i` opens information for the highlighted commit:
+  full hash, parents, refs, author and committer dates, full message, and file
+  change statistics. Use arrows or Page Up / Down to scroll, `c` to copy, and
+  Escape or `i` to close.
 - Loaded sessions appear directly beneath their worktree's HEAD commit, including
   sessions in the main project folder and subfolders. Rows show title, provider,
   and live status; a worktree label appears when several worktrees share a commit.

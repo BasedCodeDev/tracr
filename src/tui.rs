@@ -241,6 +241,7 @@ pub struct View {
     pub relink_scroll_limit: std::cell::Cell<u16>,
     pub help_page_size: usize,
     pub info: Option<InfoModal>,
+    pub commit_info: Option<crate::commit_info::Dialog>,
     pub message: Option<String>,
     pub preparing: bool,
     pub source_picker: Option<usize>,
@@ -261,6 +262,7 @@ impl View {
             || self.folder_move.is_some()
             || self.relink.is_some()
             || self.info.is_some()
+            || self.commit_info.is_some()
             || self.source_picker.is_some()
             || self.worktree_picker.is_some()
             || self.help
@@ -930,6 +932,10 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         modal.draw(frame, browser);
         return;
     }
+    if let Some(info) = &view.commit_info {
+        info.dialog.draw(frame);
+        return;
+    }
     if let Some(info) = &view.info {
         info.dialog.draw(frame);
         return;
@@ -1533,6 +1539,7 @@ enum Command {
     ResumeFullscreen,
     ToggleTerminalFullscreen,
     Info,
+    CommitInfo,
     Relink,
     MoveFolder,
     Recover,
@@ -1817,6 +1824,13 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         ));
         if !view.git_hidden && !view.git_size_limited {
             entries.push((
+                CommitInfo,
+                "Git",
+                "i",
+                "Commit information",
+                Some(("i Commit info", "i Info")),
+            ));
+            entries.push((
                 GitSelectWorktree,
                 "Git",
                 "Enter",
@@ -1980,6 +1994,20 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         .collect()
 }
 
+fn selected_commit(browser: &Browser, view: &View) -> Option<(std::path::PathBuf, String)> {
+    if !view.git_focus
+        || view.git_hidden
+        || view.git_size_limited
+        || selected_git_session(browser, view).is_some()
+    {
+        return None;
+    }
+    Some((
+        view.history.repository()?,
+        view.history.rows.get(view.history.selected)?.oid.clone()?,
+    ))
+}
+
 fn worktree_unavailable(browser: &Browser, view: &View) -> Option<String> {
     if view.git_focus
         && view
@@ -2040,6 +2068,9 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
             Some("Select a concrete folder first.".into())
         }
         Command::CreateWorktree => worktree_unavailable(browser, view),
+        Command::CommitInfo if selected_commit(browser, view).is_none() => {
+            Some("Select a visible Git commit first.".into())
+        }
         Command::FolderLeft | Command::FolderRight
             if !matches!(browser.folder, FolderFilter::Path(_)) =>
         {
@@ -3111,6 +3142,14 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         }
         return Action::Continue;
     }
+    if let Some(info) = view.commit_info.as_mut() {
+        match info.dialog.key(key) {
+            crate::error_dialog::Event::Copy => info.dialog.start_copy(),
+            crate::error_dialog::Event::Close => view.commit_info = None,
+            crate::error_dialog::Event::None => {}
+        }
+        return Action::Continue;
+    }
     if let Some(info) = view.info.as_mut() {
         match info.dialog.key(key) {
             crate::error_dialog::Event::Copy => return Action::CopyInformation,
@@ -3373,6 +3412,7 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             _ if view.git_hidden || view.git_size_limited => return Action::Continue,
             KeyCode::Enter if key.kind != KeyEventKind::Repeat => Command::GitSelectWorktree,
             KeyCode::Char('w') => Command::CreateWorktree,
+            KeyCode::Char('i') => Command::CommitInfo,
             KeyCode::Up | KeyCode::Char('k') => Command::GitUp,
             KeyCode::Down | KeyCode::Char('j') => Command::GitDown,
             KeyCode::Left | KeyCode::Char('h') => Command::GitLeft,
@@ -3594,6 +3634,13 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
 
         Command::Help => {
             open_help(browser, view);
+        }
+        Command::CommitInfo => {
+            if let Some((repository, oid)) = selected_commit(browser, view) {
+                view.commit_info = Some(crate::commit_info::Dialog::new(repository, oid));
+            } else {
+                view.message = Some("Select a visible Git commit first.".into());
+            }
         }
         Command::Info => {
             if view.focus == 0 {
@@ -3910,7 +3957,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if modal_timer { modal_deadline = now + Duration::from_millis(100); }
             let resized = signals.resize.swap(false, std::sync::atomic::Ordering::Relaxed);
             let reload_requested = dev_reload.requested();
-            let activity = reload_requested || view.worktree_create.as_ref().is_some_and(|modal| modal.ready()) || resized || candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll() || copy_ready || picker_ready || modal_timer
+            let activity = view.commit_info.as_ref().is_some_and(|info| info.ready()) || reload_requested || view.worktree_create.as_ref().is_some_and(|modal| modal.ready()) || resized || candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll() || copy_ready || picker_ready || modal_timer
                 || pending.as_ref().is_some_and(|p| p.task.is_finished())
                 || relink_task.as_ref().is_some_and(|task| task.is_finished()) || folder_task.as_ref().is_some_and(|task| task.is_finished())
                 || !relink_rx.is_empty() || !folder_rx.is_empty()
@@ -4043,6 +4090,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 }
                 refresh_recovery(relocation_state.as_deref(), &mut view);
             }
+            if let Some(info)=view.commit_info.as_mut(){info.tick().await;}
             if let Some(dialog)=view.error_dialog.as_mut(){dialog.tick().await;}
             if let Some(info)=view.info.as_mut(){info.refresh(&browser);info.dialog.tick().await;}
             if relink_task.as_ref().is_some_and(|t|t.is_finished()) {
@@ -4442,6 +4490,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     view.history.shutdown().await;
     status_monitor.shutdown().await;
     git_discovery.shutdown().await;
+    view.commit_info = None;
     crate::git::drain_reads().await;
     drop(pending);
     discovery.close(&mut browser).await;
@@ -4993,6 +5042,31 @@ mod cleanup_tests {
         assert_eq!(git_session_name_width(&presentation), width);
     }
 
+    #[tokio::test]
+    async fn commit_info_shortcut_opens_modal_and_preserves_selection_on_close() {
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
+        assert!(
+            menu_entries(&browser, &view)
+                .iter()
+                .any(|entry| entry.command == Command::CommitInfo)
+        );
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        handle_key(&mut browser, &mut view, key(KeyCode::Char('i')));
+        assert!(view.commit_info.is_some());
+        assert!(view.modal_open());
+        handle_key(&mut browser, &mut view, key(KeyCode::Down));
+        assert_eq!(view.history.selected, 0);
+        handle_key(&mut browser, &mut view, key(KeyCode::Esc));
+        assert!(view.commit_info.is_none());
+        assert!(view.git_focus);
+        handle_key(&mut browser, &mut view, key(KeyCode::Char('i')));
+        handle_key(&mut browser, &mut view, key(KeyCode::Char('i')));
+        assert!(view.commit_info.is_none());
+        view.history.rows.clear();
+        handle_key(&mut browser, &mut view, key(KeyCode::Char('i')));
+        assert!(view.commit_info.is_none());
+    }
+
     async fn navigation_fixture(heads: &[&str]) -> (Browser, View) {
         let mut browser = Browser::new(vec![]);
         let repository = std::path::PathBuf::from("/project/.git");
@@ -5326,11 +5400,7 @@ mod cleanup_tests {
             handle_key(&mut browser, &mut view, key(KeyCode::Char('r'))),
             Action::Refresh
         );
-        for code in [
-            KeyCode::Right,
-            KeyCode::Char('h'),
-            KeyCode::Char('l'),
-        ] {
+        for code in [KeyCode::Right, KeyCode::Char('h'), KeyCode::Char('l')] {
             assert_eq!(
                 handle_key(&mut browser, &mut view, key(code)),
                 Action::Continue

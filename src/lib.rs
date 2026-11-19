@@ -15,6 +15,7 @@ pub mod relocation;
 pub mod path_picker;
 
 mod clipboard;
+pub mod commit_info;
 
 pub mod relocation_profile;
 
