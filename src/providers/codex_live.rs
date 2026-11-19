@@ -35,6 +35,7 @@ pub struct LiveClient {
     // kill_on_drop affects only our byte proxy, never the shared daemon.
     _proxy: Option<Child>,
     sequence: u64,
+    initialization: Value,
     source: SourceConfig,
 }
 impl Drop for LiveClient {
@@ -80,9 +81,10 @@ impl LiveClient {
             socket,
             _proxy: Some(proxy),
             sequence: 0,
+            initialization: Value::Null,
             source,
         };
-        client
+        client.initialization = client
             .call(
                 "initialize",
                 json!({"clientInfo":{"name":if operational {"tracr_release"} else {"tracr_live"}, "version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":operational}}),
@@ -223,6 +225,29 @@ impl LiveClient {
 /// Separate connection used only by confirmed relocation operations.
 pub(crate) struct OperationalClient(LiveClient);
 impl OperationalClient {
+    pub(crate) fn validate_server(&self, home: &Path, version: &str) -> Result<(), String> {
+        let init = &self.0.initialization;
+        let agent = init["userAgent"].as_str().unwrap_or_default();
+        let reported_version = agent
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.rsplit_once('/'))
+            .map(|(_, version)| version);
+        if reported_version != Some(version) {
+            return Err(format!(
+                "Shared Codex daemon must be version {version}; restart the client after upgrading Codex."
+            ));
+        }
+        let server_home = init["codexHome"]
+            .as_str()
+            .ok_or("Shared daemon did not report its Codex home")?;
+        let actual = std::fs::canonicalize(server_home).map_err(|e| e.to_string())?;
+        let expected = std::fs::canonicalize(home).map_err(|e| e.to_string())?;
+        if actual != expected {
+            return Err("Shared daemon belongs to a different Codex home".into());
+        }
+        Ok(())
+    }
     pub(crate) async fn connect(binary: &Path, source: SourceConfig) -> Result<Self, String> {
         timeout(
             Duration::from_secs(5),
