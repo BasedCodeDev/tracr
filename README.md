@@ -279,8 +279,8 @@ Tab cycles through Folders, Sessions, and Git (when available); Shift+Tab revers
   its displayed parent. Enter opens the only session embedded, or creates one
   embedded when the folder has none. With multiple sessions, it focuses the
   session list. While discovery is incomplete, it only focuses Sessions.
-  Escape or Backspace
-  returns to Folders. Left / Right and `h/l` do nothing in Sessions.
+  Left, Escape, or Backspace returns to Folders from Sessions.
+  Right and `h/l` do nothing in Sessions.
 - `b` in Folders or Git collapses that panel and returns focus to Sessions.
   Collapsed panels leave a two-column rail in the wide layout or a one-row strip
   in the stacked layout. Navigating to a collapsed panel reopens it. Selection,
