@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-drawer-') as directory:
         t.send(b'n')
         t.wait(lambda: (root / 'launch.json').exists())
         t.expect('COMPOSER')
-        assert [t.line(row, 233, 240) for row in range(3)] == ['┌─────┐', '│Alt+~│', '└─────┘']
+        assert 'Alt+~' not in t.text()  # The earlier drawer shortcut retired the reminder.
         launch = json.loads((root / 'launch.json').read_text())
         def size():
             return json.loads((root / 'terminal-size.json').read_text())
@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-drawer-') as directory:
         assert 'Ctrl+B background' not in t.text() and 'Alt+`' not in t.text()
         t.send(toggle)
         t.expect('Ctrl+B Background')
-        assert '│Alt+~│' not in t.text()
+        assert 'Alt+~' not in t.text()
         t.wait(lambda: size()['columns'] == 178)
         t.send(b'\x1b~')
         t.wait(lambda: size()['columns'] == 240)
@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-drawer-') as directory:
         assert 'Terminal exited' not in t.text()
         t.send(toggle)
         t.expect('Terminal exited')
-        assert '│Alt+~│' not in t.text()
+        assert 'Alt+~' not in t.text()
         t.send(b'\x1b')
         t.wait(lambda: 'Terminal exited' not in t.text())
         t.send(toggle)

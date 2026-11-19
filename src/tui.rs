@@ -279,10 +279,39 @@ pub struct AreaDialogs {
     terminal_overlay: crate::inline_terminal::OverlayState,
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct DrawerReminder {
+    learned: bool,
+    started: bool,
+    deadline: Option<std::time::Instant>,
+}
+impl DrawerReminder {
+    fn expire(&mut self, now: std::time::Instant) {
+        if self.deadline.is_some_and(|deadline| now >= deadline) {
+            self.deadline = None;
+        }
+    }
+    fn visible(&mut self, now: std::time::Instant, eligible: bool) -> bool {
+        if self.learned || !eligible {
+            return false;
+        }
+        if !self.started {
+            self.started = true;
+            self.deadline = Some(now + Duration::from_secs(2));
+        }
+        self.deadline.is_some_and(|deadline| now < deadline)
+    }
+    fn learn(&mut self) {
+        self.learned = true;
+        self.deadline = None;
+    }
+}
+
 pub struct View {
     pub folder_navigation: FolderNavigation,
     /// Scoped to the displayed frame and its next input; cleared before updates.
     pub folder_rows_snapshot: Option<std::rc::Rc<Vec<crate::browser::FolderRow>>>,
+    pub drawer_reminder: std::cell::Cell<DrawerReminder>,
     pub drawer_open: bool,
     pub drawer_git: bool,
     /// Area whose dialog fields are currently loaded: false = main, true = drawer.
@@ -332,6 +361,7 @@ impl Default for View {
         Self {
             folder_navigation: Default::default(),
             folder_rows_snapshot: Default::default(),
+            drawer_reminder: Default::default(),
             drawer_open: Default::default(),
             drawer_git: Default::default(),
             dialog_area: Default::default(),
@@ -1146,6 +1176,9 @@ fn git_session_spans(
 }
 
 pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
+    let mut reminder = view.drawer_reminder.get();
+    reminder.expire(std::time::Instant::now());
+    view.drawer_reminder.set(reminder);
     view.terminals.borrow_mut().visible = false;
     if let Some(dialog) = &view.terminal_recovery {
         dialog.draw(frame);
@@ -1177,19 +1210,17 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         .set(LayoutMode::for_size(area.width, area.height));
     if !view.drawer_open && view.terminals.borrow().active.is_some() && !view.modal_open() {
         view.terminals.borrow_mut().draw(frame, area, true, false);
-        if area.width >= 7 && area.height >= 3 && !view.terminals.borrow().has_overlay() {
-            let hint = Rect::new(area.right() - 7, area.y, 7, 3);
-            frame.render_widget(Clear, hint);
+        let mut reminder = view.drawer_reminder.get();
+        let visible = reminder.visible(
+            std::time::Instant::now(),
+            area.width >= 9 && area.height >= 3 && !view.terminals.borrow().has_overlay(),
+        );
+        view.drawer_reminder.set(reminder);
+        if visible {
             frame.render_widget(
                 Paragraph::new("Alt+~")
-                    .style(Style::default().fg(Color::White).bg(Color::Black))
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_type(BorderType::Plain)
-                            .border_style(Style::default().fg(Color::DarkGray)),
-                    ),
-                hint,
+                    .style(Style::default().fg(Color::DarkGray).bg(Color::Black)),
+                Rect::new(area.x + 4, area.y + 2, 5, 1),
             );
         }
         return;
@@ -3404,6 +3435,9 @@ fn drawer_shortcut(key: KeyEvent) -> bool {
 pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Action {
     if drawer_shortcut(key) {
         if key.kind == KeyEventKind::Press {
+            let mut reminder = view.drawer_reminder.get();
+            reminder.learn();
+            view.drawer_reminder.set(reminder);
             view.toggle_drawer();
         }
         return Action::Continue;
@@ -4217,6 +4251,21 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         message: browser.state_warning.take(),
         ..View::default()
     };
+    if let Some(path) = browser.state_path.as_deref() {
+        match crate::state::drawer_shortcut_learned(path) {
+            Ok(true) => {
+                let mut reminder = view.drawer_reminder.get();
+                reminder.learn();
+                view.drawer_reminder.set(reminder);
+            }
+            Ok(false) => {}
+            Err(error) => {
+                let warning = format!("Could not read drawer shortcut preference: {error}");
+                view.message = Some(warning.clone());
+                browser.state_warning = Some(warning);
+            }
+        }
+    }
     let signals = ShutdownSignals::new()?;
     let mut dev_reload = crate::dev_reload::DevReload::new()?;
     let mut reloading = false;
@@ -4584,7 +4633,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             view.folder_rows_snapshot = Some(std::rc::Rc::new(browser.folder_rows()));
             terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame, &browser); })?;
             guard.mouse_capture(view.terminals.borrow().active.is_some())?;
-            idle.deadline = next_age_update(&browser, &view, size.height);
+            idle.deadline = next_age_update(&browser, &view, size.height)
+                .into_iter().chain(view.drawer_reminder.get().deadline).min();
             }
             let busy = terminal_copy.is_some() || !view.terminals.borrow().is_empty() || browser.loading() || git_discovery.pending() || view.history.loading() || pending.iter().any(Option::is_some) || relink_task.iter().any(Option::is_some) || folder_task.iter().any(Option::is_some)
                 || view.relink.is_some() || view.folder_move.is_some() || view.worktree_create.is_some()
@@ -4610,7 +4660,17 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 }
                 if let Event::Key(key) = &incoming {
                     if drawer_shortcut(*key) {
+                        let learned = view.drawer_reminder.get().learned;
                         handle_key(&mut browser, &mut view, *key);
+                        if !learned && view.drawer_reminder.get().learned {
+                            if let Some(path) = browser.state_path.as_deref() {
+                                if let Err(error) = crate::state::mark_drawer_shortcut_learned(path) {
+                                    let warning = format!("Could not save drawer shortcut preference: {error}");
+                                    view.message = Some(warning.clone());
+                                    browser.state_warning = Some(warning);
+                                }
+                            }
+                        }
                         continue;
                     }
                 }
@@ -6476,9 +6536,9 @@ mod cleanup_tests {
     #[test]
     fn coding_hint_fits_without_reserving_terminal_space() {
         let browser = Browser::new(vec![]);
-        let view = View::default();
-        view.terminals.borrow_mut().active = Some(1);
-        for (width, height, shown) in [(80, 24, true), (7, 3, true), (6, 3, false), (7, 2, false)] {
+        for (width, height, shown) in [(80, 24, true), (9, 3, true), (8, 3, false), (9, 2, false)] {
+            let view = View::default();
+            view.terminals.borrow_mut().active = Some(1);
             let mut terminal =
                 Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
@@ -6486,16 +6546,57 @@ mod cleanup_tests {
             let buffer = terminal.backend().buffer();
             let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
             assert_eq!(text.contains("Alt+~"), shown);
+            assert!(
+                buffer.content[..usize::from(width * 2)]
+                    .iter()
+                    .all(|cell| cell.symbol() == " ")
+            );
             if shown {
-                for (row, expected) in ["┌─────┐", "│Alt+~│", "└─────┘"].iter().enumerate()
-                {
-                    let line: String = (0..7)
-                        .map(|col| buffer[(width - 7 + col, row as u16)].symbol())
-                        .collect();
-                    assert_eq!(&line, expected);
-                }
+                let line: String = (4..9).map(|col| buffer[(col, 2)].symbol()).collect();
+                assert_eq!(line, "Alt+~");
             }
         }
+    }
+
+    #[test]
+    fn only_shortcut_presses_teach_the_drawer_reminder() {
+        let mut browser = Browser::new(vec![]);
+        for code in [KeyCode::Char('`'), KeyCode::Char('~')] {
+            let mut view = View::default();
+            view.toggle_drawer();
+            assert!(!view.drawer_reminder.get().learned);
+            for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+                handle_key(
+                    &mut browser,
+                    &mut view,
+                    KeyEvent::new_with_kind(code, KeyModifiers::ALT, kind),
+                );
+                assert!(!view.drawer_reminder.get().learned);
+            }
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new(code, KeyModifiers::ALT),
+            );
+            assert!(view.drawer_reminder.get().learned);
+        }
+    }
+
+    #[test]
+    fn drawer_reminder_expires_once_and_learning_retires_it() {
+        let now = std::time::Instant::now();
+        let mut reminder = DrawerReminder::default();
+        assert!(!reminder.visible(now, false));
+        assert!(!reminder.started);
+        assert!(reminder.visible(now, true));
+        assert!(!reminder.visible(now + Duration::from_secs(1), false));
+        assert!(reminder.visible(now + Duration::from_secs(1), true));
+        assert!(!reminder.visible(now + Duration::from_secs(2), true));
+        assert!(!reminder.visible(now + Duration::from_secs(20), true));
+        let mut reminder = DrawerReminder::default();
+        reminder.learn();
+        assert!(!reminder.visible(now, true));
+        assert!(reminder.deadline.is_none());
     }
 
     #[test]
