@@ -1177,6 +1177,21 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         .set(LayoutMode::for_size(area.width, area.height));
     if !view.drawer_open && view.terminals.borrow().active.is_some() && !view.modal_open() {
         view.terminals.borrow_mut().draw(frame, area, true, false);
+        if area.width >= 7 && area.height >= 3 && !view.terminals.borrow().has_overlay() {
+            let hint = Rect::new(area.right() - 7, area.y, 7, 3);
+            frame.render_widget(Clear, hint);
+            frame.render_widget(
+                Paragraph::new("Alt+~")
+                    .style(Style::default().fg(Color::White).bg(Color::Black))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Plain)
+                            .border_style(Style::default().fg(Color::DarkGray)),
+                    ),
+                hint,
+            );
+        }
         return;
     }
     if area.width < 12 || area.height < 4 {
@@ -6456,6 +6471,31 @@ mod cleanup_tests {
         press(&mut browser, &mut view, KeyCode::Esc);
         assert!(!view.drawer_open);
         assert_eq!(view.search_query, "main draft");
+    }
+
+    #[test]
+    fn coding_hint_fits_without_reserving_terminal_space() {
+        let browser = Browser::new(vec![]);
+        let view = View::default();
+        view.terminals.borrow_mut().active = Some(1);
+        for (width, height, shown) in [(80, 24, true), (7, 3, true), (6, 3, false), (7, 2, false)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            assert_eq!(view.terminals.borrow().area, Rect::new(0, 0, width, height));
+            let buffer = terminal.backend().buffer();
+            let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert_eq!(text.contains("Alt+~"), shown);
+            if shown {
+                for (row, expected) in ["┌─────┐", "│Alt+~│", "└─────┘"].iter().enumerate()
+                {
+                    let line: String = (0..7)
+                        .map(|col| buffer[(width - 7 + col, row as u16)].symbol())
+                        .collect();
+                    assert_eq!(&line, expected);
+                }
+            }
+        }
     }
 
     #[test]

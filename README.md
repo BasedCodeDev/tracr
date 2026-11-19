@@ -448,7 +448,8 @@ Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
 Enter opens the selected session. The open-terminals picker also uses Enter to
 reattach a running terminal. With the drawer closed, coding fills the screen
-without Tracr borders or a footer. Opening the drawer shows the coding pane
+without Tracr borders or a footer, apart from a small `Alt+~` shortcut panel
+at the top-right. Opening the drawer shows the coding pane
 beside it on wide terminals, or just the drawer on smaller terminals.
 **Ctrl+B** backgrounds the displayed session without stopping it. From the drawer,
 this keeps the drawer open and preserves its focus; from coding, it returns to
