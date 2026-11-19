@@ -225,3 +225,98 @@ async fn background_search_reuses_cache_and_refresh_invalidates_it() {
     search.tick(&mut browser, false);
     assert!(browser.search_cache.is_empty());
 }
+
+#[test]
+fn search_layout_expands_spaces_results_and_keeps_selection_visible() {
+    use ratatui::{Terminal, backend::TestBackend};
+    use tracr::{
+        browser::{Browser, SourceSpec, Update},
+        domain::SessionSummary,
+        search::{CachedContent, Content},
+        tui::View,
+    };
+    let mut browser = Browser::new(vec![SourceSpec::Fixture("unused".into())]);
+    let sessions: Vec<SessionSummary> = (0..30)
+        .map(|i| {
+            serde_json::from_value(serde_json::json!({
+        "key":{"provider":"codex","source_id":"test","native_id":format!("{i:02}")},
+        "title":format!("Result {i:02}"), "cwd":"/sysadmin", "created_at":1, "updated_at":30-i,
+        "git":null, "source_kind":null
+    })).unwrap()
+        })
+        .collect();
+    browser.apply(Update::Page {
+        generation: 0,
+        source: 0,
+        sessions: sessions.clone(),
+        warnings: vec![],
+    });
+    browser.focus_root = Some("/sysadmin".into());
+    for session in &sessions {
+        browser.search_cache.insert(
+            session.key.clone(),
+            CachedContent::new(
+                session.clone(),
+                Ok(vec![Content {
+                    turn_id: "t".into(),
+                    item_id: "u".into(),
+                    kind: ContentKind::User,
+                    text: "Result excerpt".into(),
+                }]),
+            ),
+        );
+    }
+    let mut view = View {
+        editing: true,
+        search_query: "Result".into(),
+        ..View::default()
+    };
+    let render = |browser: &Browser, view: &View, width, height| {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| tracr::tui::draw(frame, browser, view))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(2, 1)].symbol(), "╭");
+        assert_eq!(buffer[(width - 3, height - 2)].symbol(), "╯");
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+    };
+    for deep in [false, true] {
+        browser.deep_search = deep;
+        let normal = render(&browser, &view, 100, 30);
+        let large = render(&browser, &view, 160, 50);
+        let count = |rows: &[String]| {
+            rows.iter()
+                .filter(|row| row.contains("Result ") && !row.contains("excerpt"))
+                .count()
+        };
+        assert!(count(&large) > count(&normal));
+        let first = large
+            .iter()
+            .position(|row| row.contains("Result 00"))
+            .unwrap();
+        let second = large
+            .iter()
+            .position(|row| row.contains("Result 01"))
+            .unwrap();
+        assert_eq!(second - first, if deep { 4 } else { 3 });
+        assert!(!large[second - 1].chars().any(char::is_alphanumeric));
+        assert_eq!(large.iter().any(|row| row.contains("Content:")), deep);
+        view.search_selected = Some(sessions[29].key.clone());
+        for (width, height) in [(160, 50), (80, 24), (40, 18), (60, 12)] {
+            let rows = render(&browser, &view, width, height);
+            assert!(
+                rows.iter().any(|row| row.contains("Result 29")),
+                "{width}x{height}: {rows:?}"
+            );
+            assert!(rows.iter().any(|row| row.contains("Deep search:")));
+        }
+        view.search_selected = None;
+    }
+}

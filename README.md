@@ -359,7 +359,7 @@ without a recorded folder are selected under Unknown folders.
 
 **Deep search**
 
-Press `/` to open search. The **Search mode** panel shows **Deep search: OFF/ON**
+Press `/` to open search. The compact mode indicator shows **Deep search: OFF/ON**
 and explains what is being searched. Press Tab once to select the toggle, then
 Space to change it; `Ctrl+D` is also available as a shortcut. Deep search includes
 your messages, proposed plans, and final Codex replies, alongside the usual title, folder, session ID, provider, and branch.
@@ -370,6 +370,8 @@ Focus a folder first to limit the search to its descendants and displayed
 worktrees—for example, focus sysadmin and search for `AltTab Ninja`. Every
 space-separated term must occur somewhere in the session; matching ignores case.
 Results show a matching excerpt. Enter opens the folder and selects the session.
+The search dialog expands with your terminal, with spacing between results and
+compact controls to leave more room for matches.
 
 Content loads in the background only for a nonempty deep-search query. Progress
 and unavailable-history warnings appear above the results. Content is cached
