@@ -1,4 +1,4 @@
-//! Metadata-only Codex adapter. Never resumes a thread or starts a turn.
+//! Read-only Codex adapter for metadata and searchable history. Never starts a turn.
 use super::{Cursor, ProviderError, SessionPage, SessionProvider};
 use crate::{config::SourceConfig, domain::*};
 use serde::{Deserialize, Serialize};
@@ -290,6 +290,58 @@ impl CodexProvider {
     }
 }
 impl SessionProvider for CodexProvider {
+    async fn search_content(
+        &self,
+        key: &SessionKey,
+    ) -> Result<Vec<crate::search::Content>, ProviderError> {
+        if key.provider.0 != "codex" || key.source_id != self.source.id {
+            return Err(ProviderError::InvalidData("Session source mismatch".into()));
+        }
+        let mut rpc = self.rpc.lock().await;
+        let mut cursor: Option<String> = None;
+        let mut seen = BTreeSet::new();
+        let mut content = Vec::new();
+        loop {
+            let response = rpc
+                .call(
+                    "thread/turns/list",
+                    json!({
+                        "threadId": key.native_id, "itemsView": "full", "limit": 20,
+                        "sortDirection": "asc", "cursor": cursor
+                    }),
+                )
+                .await;
+            let response = match response {
+                Err(error) if cursor.is_none() && error.to_string().contains("-32601") => {
+                    // RPC errors retire the connection. Compatibility reads use a fresh one.
+                    *rpc = Rpc::start(&self.binary, &self.source.home).await?;
+                    let value = rpc
+                        .call(
+                            "thread/read",
+                            json!({"threadId":key.native_id,"includeTurns":true}),
+                        )
+                        .await?;
+                    if value["thread"]["id"].as_str() != Some(&key.native_id) {
+                        return Err(ProviderError::InvalidData(
+                            "Session identity mismatch".into(),
+                        ));
+                    }
+                    return crate::search::extract_turns(&value["thread"]["turns"]);
+                }
+                other => other?,
+            };
+            content.extend(crate::search::extract_turns(&response["data"])?);
+            cursor = match response.get("nextCursor") {
+                None | Some(Value::Null) => return Ok(content),
+                Some(Value::String(next)) if seen.insert(next.clone()) => Some(next.clone()),
+                _ => {
+                    return Err(ProviderError::InvalidData(
+                        "Invalid or repeated history cursor".into(),
+                    ));
+                }
+            };
+        }
+    }
     async fn prepare_resume(
         &self,
         session: &SessionSummary,

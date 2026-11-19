@@ -1,7 +1,7 @@
 # tracr
 
 tracr is a Linux terminal application for browsing Codex sessions by folder,
-searching metadata globally, and resuming work in the same terminal. Browsing and
+searching metadata and conversation content, and resuming work in the same terminal. Browsing and
 resume pass automated checks and isolated real-Codex acceptance with Codex 0.167.2.
 Relink individual sessions or move a folder and its sessions together, with
 recovery support verified on Codex 0.167.2 and 0.169.0.
@@ -352,10 +352,33 @@ Tab cycles through Folders, Sessions, and Git (when available); Shift+Tab revers
   Home/End navigate longer menus; the selection scrolls into view automatically.
 - `q` or Ctrl-C: quit. While editing search, `q` is text.
 
-Search requires every whitespace-separated term to match some metadata field:
-title, native ID, path, provider, or Git branch. It ignores the selected folder
-inside the modal. Choosing a result returns to exact-folder browsing; sessions
+By default, search requires every whitespace-separated term to match a metadata field:
+title, native ID, path, provider, or Git branch. Search respects folder focus;
+without folder focus it searches globally. Choosing a result returns to exact-folder browsing; sessions
 without a recorded folder are selected under Unknown folders.
+
+**Deep search**
+
+Press `/` to open search. The compact mode indicator shows **Deep search: OFF/ON**
+and explains what is being searched. Press Tab once to select the toggle, then
+Space to change it; `Ctrl+D` is also available as a shortcut. Deep search includes
+your messages, proposed plans, and final Codex replies, alongside the usual title, folder, session ID, provider, and branch.
+Tool output, reasoning, and progress updates are excluded. Older completed turns
+without final-answer markers use their last unmarked agent reply.
+
+Focus a folder first to limit the search to its descendants and displayed
+worktrees—for example, focus sysadmin and search for `AltTab Ninja`. Every
+space-separated term must occur somewhere in the session; matching ignores case.
+Results show a matching excerpt. Enter opens the folder and selects the session.
+The search dialog expands with your terminal, with spacing between results and
+compact controls to leave more room for matches.
+
+Content loads in the background only for a nonempty deep-search query. Progress
+and unavailable-history warnings appear above the results. Content is cached
+only while Tracer runs; refresh clears the cache. The toggle is remembered during
+the current run and defaults to off on launch. Claude content search is not yet
+supported.
+
 
 Live activity appears to the right of session titles: **Running** is green;
 **Waiting for approval/input** is orange. Folder colors include activity in

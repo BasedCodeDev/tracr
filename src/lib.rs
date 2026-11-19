@@ -62,4 +62,5 @@ pub mod terminal_input;
 
 mod terminal_selection;
 
+pub mod search;
 pub mod worktree_report;

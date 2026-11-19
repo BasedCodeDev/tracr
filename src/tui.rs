@@ -2302,6 +2302,7 @@ fn session_title(
 }
 
 fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
+    let area = frame.area();
     let inner = crate::modal::shell(
         frame,
         if browser.focus_root.is_some() {
@@ -2309,36 +2310,114 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         } else {
             "Search sessions"
         },
-        100,
-        30,
+        area.width
+            .saturating_sub(if area.width >= 28 { 4 } else { 0 }),
+        area.height
+            .saturating_sub(if area.height >= 12 { 2 } else { 0 }),
     );
-    let regions = crate::modal::regions(inner);
-    let scope_height = if browser.focus_root.is_some() { 3 } else { 0 };
-    let scoped = Layout::vertical([Constraint::Length(scope_height), Constraint::Min(1)])
-        .split(regions.body);
+    let compact = inner.height < 18;
+    let short = inner.height < 12;
+    let show_progress = browser.deep_search && !view.search_query.trim().is_empty();
+    let mode_height = if compact { 1 } else { 2 };
+    let sections = Layout::vertical([
+        Constraint::Length(u16::from(browser.focus_root.is_some())),
+        Constraint::Length(if short { 1 } else { 3 }),
+        Constraint::Length(mode_height),
+        Constraint::Min(1),
+        Constraint::Length(u16::from(show_progress)),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
     if let Some(root) = &browser.focus_root {
+        let scope = safe_text(&format!("Within: {}", root.display()));
+        let clipped =
+            unicode_width::UnicodeWidthStr::width(scope.as_str()) > usize::from(sections[0].width);
+        let mut line = graph_viewport(
+            vec![Span::raw(scope)],
+            0,
+            usize::from(sections[0].width.saturating_sub(u16::from(clipped))),
+        );
+        if clipped && sections[0].width > 0 {
+            line.spans.push(Span::raw("…"));
+        }
+        frame.render_widget(Paragraph::new(line), sections[0]);
+    }
+    let mode_style = if view.search_control == 3 {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(if browser.deep_search {
+                Color::Green
+            } else {
+                Color::Yellow
+            })
+            .add_modifier(Modifier::BOLD)
+    };
+    let instructions = if inner.width >= 70 {
+        "   Tab selects · Space toggles · Ctrl+D shortcut"
+    } else {
+        " · Ctrl+D"
+    };
+    let mut mode_lines = vec![Line::from(vec![
+        Span::styled(
+            if browser.deep_search {
+                "[x] Deep search: ON"
+            } else {
+                "[ ] Deep search: OFF"
+            },
+            mode_style,
+        ),
+        Span::raw(instructions),
+    ])];
+    if !compact {
+        mode_lines.push(Line::from(if inner.width < 70 {
+            "Tab selects · Space toggles"
+        } else if browser.deep_search {
+            "Searches messages, plans, final replies, and metadata."
+        } else {
+            "Metadata only. Enable deep search to find conversation content."
+        }));
+    }
+    if short {
+        let text = safe_text(&format!("Search: {}", view.search_query));
+        let width = usize::from(sections[1].width);
+        let text_width = unicode_width::UnicodeWidthStr::width(text.as_str());
+        let offset = text_width.saturating_sub(width.saturating_sub(1));
         frame.render_widget(
-            Paragraph::new(format!(
-                "Within: {}\nIncludes descendants and displayed worktrees",
-                safe_text(&root.display().to_string())
-            ))
-            .wrap(Wrap { trim: false }),
-            scoped[0],
+            Paragraph::new(graph_viewport(vec![Span::raw(text)], offset, width)),
+            sections[1],
+        );
+        if view.search_control == 0 && sections[1].width > 0 && sections[1].height > 0 {
+            frame.set_cursor_position((
+                sections[1].x + text_width.min(width - 1) as u16,
+                sections[1].y,
+            ));
+        }
+    } else {
+        crate::modal::text_field(
+            frame,
+            sections[1],
+            "Search",
+            &view.search_query,
+            view.search_query.len(),
+            view.search_control == 0,
+            true,
         );
     }
-    let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).split(scoped[1]);
-    crate::modal::text_field(
-        frame,
-        sections[0],
-        "Search",
-        &view.search_query,
-        view.search_query.len(),
-        view.search_control == 0,
-        true,
-    );
+    frame.render_widget(Paragraph::new(mode_lines), sections[2]);
+    if show_progress {
+        frame.render_widget(
+            Paragraph::new(crate::search::progress(browser)),
+            sections[4],
+        );
+    }
     modal_actions(
         frame,
-        regions.actions,
+        sections[5],
         "Cancel",
         "Open",
         view.search_control,
@@ -2347,18 +2426,30 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     );
     frame.render_widget(
         Paragraph::new("↑/↓ results · Enter opens · Esc cancels"),
-        regions.hints,
+        sections[6],
     );
+    let result_block = if sections[3].height >= 4 {
+        block("Results — ↑/↓ select · Enter opens folder", false)
+    } else {
+        Block::default()
+    }
+    .padding(ratatui::widgets::Padding::horizontal(1));
     let results = browser.search_results(&view.search_query);
     if results.is_empty() {
         frame.render_widget(
-            Paragraph::new(if browser.loading() {
-                "Searching…"
-            } else {
-                "No matching sessions"
-            })
-            .block(block("Results", false)),
-            sections[1],
+            Paragraph::new(
+                if browser.loading()
+                    || (browser.deep_search
+                        && !view.search_query.trim().is_empty()
+                        && crate::search::pending(browser))
+                {
+                    "Searching…"
+                } else {
+                    "No matching sessions"
+                },
+            )
+            .block(result_block),
+            sections[3],
         );
         return;
     }
@@ -2366,14 +2457,15 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         .iter()
         .position(|s| Some(&s.key) == view.search_selected.as_ref())
         .unwrap_or(0);
+    let result_height = usize::from(result_block.inner(sections[3]).height);
     let items: Vec<_> = results
         .iter()
         .map(|s| {
-            ListItem::new(vec![
+            let mut lines = vec![
                 session_title(
                     s,
                     browser.runtime_status(&s.key),
-                    sections[1].width.saturating_sub(4),
+                    sections[3].width.saturating_sub(6),
                 ),
                 Line::from(safe_text(
                     &s.cwd
@@ -2381,16 +2473,23 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|| "Unknown folder".into()),
                 )),
-                Line::default(),
-            ])
+            ];
+            if let Some(excerpt) = crate::search::excerpt(browser, s, &view.search_query) {
+                lines.push(Line::from(excerpt));
+            }
+            if !compact {
+                lines.push(Line::default());
+            }
+            lines.truncate(result_height.max(1));
+            ListItem::new(lines)
         })
         .collect();
     frame.render_stateful_widget(
         List::new(items)
-            .block(block("Results — ↑/↓ select · Enter opens folder", false))
+            .block(result_block)
             .highlight_style(selection_style(view.help_control == 0))
             .highlight_symbol("> "),
-        sections[1],
+        sections[3],
         &mut ListState::default().with_selected(Some(index)),
     );
 }
@@ -3334,11 +3433,28 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             .position(|s| Some(&s.key) == view.search_selected.as_ref())
             .unwrap_or(0);
         match key.code {
-            KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
-                &mut view.search_control,
-                &[true, true, !results.is_empty()],
-                key.code == KeyCode::BackTab,
-            ),
+            KeyCode::Tab | KeyCode::BackTab => {
+                // Follow the visual order: query, deep search, Cancel, Open.
+                let controls = [0, 3, 1, 2];
+                let mut index = controls
+                    .iter()
+                    .position(|c| *c == view.search_control)
+                    .unwrap_or(0);
+                crate::modal::cycle(
+                    &mut index,
+                    &[true, true, true, !results.is_empty()],
+                    key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT),
+                );
+                view.search_control = controls[index];
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                browser.deep_search = !browser.deep_search;
+                view.search_selected = None;
+            }
+            KeyCode::Enter | KeyCode::Char(' ') if view.search_control == 3 => {
+                browser.deep_search = !browser.deep_search;
+                view.search_selected = None;
+            }
             KeyCode::Enter | KeyCode::Char(' ') if view.search_control == 1 => view.editing = false,
             KeyCode::Esc => view.editing = false,
             KeyCode::Up | KeyCode::Down => {
@@ -3859,6 +3975,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         previous(info);
     }));
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    let mut content_search = crate::search::Search::default();
     let mut discovery = Discovery::new();
     discovery.enable_live();
     browser.invalidate_git();
@@ -3937,6 +4054,13 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     }
                     Err(_) => break,
                 }
+            }
+            let search_active = view.editing && browser.deep_search && !view.search_query.trim().is_empty();
+            if content_search.tick(&mut browser, search_active) {
+                if view.editing && view.search_selected.is_none() {
+                    view.search_selected = browser.search_results(&view.search_query).first().map(|s| s.key.clone());
+                }
+                idle.wake();
             }
             if status_monitor.tick(&mut browser).await { idle.wake(); }
             let now = std::time::Instant::now();
@@ -5796,6 +5920,80 @@ mod cleanup_tests {
         }
     }
 
+    #[test]
+    fn deep_search_toggle_is_keyboard_accessible_and_renders_small_terminals() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View {
+            editing: true,
+            search_query: "AltTab".into(),
+            ..View::default()
+        };
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        );
+        assert!(browser.deep_search);
+        assert_eq!(view.search_query, "AltTab");
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        );
+        assert_eq!(view.search_control, 3);
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+        );
+        assert!(!browser.deep_search);
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| draw_search(frame, &browser, &view))
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(screen.contains("Deep search: OFF"));
+        assert!(screen.contains("Enable deep search"));
+        assert!(screen.contains("Space toggles"));
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        assert!(browser.deep_search);
+        assert!(view.editing);
+        for (width, height) in [(120, 35), (40, 10), (15, 5)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| draw_search(frame, &browser, &view))
+                .unwrap();
+            if width >= 40 {
+                let screen: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
+                assert!(screen.contains("Deep search: ON"));
+            }
+        }
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        );
+        assert!(!view.editing);
+        assert!(browser.deep_search);
+    }
+
     #[tokio::test]
     async fn tab_cycles_available_panes_in_both_directions() {
         for has_git in [false, true] {
@@ -5858,7 +6056,7 @@ mod cleanup_tests {
             );
             assert!(view.editing);
             assert_eq!(view.context(), 1);
-            assert_eq!(view.search_control, 1);
+            assert_eq!(view.search_control, 3);
             view.editing = false;
             // The action menu uses the same pane-cycle behavior as the key.
             view.help = true;

@@ -98,6 +98,19 @@ def main():
                     release_test = message.get('executable')
         stage('real-release', ['python3', 'scripts/check_codex_release.py', '--codex', args.codex,
                                '--test-binary', release_test or ''], bool(release_test))
+    if args.codex and built and tested:
+        artifact = subprocess.run(cargo + ['test', *locked, '--test', 'search', '--no-run', '--message-format=json'],
+                                  capture_output=True, text=True, timeout=120)
+        (logs / 'real-search-build.log').write_text(artifact.stdout + artifact.stderr)
+        search_test = None
+        if artifact.returncode == 0:
+            for line in artifact.stdout.splitlines():
+                try: message = json.loads(line)
+                except ValueError: continue
+                if message.get('reason') == 'compiler-artifact' and message.get('target', {}).get('name') == 'search':
+                    search_test = message.get('executable')
+        stage('real-search', ['python3', 'scripts/check_codex_search.py', '--codex', args.codex,
+                              '--test-binary', search_test or ''], bool(search_test))
     (logs / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     print(f'Scratch logs and results: {logs}')
     raise SystemExit(int(any(r['status'] != 'passed' for r in results)))

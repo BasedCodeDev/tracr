@@ -30,6 +30,17 @@ pub enum ProviderError {
 }
 
 pub trait SessionProvider: Send + Sync {
+    fn search_content(
+        &self,
+        _key: &SessionKey,
+    ) -> impl Future<Output = Result<Vec<crate::search::Content>, ProviderError>> + Send {
+        async {
+            Err(ProviderError::Unavailable(
+                "Content search is unsupported by this provider".into(),
+            ))
+        }
+    }
+
     fn prepare_resume(
         &self,
         _session: &SessionSummary,

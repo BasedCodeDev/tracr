@@ -46,7 +46,7 @@ impl SourceSpec {
             Self::Fixture(path) => path.display().to_string(),
         }
     }
-    async fn open(&self) -> Result<Provider, String> {
+    pub(crate) async fn open(&self) -> Result<Provider, String> {
         match self {
             Self::Codex { binary, source } => CodexProvider::connect(binary, source.clone())
                 .await
@@ -63,6 +63,16 @@ pub enum Provider {
     Fixture(FixtureProvider),
 }
 impl Provider {
+    pub(crate) async fn search_content(
+        &self,
+        key: &SessionKey,
+    ) -> Result<Vec<crate::search::Content>, String> {
+        match self {
+            Self::Codex(p) => p.search_content(key).await,
+            Self::Fixture(p) => p.search_content(key).await,
+        }
+        .map_err(|e| e.to_string())
+    }
     pub async fn prepare_resume(&self, session: &SessionSummary) -> Result<ResumeCommand, String> {
         match self {
             Self::Codex(p) => p.prepare_resume(session).await,
@@ -88,7 +98,7 @@ impl Provider {
         }
         .map_err(|e| e.to_string())
     }
-    async fn close(&self) {
+    pub(crate) async fn close(&self) {
         if let Self::Codex(p) = self {
             p.close().await;
         }
@@ -154,6 +164,11 @@ pub struct SourceState {
     pub warnings: Vec<String>,
     pub provider: Option<Arc<Provider>>,
 }
+impl SourceState {
+    pub(crate) fn contains(&self, key: &SessionKey) -> bool {
+        self.committed.contains_key(key) || self.staging.contains_key(key)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FolderFilter {
     All,
@@ -177,6 +192,8 @@ pub struct SourceDiagnostic {
 }
 
 pub struct Browser {
+    pub deep_search: bool,
+    pub search_cache: BTreeMap<SessionKey, crate::search::CachedContent>,
     pub ownership: BTreeMap<PathBuf, crate::git_discovery::Ownership>,
     pub git_generation: u64,
     retired_repositories: BTreeSet<PathBuf>,
@@ -206,6 +223,8 @@ pub struct Browser {
 impl Browser {
     pub fn new(specs: Vec<SourceSpec>) -> Self {
         Self {
+            deep_search: false,
+            search_cache: BTreeMap::new(),
             ownership: BTreeMap::new(),
             git_generation: 0,
             retired_repositories: BTreeSet::new(),
@@ -493,6 +512,7 @@ impl Browser {
     }
 
     pub fn begin_refresh(&mut self) {
+        self.search_cache.clear();
         self.generation += 1;
         self.folders.clear();
         self.details.clear();
@@ -597,12 +617,12 @@ impl Browser {
         records.into_values().collect()
     }
     pub fn visible(&self) -> Vec<SessionSummary> {
-        self.matching_sessions(&self.query, !self.query.trim().is_empty())
+        self.matching_sessions(&self.query, !self.query.trim().is_empty(), false)
     }
     pub fn search_results(&self, query: &str) -> Vec<SessionSummary> {
-        self.matching_sessions(query, true)
+        self.matching_sessions(query, true, self.deep_search)
     }
-    fn matching_sessions(&self, query: &str, searching: bool) -> Vec<SessionSummary> {
+    fn matching_sessions(&self, query: &str, searching: bool, deep: bool) -> Vec<SessionSummary> {
         let terms: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         let mut sessions: Vec<_> = self
             .all()
@@ -630,7 +650,18 @@ impl Browser {
                                 .unwrap_or("")
                         )
                         .to_lowercase();
-                        terms.iter().all(|term| text.contains(term))
+                        let content = if deep {
+                            self.search_cache
+                                .get(&s.key)
+                                .filter(|c| c.session == *s)
+                                .map(|c| c.searchable.as_str())
+                                .unwrap_or("")
+                        } else {
+                            ""
+                        };
+                        terms
+                            .iter()
+                            .all(|term| text.contains(term) || content.contains(term))
                     } else {
                         self.matches_folder(s, &self.folder)
                     }
