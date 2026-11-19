@@ -23,11 +23,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-dirty-') as directory:
     fixture.write_text(json.dumps({'sessions': [session]}))
     terminal = Terminal([binary, 'browse', '--fixture', str(fixture), str(project)], env)
     try:
+        terminal.send(b'\x1b`')
         terminal.expect('[main]')
         (project / 'new.txt').write_text('untracked\n')
         terminal.expect('[main *]')
         terminal.expect('project *')
-        terminal.send(b'\x1b')
         terminal.expect('Enter Sessions')
         terminal.send(b'i')
         terminal.expect('Worktree information')

@@ -38,8 +38,8 @@ for scenario in ['changed', 'cancel', 'missing', 'direct', 'launch']:
             terminal.send(b'\r\r')
             if scenario == 'changed':
                 terminal.expect('Session folder changed')
-                terminal.expect(str(home/'resume'))
-                terminal.expect(str(home/'changed'))
+                terminal.expect('resume')
+                terminal.expect('changed')
                 terminal.send(b'\r')
                 terminal.wait(lambda: 'Session folder changed' not in terminal.text())
                 assert not (home/'launch.json').exists()

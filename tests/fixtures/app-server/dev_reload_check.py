@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-reload-move-') as directory:
                         {**os.environ, 'TRACR_DEV_CONTROL': str(control), 'XDG_STATE_HOME': str(root / 'state')})
     try:
         terminal.inspect('ID: session')
-        terminal.send(b'\x1b')
+        terminal.send(b'\x1b`')
         terminal.expect('Enter Sessions')
         terminal.send(b'm')
         terminal.expect('Destination folder')
@@ -45,6 +45,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-reload-move-') as directory:
         terminal.expect('Enter confirms')
         terminal.send(b'\r')
         terminal.wait(lambda: (home / 'updating').exists())
+        terminal.send(b'\x1b`')  # Hidden operations still finish before reload.
         (control / 'request').touch()
         time.sleep(1)
         assert terminal.child.poll() is None

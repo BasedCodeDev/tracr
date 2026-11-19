@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
         t.send(b'\x1b');t.wait(lambda:'Actions & shortcuts' not in t.text())
         assert 'No unfinished relocations' not in t.text()
         t.resize(24, 36)
-        t.expect('n New');t.expect('? Help · q Quit')
+        t.expect('n New');t.expect('Alt+`')
         t.resize(80, 240)
         t.send(b'm');t.expect('New folder');t.expect('Use this folder')
         t.wait(lambda:'Loading folders' not in t.text())

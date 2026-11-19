@@ -180,8 +180,10 @@ fn folder_colors_follow_visible_descendants_and_waiting_wins() {
         browser.folder_activity(&folder("/work/other")),
         RuntimeStatus::Running
     );
-    let view = tracr::tui::View {
-        focus: 1,
+    let mut view = tracr::tui::View {
+        drawer_open: true,
+        dialog_area: true,
+        focus: 0,
         ..Default::default()
     };
     let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
@@ -202,6 +204,8 @@ fn folder_colors_follow_visible_descendants_and_waiting_wins() {
             .any(|c| c.fg == Color::Rgb(255, 165, 0))
     );
     browser.open_folder("/work/app/child".into());
+    view.drawer_open = false;
+    view.focus = 1;
     let mut terminal = Terminal::new(TestBackend::new(36, 15)).unwrap();
     terminal
         .draw(|f| tracr::tui::draw(f, &browser, &view))

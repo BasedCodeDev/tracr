@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-browse-') as tmp:
         terminal.resize(25, 65)
         terminal.wait(lambda: 'Search within folder' not in terminal.text())
         terminal.resize(80, 240)
-        terminal.expect('Folders');terminal.expect('Sessions')
+        terminal.send(b'\x1b`');terminal.expect('Folders');terminal.expect('Sessions')
         (home/'fake.json').write_text(json.dumps({'malformed': True}))
         terminal.send(b'r')
         terminal.expect('incomplete')

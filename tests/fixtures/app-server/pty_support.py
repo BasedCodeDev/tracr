@@ -20,7 +20,7 @@ class Terminal:
             os.setsid()
             fcntl.ioctl(self.slave, termios.TIOCSCTTY, 0)
         self.child = subprocess.Popen(command, stdin=self.slave, stdout=self.slave, stderr=self.slave,
-                                      preexec_fn=setup, env={**(env if env is not None else os.environ), 'XDG_STATE_HOME': (env or {}).get('XDG_STATE_HOME', self.state.name), 'TERM':'xterm-256color'})
+                                      preexec_fn=setup, env={**(env if env is not None else os.environ), 'XDG_STATE_HOME': ((env or {}).get('XDG_STATE_HOME') if (env or {}).get('XDG_STATE_HOME') != os.environ.get('XDG_STATE_HOME') else None) or self.state.name, 'TERM':'xterm-256color'})
         self.output = bytearray()
     def resize(self, rows, cols):
         changed = getattr(self, 'dimensions', None) != (rows, cols)
@@ -94,6 +94,20 @@ class Terminal:
                 raise RuntimeError(f'terminal process exited unexpectedly: {self.child.returncode}')
     def expect(self, text):
         self.wait(lambda: text in self.text())
+    def action(self, label):
+        self.send(b'?')
+        self.expect('Actions & shortcuts')
+        self.send(b'\x1b[H')
+        for _ in range(60):
+            end = time.monotonic() + .06
+            self.wait(lambda: time.monotonic() >= end)
+            if any('> ' in self.line(row) and label in self.line(row)
+                   for row in range(self.dimensions[0])):
+                self.send(b'\r')
+                return
+            self.send(b'\x1b[B')
+        raise AssertionError('Action not found: ' + label + ': ' + self.text())
+
     def inspect(self, expected):
         self.expect('Sessions')
         self.wait(lambda: all(marker not in self.text() for marker in ('Loading', 'refreshing', 'Fetching metadata')) and 'i Info' in self.text())

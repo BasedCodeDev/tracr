@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
     t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
     try:
         t.inspect('ID: session')
-        t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
+        t.send(b'\x1b`');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
         # Edit the exact destination directly; no separate naming screen.
         t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms')
         t.expect('1 sessions')
@@ -45,9 +45,9 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
         archive=root/'archive';archive.mkdir()
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(root/'moved')],env)
         t.inspect('ID: session')
-        t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
+        t.send(b'\x1b`');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
         t.send(b'\x1b[Z\x15'+(str(archive)+'/').encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r');t.expect('Enter confirms')
-        t.expect(str(archive/'moved'))
+        t.expect('Final path:');t.expect('moved')
         t.send(b'\r');t.expect('Folder and sessions moved and verified.')
         assert 'u Recover' not in t.text()
         assert (archive/'moved/file').read_text()=='unchanged'
@@ -72,7 +72,7 @@ for recovery in (False, True):
              'PATH':str(root)+':/usr/bin:/bin','COPY_CAPTURE':str(capture)}
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         try:
-            t.inspect('ID: session');t.send(b'\x1b');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
+            t.inspect('ID: session');t.send(b'\x1b`');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
             t.send(b'\x1b[Z\x15'+str(root/'moved').encode()+b'\r');t.expect('>[ Use this folder ]');t.send(b'\r')
             if recovery:
                 t.expect('Enter confirms');t.send(b'\r')

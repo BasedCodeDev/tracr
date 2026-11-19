@@ -218,6 +218,12 @@ enum Confirmation {
     Quit,
     Close(u64),
 }
+#[derive(Default)]
+pub(crate) struct OverlayState {
+    picker: bool,
+    selected: usize,
+    confirmation: Option<Confirmation>,
+}
 pub struct ExitNotice {
     pub message: String,
     pub failed: bool,
@@ -229,6 +235,12 @@ pub enum Input {
     Quit,
 }
 impl Manager {
+    pub(crate) fn swap_overlay(&mut self, other: &mut OverlayState) {
+        std::mem::swap(&mut self.picker, &mut other.picker);
+        std::mem::swap(&mut self.selected, &mut other.selected);
+        std::mem::swap(&mut self.confirmation, &mut other.confirmation);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
@@ -816,24 +828,6 @@ impl Manager {
             }
             return Ok(Input::Consumed);
         }
-        // Embedded terminals reserve Tab for panel navigation; fullscreen forwards it.
-        if let Event::Key(key) = event {
-            if !self.fullscreen
-                && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
-                && (key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT)
-            {
-                if key.kind == KeyEventKind::Release {
-                    return Ok(Input::Consumed);
-                }
-                return Ok(Input::Pass);
-            }
-        }
-        // Inline sessions retain pane navigation; fullscreen sessions receive these keys.
-        if !self.fullscreen
-            && matches!(event, Event::Key(key) if key.modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down))
-        {
-            return Ok(Input::Pass);
-        }
         let Some(id) = self.active else {
             return Ok(Input::Pass);
         };
@@ -902,7 +896,7 @@ impl Manager {
             } else {
                 Color::DarkGray
             }))
-            .title(" Codex · Ctrl+B background · Tab/Shift+Tab panels · Alt+C copy ");
+            .title(" Codex · Ctrl+B background · Alt+` drawer · Alt+C copy ");
         self.area = if self.fullscreen {
             area
         } else {
@@ -2072,7 +2066,7 @@ time.sleep(60)
     }
 
     #[test]
-    fn tabs_reach_fullscreen_child_but_navigate_when_embedded() {
+    fn tabs_reach_child_in_embedded_and_fullscreen_modes() {
         let mut manager = Manager {
             area: Rect::new(0, 0, 80, 24),
             ..Manager::default()
@@ -2104,12 +2098,8 @@ time.sleep(60)
                     let result = manager
                         .input(&Event::Key(KeyEvent::new_with_kind(code, modifiers, kind)))
                         .unwrap();
-                    if fullscreen || kind == KeyEventKind::Release {
-                        assert!(matches!(result, Input::Consumed));
-                    } else {
-                        assert!(matches!(result, Input::Pass));
-                    }
-                    if fullscreen && kind != KeyEventKind::Release {
+                    assert!(matches!(result, Input::Consumed));
+                    if kind != KeyEventKind::Release {
                         expected.extend_from_slice(
                             if code == KeyCode::Tab && modifiers == KeyModifiers::NONE {
                                 b"\t"
@@ -2213,7 +2203,7 @@ time.sleep(60)
         for direction in [KeyCode::Left, KeyCode::Right, KeyCode::Up, KeyCode::Down] {
             assert!(matches!(
                 manager.input(&key(direction, KeyModifiers::ALT)).unwrap(),
-                Input::Pass
+                Input::Consumed
             ));
             assert!(manager.active.is_some());
         }

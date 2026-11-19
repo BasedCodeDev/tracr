@@ -363,10 +363,19 @@ async fn enter_respects_focus_search_and_pending_preparation() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tracr::tui::{Action, View, handle_key};
     let mut browser = loaded().await;
-    let mut view = View::default();
+    let mut view = View {
+        drawer_open: true,
+        dialog_area: true,
+        focus: 0,
+        ..View::default()
+    };
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     assert_eq!(handle_key(&mut browser, &mut view, enter), Action::Continue);
-    view.focus = 1;
+    handle_key(
+        &mut browser,
+        &mut view,
+        KeyEvent::new(KeyCode::Char('`'), KeyModifiers::ALT),
+    );
     assert_eq!(
         handle_key(&mut browser, &mut view, enter),
         Action::ResumeSelected
@@ -489,57 +498,32 @@ async fn initial_folder_shows_direct_sessions_and_survives_empty_refresh() {
 }
 
 #[tokio::test]
-async fn enter_and_escape_navigate_panes_outside_search() {
+async fn enter_keeps_drawer_open_and_escape_returns_to_main() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tracr::tui::{View, handle_key};
     let mut browser = loaded().await;
     let mut view = View::default();
+    handle_key(
+        &mut browser,
+        &mut view,
+        KeyEvent::new(KeyCode::Char('`'), KeyModifiers::ALT),
+    );
+    browser.folder = FolderFilter::Unlinked;
     let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
-    {
-        let editing = false;
-        view.editing = editing;
-        view.focus = 0;
-        browser.folder = FolderFilter::Unlinked;
-        browser.query = "codex".into();
-        handle_key(&mut browser, &mut view, key(KeyCode::Down));
-        assert_eq!(browser.folder, FolderFilter::Unknown);
-        handle_key(&mut browser, &mut view, key(KeyCode::Up));
-        assert_eq!(browser.folder, FolderFilter::Unlinked);
-        let path = PathBuf::from("/work/project");
-        browser.open_folder(path.clone());
-        browser.expanded.remove(&path);
-        handle_key(&mut browser, &mut view, key(KeyCode::Enter));
-        assert_eq!(view.focus, 1);
-        assert!(!browser.expanded.contains(&path));
-        assert_eq!(view.editing, editing);
-        for code in [
-            KeyCode::Left,
-            KeyCode::Right,
-            KeyCode::Char('h'),
-            KeyCode::Char('l'),
-        ] {
-            handle_key(&mut browser, &mut view, key(code));
-            assert_eq!(view.focus, 1);
-            assert!(!browser.expanded.contains(&path));
-        }
-        for code in [KeyCode::Esc, KeyCode::Backspace] {
-            view.focus = 1;
-            handle_key(&mut browser, &mut view, key(code));
-            assert_eq!(view.focus, 0);
-            assert_eq!(browser.folder, FolderFilter::Path(path.clone()));
-            assert!(!browser.expanded.contains(&path));
-        }
-        handle_key(&mut browser, &mut view, key(KeyCode::Down));
-        for expected in [1, 0, 1, 0] {
-            handle_key(&mut browser, &mut view, key(KeyCode::Tab));
-            assert_eq!(view.focus, expected);
-        }
-        for expected in [1, 0] {
-            handle_key(&mut browser, &mut view, key(KeyCode::BackTab));
-            assert_eq!(view.focus, expected);
-        }
-        assert!(browser.query.is_empty());
+    handle_key(&mut browser, &mut view, key(KeyCode::Down));
+    assert_eq!(browser.folder, FolderFilter::Unknown);
+    handle_key(&mut browser, &mut view, key(KeyCode::Up));
+    assert_eq!(browser.folder, FolderFilter::Unlinked);
+    handle_key(&mut browser, &mut view, key(KeyCode::Enter));
+    assert!(view.drawer_open);
+    assert_eq!(view.focus, 0);
+    for code in [KeyCode::Tab, KeyCode::BackTab] {
+        handle_key(&mut browser, &mut view, key(code));
+        assert_eq!(view.focus, 0); // No Git repository: only Folders.
     }
+    handle_key(&mut browser, &mut view, key(KeyCode::Esc));
+    assert!(!view.drawer_open);
+    assert_eq!(view.focus, 1);
 }
 
 #[tokio::test]
@@ -572,7 +556,7 @@ async fn guardian_metadata_is_hidden_without_dropping_other_sessions_or_pages() 
 }
 
 #[test]
-fn escape_returns_to_folders_and_closes_help_and_cancels_resume() {
+fn escape_closes_drawer_and_closes_help_and_cancels_resume() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tracr::tui::{Action, View, handle_key};
     let mut browser = Browser::new(vec![]);
@@ -584,6 +568,8 @@ fn escape_returns_to_folders_and_closes_help_and_cancels_resume() {
                 let code = KeyCode::Esc;
                 let mut view = View {
                     focus,
+                    drawer_open: focus == 0,
+                    dialog_area: focus == 0,
                     editing,
                     ..View::default()
                 };
@@ -595,7 +581,7 @@ fn escape_returns_to_folders_and_closes_help_and_cancels_resume() {
                     ),
                     Action::Continue
                 );
-                assert_eq!(view.focus, 0);
+                assert_eq!(view.focus, 1);
                 assert_eq!(view.editing, editing);
                 assert_eq!(browser.query, "keep filter");
             }
@@ -803,7 +789,13 @@ async fn action_menu_navigates_cancels_and_dispatches_without_changing_context()
     assert_eq!(view.help_selected, 4);
     handle_key(&mut browser, &mut view, key(KeyCode::Down));
     assert_eq!(view.help_selected, 5);
-    view.help_selected = 13; // Create is disabled for fixtures.
+    view.help_selected = view
+        .help_entries
+        .as_ref()
+        .unwrap()
+        .iter()
+        .position(|e| e.label == "Create new session")
+        .unwrap();
     assert_eq!(
         handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
         Action::Continue
@@ -816,20 +808,26 @@ async fn action_menu_navigates_cancels_and_dispatches_without_changing_context()
     assert_eq!(view.focus, 1);
     handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
     assert_eq!(view.help_selected, 0);
-    view.help_selected = 9;
-    handle_key(&mut browser, &mut view, key(KeyCode::Down));
-    handle_key(&mut browser, &mut view, key(KeyCode::Enter));
-    assert!(!view.help);
-    assert_eq!(view.focus, 1); // Previous item keeps focus on Sessions.
-    handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
-    view.help_selected = 3;
+    view.help_selected = view
+        .help_entries
+        .as_ref()
+        .unwrap()
+        .iter()
+        .position(|e| e.label == "Refresh sessions")
+        .unwrap();
     assert_eq!(
         handle_key(&mut browser, &mut view, key(KeyCode::Enter)),
         Action::Refresh
     );
     assert!(!view.help);
     handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
-    view.help_selected = 2;
+    view.help_selected = view
+        .help_entries
+        .as_ref()
+        .unwrap()
+        .iter()
+        .position(|e| e.label.contains("Search"))
+        .unwrap();
     handle_key(&mut browser, &mut view, key(KeyCode::Enter));
     assert!(view.editing);
     assert!(!view.help);
@@ -845,7 +843,10 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let mut view = View {
             help: true,
-            help_selected: if width >= 160 { 15 } else { 16 },
+            help_selected: usize::MAX,
+            drawer_open: true,
+            dialog_area: true,
+            focus: 0,
             ..View::default()
         };
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
@@ -857,7 +858,7 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
                 .iter()
                 .map(|cell| cell.symbol())
                 .collect();
-            assert!(text.contains("Move folder"), "{width}x{height}");
+            assert!(text.contains("Zoom"), "{width}x{height}");
             assert!(text.contains("Esc close"));
             view.help_selected = 0;
             terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
@@ -946,9 +947,7 @@ async fn unlinked_rows_use_explicit_undimmed_labels_and_footer_preserves_primary
                         .collect::<String>()
                 };
                 let footer = (21..24).map(line).collect::<Vec<_>>().join("\n");
-                let upper = (21..24)
-                    .find(|&row| line(row).contains(if width < 15 { "? · q" } else { "? Help" }))
-                    .unwrap();
+                let upper = (21..24).find(|&row| line(row).contains("Alt+`")).unwrap();
                 assert!(
                     line(upper + 1).contains(if width >= 80 {
                         "Enter Embedded"
@@ -999,10 +998,19 @@ async fn information_modal_is_requested_pinned_scrollable_and_blocks_browser_act
     let session = browser.visible()[0].clone();
     browser.selected = Some(session.key.clone());
     let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
-    let mut view = View::default();
+    let mut view = View {
+        drawer_open: true,
+        dialog_area: true,
+        focus: 0,
+        ..View::default()
+    };
     handle_key(&mut browser, &mut view, key(KeyCode::Char('i')));
     assert!(view.info.is_none());
-    view.focus = 1;
+    handle_key(
+        &mut browser,
+        &mut view,
+        KeyEvent::new(KeyCode::Char('`'), KeyModifiers::ALT),
+    );
     handle_key(&mut browser, &mut view, key(KeyCode::Char('i')));
     assert!(view.info.is_some());
     let folder = browser.folder.clone();
@@ -1066,8 +1074,14 @@ async fn information_modal_is_requested_pinned_scrollable_and_blocks_browser_act
             Action::CloseInformation
         );
     }
-    view.help = true;
-    view.help_selected = 14; // Session information; Recover is hidden.
+    handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
+    view.help_selected = view
+        .help_entries
+        .as_ref()
+        .unwrap()
+        .iter()
+        .position(|e| e.label == "Session information")
+        .unwrap();
     handle_key(&mut browser, &mut view, key(KeyCode::Enter));
     assert!(view.info.is_some());
     assert!(!view.help);
@@ -1211,6 +1225,8 @@ async fn idle_color_is_shared_by_sessions_search_info_and_folder_ancestors() {
     let pale = Color::Rgb(255, 255, 170);
     for surface in 0..3 {
         if surface == 1 {
+            view.drawer_open = false;
+            view.focus = 1;
             view.editing = true;
         }
         if surface == 2 {
@@ -1231,6 +1247,10 @@ async fn idle_color_is_shared_by_sessions_search_info_and_folder_ancestors() {
             "surface {surface}"
         );
         if surface == 0 {
+            view.drawer_open = true;
+            view.focus = 0;
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            let buffer = terminal.backend().buffer();
             assert!(
                 buffer
                     .content
@@ -1279,7 +1299,7 @@ async fn footer_shares_feedback_only_when_display_width_leaves_a_gap() {
                 let top = if separate { 27 } else { 28 };
                 let shared_start = width - shared.width() as u16;
                 let buffer = terminal.backend().buffer();
-                assert_eq!(buffer[(shared_start, top)].symbol(), "?");
+                assert_eq!(buffer[(shared_start, top)].symbol(), "A");
                 assert!(line(&terminal, top).ends_with(&shared));
                 assert!(line(&terminal, top + 1).ends_with(&context));
                 if !message.is_empty() {
@@ -1569,7 +1589,18 @@ async fn inventory_failure_and_recovery_render_staleness_without_losing_worktree
         };
         browser.apply_inventory(browser.git_generation, id.clone(), result);
         terminal
-            .draw(|frame| draw(frame, &browser, &View::default()))
+            .draw(|frame| {
+                draw(
+                    frame,
+                    &browser,
+                    &View {
+                        drawer_open: true,
+                        dialog_area: true,
+                        focus: 0,
+                        ..View::default()
+                    },
+                )
+            })
             .unwrap();
         let text: String = terminal
             .backend()
@@ -1851,13 +1882,15 @@ async fn folder_pane_scrolls_whole_tree_and_resets_for_short_selection_and_resiz
     browser.open_folder(path.clone());
     let view = View {
         focus: 0,
+        drawer_open: true,
+        dialog_area: true,
         ..View::default()
     };
     for width in [100u16, 140, 160, 240, 80] {
         browser.folder = FolderFilter::Path(path.clone());
         let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
         terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-        let pane_width = if width >= 160 {
+        let pane_width = if width >= 120 {
             let divider = (0..width)
                 .find(|x| terminal.backend().buffer()[(*x, 0)].symbol() == "┓")
                 .unwrap()
@@ -1880,7 +1913,7 @@ async fn folder_pane_scrolls_whole_tree_and_resets_for_short_selection_and_resiz
             terminal.backend().buffer()[(pane_width - 1, 0)].symbol(),
             "┓"
         );
-        if width >= 160 {
+        if width >= 120 {
             assert_eq!(terminal.backend().buffer()[(pane_width, 0)].symbol(), "┌");
         }
         let before = lines(&terminal);
@@ -2090,6 +2123,8 @@ async fn focused_folder_ui_shows_scope_and_blocks_navigation_above_root() {
     browser.open_folder("/focused/project".into());
     let mut view = View {
         focus: 0,
+        drawer_open: true,
+        dialog_area: true,
         ..View::default()
     };
     handle_key(

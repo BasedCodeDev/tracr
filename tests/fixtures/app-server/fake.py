@@ -73,15 +73,22 @@ if len(sys.argv) > 1 and sys.argv[1] in ('resume', '--cd'):
     tty.setraw(0)
     def report_size(*_):
         if settings.get('report_size'):
-            size = os.get_terminal_size(0)
-            record = home / 'terminal-size.tmp'
-            record.write_text(json.dumps(dict(columns=size.columns, rows=size.lines, pid=os.getpid())))
-            record.replace(home / 'terminal-size.json')
+            # Rapid drawer/fullscreen changes can deliver nested SIGWINCH signals.
+            previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGWINCH})
+            try:
+                size = os.get_terminal_size(0)
+                record = home / f'terminal-size-{os.getpid()}.tmp'
+                record.write_text(json.dumps(dict(columns=size.columns, rows=size.lines, pid=os.getpid())))
+                record.replace(home / 'terminal-size.json')
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous)
     signal.signal(signal.SIGWINCH, report_size)
     report_size()
-    (home / 'launch.json').write_text(json.dumps(dict(
+    launch_record = home / f'launch-{os.getpid()}.tmp'
+    launch_record.write_text(json.dumps(dict(
         args=sys.argv[1:], cwd=os.getcwd(), home=os.environ['CODEX_HOME'],
         foreground=os.tcgetpgrp(0) == os.getpgrp(), pid=os.getpid())))
+    launch_record.replace(home / 'launch.json')
     if settings.get('scroll_fixture'):
         height = os.get_terminal_size(0).lines
         os.write(1, f'\x1b[{height-1};1HCOMPOSER\x1b[1;{height-2}r\x1b[{height-2};1H'.encode())

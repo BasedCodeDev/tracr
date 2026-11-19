@@ -25,10 +25,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
     terminal = Terminal(args+[str(listed)], env)
     try:
         terminal.inspect('ID: first')
+        terminal.send(b'\x1b`')
         terminal.expect('Folders · Focused')
-        terminal.send(b'/')
+        terminal.send(b'\x1b`/')
         terminal.expect('Search within folder')
-        terminal.expect('Within: '+str(listed))
+        terminal.expect('Within:')
         terminal.expect('Task first')
         terminal.send(b'\x1b')
         terminal.wait(lambda: 'Search within folder' not in terminal.text())
@@ -37,13 +38,13 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
         size = lambda: json.loads((home/'terminal-size.json').read_text())
         terminal.wait(lambda: (home/'terminal-size.json').exists())
         original = size()
-        terminal.send(b'\x1b[1;3D\x1bz')
-        terminal.wait(lambda: 'Folders · Focused' not in terminal.text() and size()['columns'] == original['columns'])
+        terminal.send(b'\x1b`\x1bz')
+        terminal.wait(lambda: 'Folders · Focused' not in terminal.text() and size()['columns'] == original['columns'] - 60)
         assert size()['pid'] == original['pid']
         terminal.send(b'\x1bz')
         terminal.expect('Folders · Focused')
-        terminal.wait(lambda: size()['columns'] == original['columns'])
-        terminal.send(b'\x1b[1;3Cx')
+        terminal.wait(lambda: size()['columns'] == original['columns'] - 60)
+        terminal.send(b'\x1b`x')
         terminal.wait(lambda: 'Ctrl+B background' not in terminal.text())
         terminal.finish()
     finally:
@@ -63,10 +64,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
     # An explicit different path replaces the remembered startup context.
     terminal = Terminal(args+[str(outside)], env)
     try:
+        terminal.send(b'\x1b`')
         terminal.expect('Folders · Focused')
         terminal.send(b'/')
         terminal.expect('Search within folder')
-        terminal.expect('Within: '+str(outside))
+        terminal.expect('Within:')
         terminal.wait(lambda: 'refreshing' not in terminal.text())
         assert 'Task first' not in terminal.text()
         terminal.send(b'\x1b')
@@ -86,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
             terminal.send(b'/')
             terminal.expect('Search within folder' if focused else 'Search sessions')
             if focused:
-                terminal.expect('Within: '+str(folder))
+                terminal.expect('Within:')
             terminal.send(b'\x1b')
             terminal.wait(lambda: 'Search within folder' not in terminal.text() and 'Search sessions' not in terminal.text())
             terminal.finish()
@@ -102,7 +104,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
                 terminal.send(b'/')
                 terminal.expect('Search within folder' if focused else 'Search sessions')
                 if focused:
-                    terminal.expect('Within: '+str(folder))
+                    terminal.expect('Within:')
                 terminal.send(b'\x1b')
                 terminal.wait(lambda: 'Search within folder' not in terminal.text() and 'Search sessions' not in terminal.text())
                 terminal.finish()

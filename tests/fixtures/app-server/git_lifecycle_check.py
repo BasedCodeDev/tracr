@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import termios
+import time
 from pty_support import Terminal
 
 binary = str(Path(sys.argv[1]).resolve())
@@ -84,17 +85,17 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
         terminal = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(executable), str(linked)], env)
         try:
             terminal.expect('Task first')
-            # This walkthrough exercises navigation across the complete tree.
-            terminal.send(b'\x1b[1;3D\x1bz\x1b[1;3C')
-            terminal.wait(lambda: 'Folders · Focused' not in terminal.text())
             if action in ('presentation', 'follow', 'progressive', 'expansion-quit'):
-                terminal.resize(80, 139)
+                terminal.resize(48, 119)
+            # Open navigation without giving up the main session workspace.
+            terminal.send(b'\x1b`')
+            terminal.expect('Enter Sessions')
             if action == 'presentation':
                 terminal.expect('[remote: origin/main]')
                 terminal.expect('[tag: light] [tag: release]')
                 terminal.expect('[HEAD] [◇ feature]')
                 terminal.send(b'\t\x1b[C')
-                terminal.expect('b Collapse')
+                terminal.expect('i Commit info')
                 terminal.send(b'r')
                 terminal.wait(lambda: 'loading more' not in terminal.text())
                 terminal.send(b'f')
@@ -117,11 +118,16 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.send(b'f')
                 terminal.expect('[HEAD]')
                 terminal.wait(lambda: '> ● ' + subprocess.check_output([real_git, '-C', str(project), 'rev-parse', 'HEAD~200'], env=env).decode().strip()[:7] in terminal.text())
-                terminal.send(b'\x1b[Z');terminal.expect('Enter Embedded')
-                terminal.send(b'\x1b');terminal.expect('Enter Sessions')
-                terminal.send(b'\x1b[A')
+                terminal.send(b'\x1b[Z');terminal.expect('Enter Sessions')
+                terminal.send(b'\x1bz')  # Reveal the main checkout outside the focused worktree.
+                for direction in [b'\x1b[A'] * 10 + [b'\x1b[B'] * 30:
+                    if any(re.search(r'> .*project \(', terminal.line(row)) for row in range(terminal.dimensions[0])):
+                        break
+                    terminal.send(direction)
+                    deadline = time.monotonic() + .04
+                    terminal.wait(lambda: time.monotonic() >= deadline)
                 terminal.expect(f'[HEAD] [{main_branch}] History 299')
-                terminal.send(b'\x1b[B')
+                terminal.send(b'\x1b[C\x1b[B')
                 terminal.expect('[HEAD] [◇ feature] History 099')
                 terminal.finish()
                 return
@@ -159,61 +165,52 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
             if operation:
                 terminal.wait(lambda: bool(list(home.glob('pending-*'))))
             else:
-                terminal.expect('─ ◇ feature')
+                terminal.expect('◇ feature')
                 terminal.expect('Lifecy')
-                terminal.send(b'\x1b[1;3D')  # Alt+Left -> Folders
                 terminal.expect('Enter Sessions')
-                terminal.send(b'\x1b[1;3C')  # Alt+Right -> Sessions
-                terminal.expect('Enter Embedded')
-                terminal.send(b'\x1b[1;3C')  # Alt+Right -> Git
-                terminal.expect('b Collapse')
-                terminal.send(b'\x1b[1;3D')  # Alt+Left -> Sessions
-                terminal.expect('Enter Embedded')
                 terminal.send(b'\t')
-                terminal.expect('b Collapse')
-                assert 'Enter Embedded' not in terminal.text()
-                terminal.send(b'b')
+                terminal.expect('i Commit info')
+                terminal.send(b'\x1b`')
                 terminal.expect('Enter Embedded')
                 terminal.send(b'?')
                 terminal.expect('Open session embedded')
-                assert 'Expand Git history' not in terminal.text()
                 terminal.send(b'?')
                 terminal.wait(lambda: 'Actions & shortcuts' not in terminal.text())
-                terminal.send(b'\t')
+                terminal.send(b'\x1b`')
                 terminal.expect('Lifecy')
-                terminal.expect('b Collapse')
                 terminal.resize(8, 80)
                 terminal.expect('Git')
                 terminal.resize(80, 240)
                 terminal.expect('Lifecy')
                 terminal.send(b'\t')
                 terminal.expect('Enter Sessions')  # Tab already focuses Folders.
-                terminal.send(b'\x1b[A')
-                terminal.wait(lambda: re.search(r'> [│ ]*[├└]─ project', terminal.text()) is not None)
-                terminal.send(b'\x1b[B\r')
+                terminal.send(b'\r')
                 terminal.expect('Task first')
             pids = [int(p.name.split('-')[1]) for p in home.glob('pending-*')]
             if action in ('walkthrough', 'handoff'):
-                terminal.send(b'\r')
+                terminal.send(b'\x1b`\r')
                 terminal.wait(lambda: (home / 'launch.json').exists())
                 launch = json.loads((home / 'launch.json').read_text())
                 assert launch['cwd'] == str(linked), launch
                 assert launch['foreground'], launch
                 # Inline sessions keep discovery and filesystem monitoring alive.
                 terminal.expect('Ctrl+B background')
-                assert 'Folders' in terminal.text()
+                terminal.send(b'\x1b`')
+                terminal.expect('Enter Sessions')
                 assert os.tcgetpgrp(terminal.master) == terminal.child.pid
                 if action == 'walkthrough':
                     # Preserve the selected folder while removing its Git registration.
                     (linked / '.git').unlink()
                     git('worktree', 'prune', '--expire', 'now')
                 mark = len(terminal.output)
-                terminal.send(b'x')
+                terminal.send(b'\x1b`x')
                 terminal.wait(lambda: b'Sessions' in terminal.output[mark:])
                 terminal.expect('Task first')
                 if action == 'walkthrough':
                     terminal.wait(lambda: '─ ◇ feature' not in terminal.text())
                 else:
+                    terminal.send(b'\x1b`')  # Reopening resumes visible-history reads.
+                    terminal.expect('Enter Sessions')
                     terminal.wait(lambda: len(list(home.glob('pending-*'))) > len(pids))
                 terminal.send(b'q')
             elif action == 'sigterm':

@@ -61,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-') as tmp:
             os.write(master, b'\r')
             if path == '.':
                 deadline = time.monotonic() + 10
-                while b'cannot' not in output:
+                while b'fixture data is browse-only' not in output:
                     assert time.monotonic() < deadline, bytes(output[-2000:])
                     if select.select([master], [], [], .05)[0]:
                         output.extend(os.read(master, 65536))
