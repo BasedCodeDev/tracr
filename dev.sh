@@ -3,23 +3,23 @@
 set -euo pipefail
 
 caller_dir="$PWD"
-project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     cat <<'USAGE'
-Usage: ./scripts/dev.sh [--once] [--] [tracr arguments...]
+Usage: ./dev.sh [--once] [--] [tracr arguments...]
 
 No arguments: build and browse your live Codex sessions, rebuilding on source edits.
 Use --once to build and run without watching. Watch mode requires Python 3.
-  ./scripts/dev.sh                    Browse your live Codex sessions
-  ./scripts/dev.sh .                  Browse this folder and its subfolders
-  ./scripts/dev.sh browse --fixture tests/fixtures/sessions/catalog.json
-  ./scripts/dev.sh list --json        Print your live inventory as JSON
-  ./scripts/dev.sh list --fixture tests/fixtures/sessions/catalog.json --json
+  ./dev.sh                    Browse your live Codex sessions
+  ./dev.sh .                  Browse this folder and its subfolders
+  ./dev.sh browse --fixture tests/fixtures/sessions/catalog.json
+  ./dev.sh list --json        Print your live inventory as JSON
+  ./dev.sh list --fixture tests/fixtures/sessions/catalog.json --json
 
 Run from any directory; application paths are relative to your calling directory.
 Set TRACR_TOOLCHAIN to select an installed rustup toolchain explicitly.
-Use ./scripts/dev.sh -- --help for tracr's own help.
+Use ./dev.sh -- --help for tracr's own help.
 USAGE
     exit 0
 fi

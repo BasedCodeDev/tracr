@@ -70,9 +70,9 @@ also use `cargo install --path . --locked` from a checkout.
 For the shortest build-and-run workflow:
 
 ```sh
-./scripts/dev.sh                  # Build and browse live Codex sessions
-./scripts/dev.sh .                # Build and browse the current folder
-./scripts/dev.sh list --json      # Build and print the live inventory
+./dev.sh                  # Build and browse live Codex sessions
+./dev.sh .                # Build and browse the current folder
+./dev.sh list --json      # Build and print the live inventory
 ```
 
 The script works from any directory, finds rustup in the Cargo bin directory,
@@ -80,7 +80,7 @@ uses the pinned toolchain when installed (otherwise installed stable), generates
 `Cargo.lock` on the first run, and builds with `--locked` before launching.
 Application paths resolve relative to the directory you launch the script from. Set `TRACR_TOOLCHAIN` to
 override toolchain selection. The first build needs crates.io connectivity.
-Use `./scripts/dev.sh --help` for script options or `./scripts/dev.sh -- --help`
+Use `./dev.sh --help` for script options or `./dev.sh -- --help`
 for the application's help.
 
 Interactive browsing watches source files by default (requires Python 3). Saving a
@@ -92,7 +92,7 @@ Reload waits for interactive Codex sessions and running file/session operations
 to finish. Temporary UI state resets; the existing saved-folder behavior applies.
 Quitting tracr exits the watcher, and commands such as `list --json` run once.
 
-Use `./scripts/dev.sh --once [arguments...]` for the original build-and-run
+Use `./dev.sh --once [arguments...]` for the original build-and-run
 workflow without Python or watching. Runner options must precede application arguments; `--` ends runner option
 parsing and the remaining arguments are passed unchanged to tracr. Non-terminal
 invocations also use the one-shot workflow. The watcher checks `src/`, Cargo
@@ -574,7 +574,7 @@ workspaces remain blocked. A permission-profile
 rejection means tracr does not yet support moving that session with its current
 permission settings; it does not mean you selected the wrong folder.
 
-To test built-in-profile support from this checkout, run `./scripts/dev.sh .`.
+To test built-in-profile support from this checkout, run `./dev.sh .`.
 Restarting an older installed binary does not load these source changes.
 
 Failures remain in a **Couldn't relink session** dialog until you press Enter or

@@ -15,7 +15,7 @@ def snapshot(root):
     paths = list((root / 'src').rglob('*'))
     paths += [root / name for name in (
         'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'build.rs',
-        '.cargo/config.toml', 'scripts/dev.sh', 'scripts/dev_watch.py',
+        '.cargo/config.toml', 'dev.sh', 'scripts/dev_watch.py',
         'scripts/toolchain.sh')]
     result = {}
     for path in paths:

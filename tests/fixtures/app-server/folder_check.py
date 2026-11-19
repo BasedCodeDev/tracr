@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-') as tmp:
                              archived=False, source_kind=None, git=None))
     fixture = root / 'catalog.json'
     fixture.write_text(json.dumps(dict(page_size=1, sessions=sessions)))
-    for runner, path in [(binary, '.'), (binary, 'missing'), (str(project / 'scripts/dev.sh'), '.')]:
+    for runner, path in [(binary, '.'), (binary, 'missing'), (str(project / 'dev.sh'), '.')]:
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 35, 150, 0, 0))
         original = termios.tcgetattr(slave)
