@@ -255,6 +255,12 @@ pub struct View {
     pub error_dialog: Option<crate::error_dialog::ErrorDialog>,
 }
 impl View {
+    fn coalesce_navigation(&self) -> bool {
+        !self.modal_open()
+            && !self.terminals.borrow().has_overlay()
+            && !(self.terminal_focused() && self.terminals.borrow().active.is_some())
+    }
+
     fn modal_open(&self) -> bool {
         self.terminal_recovery.is_some()
             || self.error_dialog.is_some()
@@ -4339,7 +4345,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if view.terminals.borrow().input_backlogged() {tokio::time::sleep(wait).await;}
             else if input_reader.poll(wait)? {
                 idle.wake();
-                let packet=input_reader.read()?;
+                let packet=if view.coalesce_navigation() { input_reader.read_navigation()? } else { input_reader.read()? };
                 let incoming=packet.event;
                 if matches!(incoming, Event::FocusGained | Event::FocusLost) {
                     outer_focused = matches!(incoming, Event::FocusGained);
@@ -4632,6 +4638,27 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
 #[cfg(test)]
 mod cleanup_tests {
     use super::*;
+
+    #[test]
+    fn navigation_coalescing_is_only_for_main_lists() {
+        let mut view = View::default();
+        for (focus, git_focus) in [(0, false), (1, false), (1, true)] {
+            view.focus = focus;
+            view.git_focus = git_focus;
+            assert!(view.coalesce_navigation());
+            view.editing = true;
+            assert!(!view.coalesce_navigation());
+            view.editing = false;
+            view.help = true;
+            assert!(!view.coalesce_navigation());
+            view.help = false;
+        }
+        view.git_focus = false;
+        view.terminals.borrow_mut().active = Some(1);
+        assert!(!view.coalesce_navigation());
+        view.focus = 0;
+        assert!(view.coalesce_navigation());
+    }
 
     fn press(browser: &mut Browser, view: &mut View, code: KeyCode) {
         handle_key(browser, view, KeyEvent::new(code, KeyModifiers::NONE));
