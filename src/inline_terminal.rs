@@ -8,7 +8,9 @@ use ratatui::{
     Frame,
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Row, Table, TableState},
+    widgets::{
+        Block, BorderType, Borders, Clear, Padding, Paragraph, Row, Table, TableState, Wrap,
+    },
 };
 use std::{
     fs::{File, OpenOptions},
@@ -964,16 +966,49 @@ impl Manager {
         }
         true
     }
-    fn draw_navigator(&self, frame: &mut Frame<'_>, browser: &crate::browser::Browser) {
+    fn draw_terminal_dialog(&self, frame: &mut Frame<'_>, browser: &crate::browser::Browser) {
         let screen = frame.area();
         let width = screen
             .width
             .saturating_sub(4)
             .min(110)
             .max(screen.width.min(12));
-        let height = (self.sessions.len().saturating_add(4).min(u16::MAX as usize) as u16)
-            .max(5)
-            .min(screen.height.saturating_sub(2).max(screen.height.min(3)));
+        let sessions: Vec<_> = self.sessions.iter().filter(|session| {
+            !matches!(self.confirmation, Some(Confirmation::Close(id)) if id != session.id)
+        }).collect();
+        let warning = match self.confirmation {
+            Some(Confirmation::Quit) => {
+                "Close all owned terminals and quit? Running work will stop."
+            }
+            Some(Confirmation::Close(_)) => "Close this terminal? Running work will stop.",
+            None => "",
+        };
+        let warning = Paragraph::new(warning)
+            .wrap(Wrap { trim: true })
+            .style(Style::default().add_modifier(Modifier::BOLD));
+        let padding_x = if width >= 30 {
+            2
+        } else if width >= 24 {
+            1
+        } else {
+            0
+        };
+        let warning_height = if self.confirmation.is_some() {
+            warning
+                .line_count(width.saturating_sub(2 + padding_x * 2).max(1))
+                .min(u16::MAX as usize) as u16
+        } else {
+            0
+        };
+        let max_height = screen.height.saturating_sub(2).max(screen.height.min(3));
+        let content_height = (sessions
+            .len()
+            .saturating_add(4)
+            .saturating_add(usize::from(warning_height))
+            .min(u16::MAX as usize) as u16)
+            .max(5);
+        let padding_y = u16::from(max_height >= content_height.saturating_add(2));
+        let height = content_height.saturating_add(padding_y * 2).min(max_height);
         let area = Rect::new(
             screen.x + (screen.width - width) / 2,
             screen.y + (screen.height - height) / 2,
@@ -985,23 +1020,37 @@ impl Manager {
             .borders(Borders::ALL)
             .border_type(BorderType::Thick)
             .border_style(Style::default().fg(Color::Cyan))
-            .title(format!(" Open terminals ({}) ", self.sessions.len()));
+            .padding(Padding::new(padding_x, padding_x, padding_y, padding_y))
+            .title(match self.confirmation {
+                Some(Confirmation::Quit) => {
+                    format!(" Close terminals and quit ({}) ", sessions.len())
+                }
+                Some(Confirmation::Close(_)) => " Close terminal ".to_owned(),
+                None => format!(" Open terminals ({}) ", sessions.len()),
+            });
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        let warning_height = warning_height.min(inner.height.saturating_sub(1));
+        if warning_height > 0 {
+            frame.render_widget(
+                warning,
+                Rect::new(inner.x, inner.y, inner.width, warning_height),
+            );
+        }
         let rows_area = Rect::new(
             inner.x,
-            inner.y,
+            inner.y + warning_height,
             inner.width,
-            inner.height.saturating_sub(1),
+            inner.height.saturating_sub(1 + warning_height),
         );
-        if self.sessions.is_empty() {
+        if sessions.is_empty() {
             frame.render_widget(
                 Paragraph::new("No open terminals").style(Style::default().fg(Color::DarkGray)),
                 rows_area,
             );
         } else {
-            let rows = self.sessions.iter().enumerate().map(|(index, s)| {
-                let branch = if index + 1 == self.sessions.len() {
+            let rows = sessions.iter().enumerate().map(|(index, s)| {
+                let branch = if index + 1 == sessions.len() {
                     "└─"
                 } else {
                     "├─"
@@ -1058,13 +1107,18 @@ impl Manager {
             frame.render_stateful_widget(
                 table,
                 rows_area,
-                &mut TableState::default().with_selected(Some(self.selected)),
+                &mut TableState::default()
+                    .with_selected(self.confirmation.is_none().then_some(self.selected)),
             );
         }
         if inner.height > 0 {
             frame.render_widget(
-                Paragraph::new("↑/↓ j/k Select · Enter Open · x Close · g/Esc Back")
-                    .style(Style::default().fg(Color::DarkGray)),
+                Paragraph::new(if self.confirmation.is_some() {
+                    "y Confirm · Esc/n Cancel"
+                } else {
+                    "↑/↓ j/k Select · Enter Open · x Close · g/Esc Back"
+                })
+                .style(Style::default().fg(Color::DarkGray)),
                 Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
             );
         }
@@ -1074,55 +1128,7 @@ impl Manager {
         if !self.picker && self.confirmation.is_none() {
             return;
         }
-        if self.confirmation.is_none() {
-            self.draw_navigator(frame, browser);
-            return;
-        }
-        let area = frame.area();
-        let area = Rect::new(
-            area.x + area.width / 10,
-            area.y + area.height / 10,
-            area.width * 8 / 10,
-            area.height * 8 / 10,
-        );
-        frame.render_widget(Clear, area);
-        let mut lines = Vec::new();
-        if let Some(c) = &self.confirmation {
-            lines.push(match c {
-                Confirmation::Quit => {
-                    "Close all owned terminals and quit? Running work will stop.".into()
-                }
-                Confirmation::Close(_) => "Close this terminal? Running work will stop.".into(),
-            });
-            lines.push("y Confirm · Esc Cancel".into());
-        }
-        for (index, s) in self.sessions.iter().enumerate() {
-            if matches!(&self.confirmation, Some(Confirmation::Close(id)) if *id != s.id) {
-                continue;
-            }
-            lines.push(format!(
-                "{} #{} {}{}",
-                if index == self.selected { ">" } else { " " },
-                s.id,
-                crate::browser::safe_text(&s.title),
-                if s.stopping.is_some() {
-                    " (closing)"
-                } else {
-                    ""
-                }
-            ));
-        }
-        if self.sessions.is_empty() {
-            lines.push("No open terminals".into());
-        }
-        frame.render_widget(
-            Paragraph::new(lines.join("\n")).block(
-                Block::default()
-                    .title(" Open terminals ")
-                    .borders(Borders::ALL),
-            ),
-            area,
-        );
+        self.draw_terminal_dialog(frame, browser);
     }
 }
 fn color(c: vt100::Color) -> Color {
@@ -2020,6 +2026,43 @@ time.sleep(60)
             .input(&key(KeyCode::Char('x'), KeyModifiers::NONE))
             .unwrap();
         assert!(matches!(manager.confirmation, Some(Confirmation::Close(_))));
+        for quit in [false, true] {
+            if quit {
+                manager.confirmation = Some(Confirmation::Quit);
+            }
+            for (width, height) in [(100, 12), (35, 12), (12, 5), (1, 1)] {
+                let mut terminal =
+                    ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+                        .unwrap();
+                terminal
+                    .draw(|frame| manager.draw_overlay(frame, &browser))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                if width >= 35 {
+                    let text = buffer
+                        .content
+                        .iter()
+                        .map(|cell| cell.symbol())
+                        .collect::<String>();
+                    assert!(text.contains("Second"));
+                    assert_eq!(text.contains("First"), quit);
+                    assert_eq!(text.contains("Last 界"), quit);
+                    assert!(text.contains("y Confirm · Esc/n Cancel"));
+                    assert!(
+                        buffer
+                            .content
+                            .iter()
+                            .any(|cell| cell.symbol() == "┏" && cell.fg == Color::Cyan)
+                    );
+                    assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
+                    if width == 100 {
+                        assert!(text.contains("Running work will stop."));
+                        assert!(text.contains("terminal"));
+                        assert!(text.contains("open"));
+                    }
+                }
+            }
+        }
         manager
             .input(&key(KeyCode::Esc, KeyModifiers::NONE))
             .unwrap();
