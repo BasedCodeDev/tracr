@@ -531,11 +531,13 @@ impl Decoder {
 #[derive(Default)]
 pub struct Reader {
     decoder: Decoder,
+    navigation_release: Option<KeyCode>,
 }
 impl Reader {
     /// Read a main-list navigation run without replaying stale held-key input.
     /// Other consumers (especially child terminals) must use `read` unchanged.
     pub fn read_navigation(&mut self) -> io::Result<Input> {
+        self.navigation_release = None;
         let mut packet = self.read()?;
         let Event::Key(first) = packet.event else {
             return Ok(packet);
@@ -568,6 +570,7 @@ impl Reader {
             let released =
                 matches!(&next.event, Event::Key(key) if key.kind == KeyEventKind::Release);
             if released {
+                self.navigation_release = Some(first.code);
                 if first.kind == KeyEventKind::Repeat {
                     packet = next;
                 }
@@ -576,6 +579,10 @@ impl Reader {
             }
         }
         Ok(packet)
+    }
+
+    pub fn take_navigation_release(&mut self) -> Option<KeyCode> {
+        self.navigation_release.take()
     }
 
     pub fn enhanced(&self) -> bool {
@@ -944,6 +951,7 @@ mod tests {
         // A boundary avoids touching real stdin in these transport tests.
         ready.push_back(Event::FocusLost.into());
         Reader {
+            navigation_release: None,
             decoder: Decoder {
                 ready,
                 enhanced,
@@ -971,6 +979,8 @@ mod tests {
             let mut reader = navigation_reader(events, true);
             let packet = reader.read_navigation().unwrap();
             assert_eq!(packet.key.unwrap().kind, KeyEventKind::Release);
+            assert_eq!(reader.take_navigation_release(), Some(code));
+            assert_eq!(reader.take_navigation_release(), None);
             assert!(matches!(reader.read().unwrap().event, Event::FocusLost));
         }
     }
@@ -995,6 +1005,7 @@ mod tests {
                 reader.read_navigation().unwrap().key.unwrap().kind,
                 KeyEventKind::Press
             );
+            assert_eq!(reader.take_navigation_release(), Some(KeyCode::Down));
         }
         assert!(matches!(reader.read().unwrap().event, Event::FocusLost));
         let mut reader = navigation_reader(vec![repeat; 1000], true);
