@@ -13,7 +13,7 @@ for attached in [False,True]:
         root=Path(tmp);home=root/'codex';home.mkdir()
         old=root/'old';old.mkdir();new=root/'new';new.mkdir()
         (home/'native.json').write_text(json.dumps({'cwd':str(old),'loaded':True,'attached':attached,'release_delay':.4}))
-        env={'HOME':str(root),'XDG_STATE_HOME':str(root/'state'),'PATH':'/usr/bin:/bin'}
+        env={'HOME':str(root),'XDG_STATE_HOME':str(root/'state'),'PATH':'/usr/bin:/bin','GIT_CEILING_DIRECTORIES':str(root),'TMPDIR':str(root)}
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         try:
             t.inspect('ID: session');t.expect('Idle')
@@ -42,7 +42,7 @@ for scenario in ['retry','stale','terminals']:
     with tempfile.TemporaryDirectory(prefix='tracr-loaded-retry-') as tmp:
         root=Path(tmp);home=root/'codex';home.mkdir();old=root/'old';old.mkdir();new=root/'new';new.mkdir()
         native=home/'native.json';native.write_text(json.dumps({'cwd':str(old),'loaded':True,'attached':True,'release_delay':.2}))
-        env={'HOME':str(root),'XDG_STATE_HOME':str(root/'state'),'PATH':'/usr/bin:/bin'}
+        env={'HOME':str(root),'XDG_STATE_HOME':str(root/'state'),'PATH':'/usr/bin:/bin','GIT_CEILING_DIRECTORIES':str(root),'TMPDIR':str(root)}
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         try:
             t.inspect('ID: session');t.expect('Idle');t.send(b'm');t.expect('Use this folder')

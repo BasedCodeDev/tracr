@@ -29,7 +29,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-stash-history-') as directory:
     terminal = Terminal([binary, 'browse', '--fixture', str(fixture), str(project)], env)
     try:
         terminal.expect('Sessions')
-        terminal.resize(80, 139)  # Keep complete stash labels visible.
+        terminal.resize(80, 119)  # Keep complete stash labels visible.
+        terminal.send(b'\x1b`')
         terminal.expect('Stash fixture base')
         (project/'tracked').write_text('first')
         git('stash', 'push', '-m', 'Older saved work')
@@ -54,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-stash-history-') as directory:
         terminal.expect('Newer saved work')
         terminal.resize(24, 60)
         terminal.expect('[stash@{0}]')
-        terminal.resize(80, 139)
+        terminal.resize(80, 119)
         git('stash', 'clear')
         terminal.wait(lambda: '[stash@{' not in terminal.text())
         terminal.expect('Stash fixture base')

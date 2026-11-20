@@ -209,14 +209,17 @@ or reservation; activity can change immediately after it is read.
 A terminal is required on stdin and stdout; use `tracr list` in pipelines.
 
 Use `tracr .`, `tracr ~/Work/Seb.SysAdmin`, or `tracr browse PATH` to select a
-folder immediately, showing only sessions recorded directly there. The session
-pane starts focused: choose a session and press Enter to resume. Without a path, tracr restores the last visited folder; the first launch starts in your current directory. You can
-navigate to other folders or search globally; selecting a result opens its folder.
+folder immediately, showing only sessions recorded directly there. The Tracr
+drawer starts expanded with Folders focused: press Enter to open the folder’s
+sessions. Without a path, tracr restores the last visited folder; the first launch
+starts in your current directory. You can navigate to other folders or search
+globally; selecting a result opens its folder.
 
 In Folders or Sessions, press **n** or choose **Create new session** from `?` to
 start a new session in the selected folder, including folders with existing
-sessions. From Folders, the new session opens full-screen; from Sessions, it
-opens embedded.
+sessions. Starting creation focuses Sessions immediately;
+any harness picker or launch error appears there. The new coding session fills
+the screen and receives keyboard input.
 When no sessions are shown, Enter also creates a session; otherwise Enter resumes
 the selected session.
 This opens Codex interactively in that folder and returns to tracr when you exit.
@@ -266,41 +269,42 @@ are hidden unless independently referenced by ordinary history or a checkout.
 Stash rows are read-only: Enter describes the stash, and worktree creation is
 unavailable. Creating or removing stashes refreshes the history automatically.
 
-The folder and session panes show partial results while loading.
-Sessions starts focused, with both available side panels expanded. At 160 columns
-and 12 rows or larger, Folders sits on the left, Sessions in the center, and Git
-Worktrees on the right. Otherwise, terminals at least 80 columns by 48 rows stack
-Folders above Sessions above Git. Smaller terminals show only the focused panel.
-Tab cycles through Folders, Sessions, and Git (when available); Shift+Tab reverses it.
+Sessions is the main workspace. Tracr starts with the drawer expanded and Folders
+focused so the current location is visible. Press
+**Alt+backtick** (the key below Escape, no Shift needed) to toggle the drawer. Alt+tilde
+also works. The shortcut works while coding and over dialogs.
 
-- Up / Down or `k/j`: select the previous / next item. In Folders, Right / `l`
-  expands a collapsed folder without changing selection; when already expanded,
-  it focuses Sessions for that folder. Left / `h` collapses the folder or selects
-  its displayed parent. Enter opens the only session embedded, or creates one
-  embedded when the folder has none. With multiple sessions, it focuses the
-  session list. While discovery is incomplete, it only focuses Sessions.
-  Left, Escape, or Backspace returns to Folders from Sessions.
-  Right and `h/l` do nothing in Sessions.
-- `b` in Folders or Git collapses that panel and returns focus to Sessions.
-  Collapsed panels leave a two-column rail in the wide layout or a one-row strip
-  in the stacked layout. Navigating to a collapsed panel reopens it. Selection,
-  expanded folders, and Git scroll positions are preserved. Collapse choices last
-  for the current run; resizing does not reset them.
-- Alt+Left/Right moves between adjacent panels in the wide layout; Alt+Up/Down
-  does so in the stacked layout. Both pairs work in single-panel mode. Directions
-  do not wrap; unused directions do nothing. These shortcuts do nothing during
-  dialogs, search, or resume preparation.
-- Tab cycles Folders → Sessions → Git → Folders; Shift-Tab reverses the order.
-  Without a Git panel, both keys switch between Folders and Sessions. Entering
-  Git expands collapsed history, and leaving preserves its expansion state.
-  Page Up / Page Down select the first / last item in lists, including folders,
-  sessions, search results, and pickers.
+At 120 columns and 12 rows or larger, the drawer opens on the left and the coding
+area resizes beside it. While browsing sessions, the drawer stays visible and
+Alt+backtick switches keyboard focus between Sessions and the remembered drawer
+panel. Starting a coding session hides the drawer; returning to the session list
+restores it. The drawer uses 40% of the width, capped at 60 columns.
+Smaller terminals show the drawer full-screen. Opening and closing is immediate.
+Folders appears above the existing Git Worktrees graph, which is available only
+in a repository. Folders uses one-third of the drawer height when Git is present.
+With fewer than 12 content rows, only the focused drawer panel is shown.
+
+- Input belongs to the focused area. **Tab / Shift+Tab** switch between
+  Folders and Git; Alt+Up/Left selects Folders and Alt+Down/Right selects Git.
+- **Right Arrow** from either drawer panel focuses the session area.
+- **Escape** closes a dialog or search first, then focuses Sessions. The drawer stays
+  visible beside the session list on wide screens.
+- Up / Down or `k/j` selects items. In Folders, `l` expands a folder;
+  Left / `h` collapses it or selects its displayed parent.
+- Enter opens the only session, or starts creation when a folder has no
+  sessions. With multiple sessions, the main view shows the list. The drawer
+  hides for coding; focus moves to the session or session list. Incomplete discovery
+  does not start a session automatically.
+- Drawer selection and scroll positions survive toggles and terminal resizes.
+  Dialogs belong to the area that opened them: toggling preserves unfinished
+  forms in both areas. Background operations continue and their results return
+  to the originating area.
+- Page Up / Page Down select the first / last item in lists, search results, and pickers.
 - In Git history, Page Up / Page Down (or Home / End) selects the first / last loaded commit or session; approaching
-  the end loads more history. Left / Right or `h/l` scrolls horizontally. Manual movement
+  the end loads more history. Left or `h` scrolls left; `l` scrolls right. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
-  root follows HEAD automatically. `b` collapses Git and focuses Sessions;
-  Escape also returns to Sessions. Leaving Git preserves its expansion state
-  across folders for this run.
+  root follows HEAD automatically. Escape focuses Sessions; returning to the drawer
+  restores the selected drawer panel.
   The top-right `↑` border marker indicates rows above the preview; the
   bottom-right `↓` indicates rows below it or more history available to load.
 - In Git history (WorkTrees), `i` opens information for the highlighted commit:
@@ -409,17 +413,16 @@ visibility affects folder counts and search.
 
 Refresh retains old results while new pages load; failed sources remain visibly
 incomplete. A successful refresh removes records no longer listed by that source.
-Folders, Sessions, and Git history each have their own
-action context: only the focused pane is highlighted, and its footer and `?` menu
-show the applicable actions. Git offers Collapse/Expand and, when expanded,
-commit navigation and horizontal scrolling. Small terminals show only the focused panel. The footer and `?` action menu
-follow the selected pane: folder expansion and moving belong to Folders; resume,
-Info, and relinking belong to Sessions. Shared controls stay in the same order,
-with Help and Quit first. Both action rows are right-aligned. Feedback shares
-the upper row on the left when it fits; otherwise it gets a third row.
-Narrow terminals omit trailing footer hints; the full
-set remains available in `?`. Recovery is shared by both panes.
- Press **i** in Sessions, or
+Folders and Git history have their own actions inside the drawer; Sessions has
+its actions in the main workspace. Only the focused panel is highlighted. Git
+provides commit navigation and horizontal scrolling. The footer and `?` menu
+follow the active area: folder expansion and moving belong to Folders; resume,
+Info, and relinking belong to Sessions. The first footer row keeps the drawer
+shortcut visible, with Help, Quit, and recovery shortcuts when space permits.
+The second row shows contextual actions. Long feedback moves to a separate row.
+The full action set remains available in `?`.
+
+Press **i** in Sessions, or
 choose **Session information** in the action menu, to open a centered information
 modal. Use arrows, PageUp/PageDown, Home/End to scroll, **c** to copy the information,
 and **i**, Enter, or Escape to close it. The selected session and pane are preserved.
@@ -453,20 +456,18 @@ If the destination changed since it was displayed, review it and press Enter aga
 Escape cancels preparation. Archived sessions and fixtures remain browse-only.
 
 Codex receives the selected source's `CODEX_HOME` and an explicit working directory.
-Enter opens the selected session embedded in the Sessions workspace, keeping
-other panels visible when space permits. **Alt+F** on a highlighted session opens
-it full-screen. The open-terminals picker uses the same shortcuts when reattaching
-a running terminal.
-Once a terminal is displayed, **Alt+F** toggles between embedded and full-screen
-from Sessions, Folders, or Git history, focusing it without restarting the process.
-The action menu also offers full-screen and embedded opening.
-**Ctrl+B** returns to the list. In embedded mode, **Tab / Shift+Tab** cycle
-Tracer panes. In full-screen mode, they reach Codex for completion, context, or
-other application actions without revealing the panels. Use **Alt+F** to return
-to embedded mode before using Tab to navigate panels. Tracer dialogs keep their
-own Tab navigation. **Alt+arrow keys** move panel focus in inline mode.
-In full-screen mode, they are forwarded to the session without revealing panels
-or leaving full-screen. Alt+Enter inside Codex is forwarded to Codex.
+Enter opens the selected session. The open-terminals picker also uses Enter to
+reattach a running terminal. With the drawer closed, coding fills the screen
+without Tracr borders or a footer. Until you use the drawer shortcut, a borderless
+`Alt+~` reminder appears for two seconds on the first coding screen of each launch,
+two rows down and four columns from the left. Using Alt+backtick or Alt+tilde
+retires this reminder across future launches. Opening the drawer shows the coding pane
+beside it on wide terminals, or just the drawer on smaller terminals.
+**Ctrl+B** backgrounds the displayed session without stopping it. From the drawer,
+this keeps the drawer open and preserves its focus; from coding, it returns to
+the session list. Dialogs retain input priority.
+**Alt+F**, **Tab / Shift+Tab**, **Alt+arrow keys**, and **Alt+Enter** reach Codex
+when coding owns input. Tracr dialogs retain their own Tab navigation.
 In Folders, **Alt+Z** zooms into the selected folder as the tree root, hiding ancestors
 and unrelated branches. Its descendants and displayed worktrees remain navigable,
 including worktrees outside that directory. Search is restricted to this context;
@@ -479,16 +480,10 @@ current directory for plain `tracr`). A new explicit launch path starts focused
 on that folder; a new plain-launch context restores the last visited folder with
 the full tree. Clearing focus is remembered too.
 
-Sidebar sizes depend on the window dimensions, so tree expansion, selection,
-and scrolling do not move the dividers. In the wide layout, Folders uses 24–32
-columns and Git uses 36–48; Sessions receives the remaining width. In the stacked
-layout, Folders uses 20% of the available height (up to 12 rows), and Git uses
-twice that height (up to 24 rows). Both shrink proportionally in shorter windows,
-leaving at least 40% for Sessions.
-Collapsing either panel gives its space to Sessions. Git is omitted outside a
-repository. Resizing changes the existing terminal dimensions without restarting Codex.
-The mouse wheel over a visible terminal scrolls its output history, even when
-Folders has keyboard focus. Up to 2,000 lines are kept per terminal. New output
+Drawer dimensions depend on the terminal size, so tree expansion, selection,
+and scrolling do not move the divider. Resizing changes the existing terminal
+without restarting Codex. Mouse input reaches the coding terminal only while
+the drawer is closed. Up to 2,000 lines are kept per terminal. New output
 keeps your reading position; typing or pasting returns to the live screen. An
 indicator appears while viewing older output. CLIs that request mouse reporting
 receive wheel events themselves; their alternate-screen behavior is respected.
@@ -516,8 +511,8 @@ Parent folders and worktrees have independent views. If a terminal exits, its
 folder returns to the session list. Choosing an open terminal from the terminal
 picker navigates to its folder.
 **Ctrl+B** backgrounds the terminal and remembers the session-list view for that folder; selecting an
-open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Tab / Shift+Tab** move focus between panels in embedded mode
-without backgrounding the terminal; input goes to whichever panel is focused.
+open session reattaches without restarting it. **Ctrl+C** still interrupts Codex. **Alt+backtick** toggles the drawer without backgrounding the terminal; input belongs
+to the drawer while open and returns to the coding area when closed.
 From the browser, press **g** for Open terminals (including newly started sessions).
 The navigator lists open terminals with aligned provider and status columns; use
 ↑/↓ or j/k to select, Enter to attach, and g or Escape to return.
@@ -541,6 +536,7 @@ Resume and inline PTY checks (no real sessions or inference):
 ```sh
 python tests/fixtures/app-server/resume_check.py target/debug/tracr
 python tests/fixtures/app-server/inline_check.py target/debug/tracr
+python tests/fixtures/app-server/drawer_check.py target/debug/tracr
 ```
 
 

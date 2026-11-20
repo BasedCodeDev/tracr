@@ -94,9 +94,47 @@ pub fn save_context(
     result
 }
 
+/// Learning is independent of folder preferences and survives their normal saves.
+pub fn drawer_shortcut_learned(browser_state: &Path) -> io::Result<bool> {
+    browser_state
+        .with_file_name("drawer-shortcut-learned")
+        .try_exists()
+}
+
+pub fn mark_drawer_shortcut_learned(browser_state: &Path) -> io::Result<()> {
+    let path = browser_state.with_file_name("drawer-shortcut-learned");
+    fs::create_dir_all(
+        path.parent()
+            .ok_or_else(|| io::Error::other("state path has no parent"))?,
+    )?;
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(file) => file.sync_all(),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shortcut_learning_survives_browser_saves_and_repeated_learning() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/browser-state.json");
+        assert!(!drawer_shortcut_learned(&path).unwrap());
+        mark_drawer_shortcut_learned(&path).unwrap();
+        mark_drawer_shortcut_learned(&path).unwrap();
+        save(&path, dir.path()).unwrap();
+        assert!(drawer_shortcut_learned(&path).unwrap());
+        let blocked = dir.path().join("blocked");
+        fs::write(&blocked, "file").unwrap();
+        assert!(mark_drawer_shortcut_learned(&blocked.join("browser-state.json")).is_err());
+    }
+
     #[test]
     fn focus_is_independent_per_launch_folder_and_preserves_legacy_state() {
         let dir = tempfile::tempdir().unwrap();

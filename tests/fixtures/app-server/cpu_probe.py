@@ -71,10 +71,11 @@ os.execv(os.environ['PROBE_GIT'], [os.environ['PROBE_GIT'], *sys.argv[1:]])
         try:
             term.expect('Build tracr')
             if case != 'plain':
+                term.send(b'\x1b`')
                 term.expect('[HEAD]')
             if case == 'hidden':
-                term.send(b'\tb')
-                term.expect('Enter Embedded')
+                term.send(b'\x1b`')
+                term.expect('Enter Open')
             pause(3)
             start_calls = len(calls())
             before = cpu()
@@ -88,7 +89,7 @@ os.execv(os.environ['PROBE_GIT'], [os.environ['PROBE_GIT'], *sys.argv[1:]])
             idle_calls = dict(Counter(calls()[start_calls:]))
             mark = len(term.output)
             response_start = time.monotonic()
-            term.send(b'\t')
+            term.send(b'\x1b`')
             term.wait(lambda: len(term.output) > mark)
             response_ms = round(1000*(time.monotonic()-response_start), 2)
             print(json.dumps(dict(binary=binary, case=case, sessions=args.sessions, seconds=round(elapsed,2),

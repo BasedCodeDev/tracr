@@ -202,10 +202,8 @@ fn session_lock(command: &LaunchCommand, key: &SessionKey) -> io::Result<Session
 pub struct Manager {
     sessions: Vec<Session>,
     folder_views: std::collections::BTreeMap<std::path::PathBuf, u64>,
-    displayed_folder: Option<std::path::PathBuf>,
     next_id: u64,
     pub active: Option<u64>,
-    pub fullscreen: bool,
     pub picker: bool,
     selected: usize,
     confirmation: Option<Confirmation>,
@@ -218,6 +216,12 @@ enum Confirmation {
     Quit,
     Close(u64),
 }
+#[derive(Default)]
+pub(crate) struct OverlayState {
+    picker: bool,
+    selected: usize,
+    confirmation: Option<Confirmation>,
+}
 pub struct ExitNotice {
     pub message: String,
     pub failed: bool,
@@ -229,6 +233,20 @@ pub enum Input {
     Quit,
 }
 impl Manager {
+    pub(crate) fn swap_overlay(&mut self, other: &mut OverlayState) {
+        std::mem::swap(&mut self.picker, &mut other.picker);
+        std::mem::swap(&mut self.selected, &mut other.selected);
+        std::mem::swap(&mut self.confirmation, &mut other.confirmation);
+    }
+
+    /// Return the displayed folder to its session list without stopping its process.
+    pub fn background(&mut self) {
+        if let Some(folder) = self.active_folder() {
+            self.folder_views.remove(&folder);
+        }
+        self.active = None;
+    }
+
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
@@ -238,10 +256,6 @@ impl Manager {
     /// Restore a folder's view without moving keyboard focus or restarting its PTY.
     pub fn sync_folder(&mut self, folder: Option<&std::path::Path>) {
         let next = folder.and_then(|path| self.folder_views.get(path)).copied();
-        if self.displayed_folder.as_deref() != folder || self.active != next {
-            self.fullscreen = false;
-        }
-        self.displayed_folder = folder.map(std::path::Path::to_owned);
         self.active = next;
     }
     pub fn active_folder(&self) -> Option<std::path::PathBuf> {
@@ -253,7 +267,6 @@ impl Manager {
     fn activate(&mut self, id: u64) {
         if let Some(s) = self.sessions.iter().find(|s| s.id == id) {
             self.folder_views.insert(s.folder.clone(), id);
-            self.fullscreen = false;
             self.active = Some(id);
         }
     }
@@ -377,7 +390,6 @@ impl Manager {
             }
         });
         self.next_id += 1;
-        self.fullscreen = false;
         self.active = Some(self.next_id);
         self.folder_views.insert(command.cwd.clone(), self.next_id);
         self.sessions.push(Session {
@@ -534,7 +546,6 @@ impl Manager {
                         was_active: self.active == Some(s.id),
                     });
                     if self.active == Some(s.id) {
-                        self.fullscreen = false;
                         self.active = None;
                     }
                     false
@@ -546,7 +557,6 @@ impl Manager {
                         was_active: self.active == Some(s.id),
                     });
                     if self.active == Some(s.id) {
-                        self.fullscreen = false;
                         self.active = None;
                     }
                     false
@@ -572,7 +582,6 @@ impl Manager {
         if self.is_empty() {
             true
         } else {
-            self.fullscreen = false;
             self.active = None;
             self.confirmation = Some(Confirmation::Quit);
             false
@@ -795,14 +804,9 @@ impl Manager {
                         self.selected =
                             (self.selected + 1).min(self.sessions.len().saturating_sub(1))
                     }
-                    KeyCode::Enter | KeyCode::Char('f')
-                        if key.kind == KeyEventKind::Press
-                            && (key.code == KeyCode::Enter
-                                || key.modifiers == KeyModifiers::ALT) =>
-                    {
+                    KeyCode::Enter if key.kind == KeyEventKind::Press => {
                         if let Some(s) = self.sessions.get(self.selected) {
                             self.activate(s.id);
-                            self.fullscreen = key.code != KeyCode::Enter;
                             self.picker = false;
                         }
                     }
@@ -816,42 +820,14 @@ impl Manager {
             }
             return Ok(Input::Consumed);
         }
-        // Embedded terminals reserve Tab for panel navigation; fullscreen forwards it.
-        if let Event::Key(key) = event {
-            if !self.fullscreen
-                && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
-                && (key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT)
-            {
-                if key.kind == KeyEventKind::Release {
-                    return Ok(Input::Consumed);
-                }
-                return Ok(Input::Pass);
-            }
-        }
-        // Inline sessions retain pane navigation; fullscreen sessions receive these keys.
-        if !self.fullscreen
-            && matches!(event, Event::Key(key) if key.modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down))
-        {
-            return Ok(Input::Pass);
-        }
         let Some(id) = self.active else {
             return Ok(Input::Pass);
         };
-        if matches!(event, Event::Key(key) if key.code == KeyCode::Char('f') && key.modifiers == KeyModifiers::ALT)
-        {
-            if matches!(event, Event::Key(key) if key.kind == KeyEventKind::Press) {
-                self.fullscreen = !self.fullscreen;
-            }
-            return Ok(Input::Consumed);
-        }
-
         if matches!(event, Event::Key(k) if k.kind != KeyEventKind::Release && k.code == KeyCode::Char('b') && k.modifiers.contains(KeyModifiers::CONTROL))
         {
-            if let Some(folder) = self.active_folder() {
-                self.folder_views.remove(&folder);
+            if matches!(event, Event::Key(key) if key.kind == KeyEventKind::Press) {
+                self.background();
             }
-            self.fullscreen = false;
-            self.active = None;
             return Ok(Input::Consumed);
         }
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
@@ -889,7 +865,7 @@ impl Manager {
         }
         Ok(Input::Consumed)
     }
-    pub fn draw(&mut self, frame: &mut Frame<'_>, area: Rect, focused: bool) -> bool {
+    pub fn draw(&mut self, frame: &mut Frame<'_>, area: Rect, focused: bool, framed: bool) -> bool {
         let border = Block::default()
             .borders(Borders::ALL)
             .border_type(if focused {
@@ -902,16 +878,12 @@ impl Manager {
             } else {
                 Color::DarkGray
             }))
-            .title(" Codex · Ctrl+B background · Tab/Shift+Tab panels · Alt+C copy ");
-        self.area = if self.fullscreen {
-            area
-        } else {
-            border.inner(area)
-        };
+            .title(" Codex · Ctrl+B background · Alt+` drawer · Alt+C copy ");
+        self.area = if framed { border.inner(area) } else { area };
         let Some(s) = self.sessions.iter_mut().find(|s| Some(s.id) == self.active) else {
             return false;
         };
-        if !self.fullscreen {
+        if framed {
             frame.render_widget(border, area);
         }
         let inner = self.area;
@@ -1091,10 +1063,8 @@ impl Manager {
         }
         if inner.height > 0 {
             frame.render_widget(
-                Paragraph::new(
-                    "↑/↓ j/k Select · Enter Embedded · Alt+F Full-screen · x Close · g/Esc Back",
-                )
-                .style(Style::default().fg(Color::DarkGray)),
+                Paragraph::new("↑/↓ j/k Select · Enter Open · x Close · g/Esc Back")
+                    .style(Style::default().fg(Color::DarkGray)),
                 Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
             );
         }
@@ -1670,45 +1640,40 @@ time.sleep(60)
     }
 
     #[test]
-    fn picker_opens_fullscreen_or_embedded_without_restarting() {
+    fn picker_enter_reattaches_without_restarting() {
         let mut manager = Manager::default();
         manager
             .launch(
                 &command("import time; time.sleep(60)"),
                 None,
-                "picker modes".into(),
+                "picker".into(),
             )
             .unwrap();
         let id = manager.active;
         let pid = manager.sessions[0].pid;
-        for (code, mods, fullscreen) in [
-            (KeyCode::Enter, KeyModifiers::NONE, false),
-            (KeyCode::Char('f'), KeyModifiers::ALT, true),
-        ] {
-            manager.active = None;
-            manager.picker = true;
-            let key = KeyEvent::new(code, mods);
-            for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
-                manager
-                    .input(&Event::Key(KeyEvent { kind, ..key }))
-                    .unwrap();
-                assert!(manager.picker);
-                assert!(manager.active.is_none());
-            }
-            manager.input(&Event::Key(key)).unwrap();
-            assert!(!manager.picker);
-            assert_eq!(manager.active, id);
-            assert_eq!(manager.fullscreen, fullscreen);
-            assert_eq!(manager.sessions[0].pid, pid);
+        manager.background();
+        manager.picker = true;
+        manager
+            .input(&key(KeyCode::Char('f'), KeyModifiers::ALT))
+            .unwrap();
+        assert!(manager.picker);
+        assert!(manager.active.is_none());
+        for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
             manager
-                .input(&Event::Key(KeyEvent::new(
-                    KeyCode::Char('f'),
-                    KeyModifiers::ALT,
+                .input(&Event::Key(KeyEvent::new_with_kind(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                    kind,
                 )))
                 .unwrap();
-            assert_eq!(manager.fullscreen, !fullscreen);
-            assert_eq!(manager.sessions[0].pid, pid);
+            assert!(manager.picker);
         }
+        manager
+            .input(&key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert!(!manager.picker);
+        assert_eq!(manager.active, id);
+        assert_eq!(manager.sessions[0].pid, pid);
     }
 
     #[test]
@@ -1747,14 +1712,14 @@ time.sleep(60)
         manager.sync_folder(Some(&a));
         assert_eq!(manager.active, None); // Ctrl+B is remembered.
         manager.activate(first);
-        manager.fullscreen = true;
+
         manager.sync_folder(Some(&a));
-        assert!(manager.fullscreen); // Merely staying in a folder changes nothing.
+
         manager.sync_folder(None);
         assert_eq!(manager.active, None);
         manager.sync_folder(Some(&a));
         assert_eq!(manager.active, Some(first));
-        assert!(!manager.fullscreen);
+
         // A delayed launch in B must not replace A's view.
         manager.launch(&launch, None, "B newer".into()).unwrap();
         let newer = manager.active;
@@ -2072,7 +2037,7 @@ time.sleep(60)
     }
 
     #[test]
-    fn tabs_reach_fullscreen_child_but_navigate_when_embedded() {
+    fn tabs_and_alt_f_reach_child() {
         let mut manager = Manager {
             area: Rect::new(0, 0, 80, 24),
             ..Manager::default()
@@ -2088,7 +2053,11 @@ time.sleep(60)
         let pid = manager.sessions[0].pid;
         manager.input(&Event::Paste("draft".into())).unwrap();
         let mut expected = b"draft".to_vec();
-        for fullscreen in [false, true] {
+        manager
+            .input(&key(KeyCode::Char('f'), KeyModifiers::ALT))
+            .unwrap();
+        expected.extend_from_slice(b"\x1bf");
+        {
             for (code, modifiers) in [
                 (KeyCode::Tab, KeyModifiers::NONE),
                 (KeyCode::Tab, KeyModifiers::SHIFT),
@@ -2100,16 +2069,11 @@ time.sleep(60)
                     KeyEventKind::Press,
                     KeyEventKind::Repeat,
                 ] {
-                    manager.fullscreen = fullscreen;
                     let result = manager
                         .input(&Event::Key(KeyEvent::new_with_kind(code, modifiers, kind)))
                         .unwrap();
-                    if fullscreen || kind == KeyEventKind::Release {
-                        assert!(matches!(result, Input::Consumed));
-                    } else {
-                        assert!(matches!(result, Input::Pass));
-                    }
-                    if fullscreen && kind != KeyEventKind::Release {
+                    assert!(matches!(result, Input::Consumed));
+                    if kind != KeyEventKind::Release {
                         expected.extend_from_slice(
                             if code == KeyCode::Tab && modifiers == KeyModifiers::NONE {
                                 b"\t"
@@ -2118,7 +2082,7 @@ time.sleep(60)
                             },
                         );
                     }
-                    assert_eq!(manager.fullscreen, fullscreen);
+
                     assert_eq!(manager.active, active);
                     assert_eq!(manager.sessions[0].pid, pid);
                 }
@@ -2136,12 +2100,10 @@ time.sleep(60)
             m.sessions[0].parser.screen().contents().contains(&expected)
         });
         for modifiers in [KeyModifiers::CONTROL, KeyModifiers::ALT] {
-            manager.fullscreen = true;
             assert!(matches!(
                 manager.input(&key(KeyCode::Tab, modifiers)).unwrap(),
                 Input::Consumed
             ));
-            assert!(manager.fullscreen);
         }
         manager.picker = true;
         assert!(matches!(
@@ -2151,7 +2113,6 @@ time.sleep(60)
             Input::Consumed
         ));
         assert!(manager.picker);
-        assert!(manager.fullscreen);
     }
 
     #[test]
@@ -2179,7 +2140,7 @@ time.sleep(60)
                 .unwrap(),
             Input::Consumed
         ));
-        assert!(manager.fullscreen);
+
         manager
             .input(&Event::Key(KeyEvent::new_with_kind(
                 KeyCode::Char('f'),
@@ -2187,7 +2148,7 @@ time.sleep(60)
                 KeyEventKind::Repeat,
             )))
             .unwrap();
-        assert!(manager.fullscreen);
+
         for (direction, expected) in [
             (KeyCode::Left, "1b5b313b3344"),
             (KeyCode::Right, "1b5b313b3343"),
@@ -2198,7 +2159,7 @@ time.sleep(60)
                 manager.input(&key(direction, KeyModifiers::ALT)).unwrap(),
                 Input::Consumed
             ));
-            assert!(manager.fullscreen);
+
             assert!(manager.active.is_some());
             assert_eq!(manager.sessions[0].pid, pid);
             wait(&mut manager, |m| {
@@ -2208,12 +2169,12 @@ time.sleep(60)
         manager
             .input(&key(KeyCode::Char('f'), KeyModifiers::ALT))
             .unwrap();
-        assert!(!manager.fullscreen);
+
         assert_eq!(manager.sessions[0].pid, pid);
         for direction in [KeyCode::Left, KeyCode::Right, KeyCode::Up, KeyCode::Down] {
             assert!(matches!(
                 manager.input(&key(direction, KeyModifiers::ALT)).unwrap(),
-                Input::Pass
+                Input::Consumed
             ));
             assert!(manager.active.is_some());
         }
@@ -2221,7 +2182,7 @@ time.sleep(60)
         manager
             .input(&key(KeyCode::Char('f'), KeyModifiers::ALT))
             .unwrap();
-        assert!(manager.fullscreen);
+
         assert!(matches!(
             manager
                 .input(&key(KeyCode::Char('b'), KeyModifiers::CONTROL))
@@ -2229,7 +2190,7 @@ time.sleep(60)
             Input::Consumed
         ));
         assert_eq!(manager.active, None);
-        assert!(!manager.fullscreen);
+
         wait(&mut manager, |m| {
             m.sessions[0]
                 .parser
@@ -2259,7 +2220,7 @@ time.sleep(60)
         terminal
             .draw(|frame| {
                 frame.render_widget(Paragraph::new("OUTSIDE"), Rect::new(0, 0, 10, 1));
-                manager.draw(frame, Rect::new(10, 2, 30, 12), true);
+                manager.draw(frame, Rect::new(10, 2, 30, 12), true, true);
             })
             .unwrap();
         assert_eq!(manager.sessions[0].size, (10, 28));
@@ -2268,7 +2229,7 @@ time.sleep(60)
         assert_eq!(terminal.backend().buffer()[(10, 2)].fg, Color::Cyan);
         terminal
             .draw(|frame| {
-                manager.draw(frame, Rect::new(10, 2, 30, 12), false);
+                manager.draw(frame, Rect::new(10, 2, 30, 12), false, true);
             })
             .unwrap();
         assert_eq!(terminal.backend().buffer()[(10, 2)].symbol(), "┌");
@@ -2301,7 +2262,7 @@ time.sleep(60)
                 "failed".into(),
             )
             .unwrap();
-        manager.fullscreen = true;
+
         let deadline = Instant::now() + Duration::from_secs(5);
         let notices = loop {
             let (_, notices) = manager.poll();
@@ -2314,7 +2275,6 @@ time.sleep(60)
         assert!(notices[0].failed && notices[0].was_active);
         assert!(notices[0].message.contains("specific startup failure"));
         assert!(manager.is_empty());
-        assert!(!manager.fullscreen);
     }
 
     #[test]

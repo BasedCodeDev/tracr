@@ -99,8 +99,8 @@ def submit_status(terminal):
 def return_to_browser(terminal):
     terminal.send(b'\x02')
     terminal.expect('Open here')
-    terminal.send(b'\x1bf')
-    terminal.expect('Ctrl+B background')
+    terminal.send(b'\r')
+    terminal.wait(lambda: 'Open here' not in terminal.text())
     terminal.send(b'\x02')
     terminal.expect('Open here')
     terminal.send(b'x')
@@ -194,8 +194,8 @@ def run_case(binary, codex, home, mode):
         passed(phase)
         phase = 'startup'
         mark = len(terminal.output)
-        terminal.send(b'\x1bf')
-        terminal.expect('Ctrl+B background')
+        terminal.send(b'\r')
+        terminal.wait(lambda: 'Open here' not in terminal.text())
         handoff = mark
         def started():
             text = screen_since(terminal, handoff)
@@ -203,7 +203,7 @@ def run_case(binary, codex, home, mode):
             blocker = startup_blocker(raw)
             if blocker:
                 raise Blocked(blocker)
-            assert 'Folders' in terminal.text(), 'surrounding UI disappeared'
+            assert 'Ctrl+B background' not in terminal.text(), 'Tracr border visible while coding'
             return history_visible(text, fixture['expected_messages']) and os.tcgetpgrp(terminal.master) == terminal.child.pid
         terminal.wait(started, timeout=30)
         passed(phase, foreground_group=os.tcgetpgrp(terminal.master))
@@ -268,7 +268,7 @@ def run_new_case(binary, codex, home):
         terminal.expect('Create new session')
         mark = len(terminal.output)
         terminal.send(b'\r')
-        terminal.expect('Ctrl+B background')
+        terminal.wait(lambda: 'Open here' not in terminal.text())
         handoff = mark
         def started():
             raw = terminal.output[handoff:].decode(errors='replace')

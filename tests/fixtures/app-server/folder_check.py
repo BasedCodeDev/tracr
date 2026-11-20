@@ -13,6 +13,7 @@ import sys
 import tempfile
 import termios
 import time
+from pty_support import Terminal
 
 binary = str(Path(sys.argv[1]).resolve())
 project = Path(__file__).resolve().parents[3]
@@ -44,6 +45,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-') as tmp:
                                  cwd=root, stdin=slave, stdout=slave, stderr=slave,
                                  preexec_fn=setup, env={**os.environ, 'TERM':'xterm-256color', 'CARGO_NET_OFFLINE':'true'})
         output = bytearray()
+        screen = Terminal.__new__(Terminal)
+        screen.output = output
         try:
             deadline = time.monotonic() + 20
             marker = b'DIRECTMATCH' if path == '.' else b'currently shown'
@@ -57,11 +60,10 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-') as tmp:
             if path == '.':
                 assert b'DIRECTMATCH' in output
             # Enter on fixtures must display the browse-only reason, proving session focus.
-            output.clear()
             os.write(master, b'\r')
             if path == '.':
                 deadline = time.monotonic() + 10
-                while b'cannot' not in output:
+                while 'fixture data is browse-only' not in screen.text():
                     assert time.monotonic() < deadline, bytes(output[-2000:])
                     if select.select([master], [], [], .05)[0]:
                         output.extend(os.read(master, 65536))

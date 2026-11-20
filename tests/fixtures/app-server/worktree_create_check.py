@@ -16,16 +16,7 @@ def open_worktree(terminal, expected='Starting commit:', menu=False):
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         if menu:
-            terminal.send(b'?')
-            terminal.expect('Actions & shortcuts')
-            terminal.send(b'\x1b[F')
-            try:
-                terminal.wait(lambda: '> w Create worktree' in terminal.text(), timeout=.5)
-            except AssertionError:
-                terminal.send(b'\x1b')
-                terminal.wait(lambda: 'Actions & shortcuts' not in terminal.text())
-                continue
-            terminal.send(b'\r')
+            terminal.action('Create worktree')
         else:
             terminal.send(b'w')
         try:
@@ -63,10 +54,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     t = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(fake), str(project)], env)
     try:
         t.expect('Sessions')
-        t.resize(80, 139)  # Full-width graph keeps commit subjects visible.
+        t.resize(80, 119)  # Full-width graph keeps commit subjects visible.
+        t.send(b'\x1b`')
         t.expect('Second creation commit')
         # Folders menu and keyboard use the same action; escape before execution is inert.
-        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, menu=True)
+        t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, menu=True)
         t.send(b'cancelled')
         t.send(b'\r\r')
         t.expect('>[ Create worktree ]')
@@ -91,7 +83,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         t.expect('─ ◇ feature/from-folder')
         t.expect('Second creation commit')
         t.send(b'\x1b[Z\x1b[B')
-        t.expect('> ● ' + first[:7])
+        t.expect_selected_commit(git(project, 'show', '-s', '--format=%s', first))
         open_worktree(t)
         t.expect(first[:8])
         t.send(b'from-history\r\r\r')
@@ -123,9 +115,10 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
     t = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(fake), str(project)], old_env)
     try:
         t.expect('Sessions')
-        t.resize(80, 139)  # Full-width graph keeps commit subjects visible.
+        t.resize(80, 119)
+        t.send(b'\x1b`')
         t.expect('Second creation commit')
-        t.send(b'\x1b');t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, expected='requires Git 2.48 or newer')
+        t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, expected='requires Git 2.48 or newer')
         t.send(b'\x1b')
         t.wait(lambda: 'Create worktree' not in t.text())
         t.finish()

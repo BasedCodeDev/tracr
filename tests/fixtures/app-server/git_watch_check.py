@@ -47,10 +47,13 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
     def read_calls(): return [line for line in calls.read_text().splitlines() if ' status ' not in ' '+line+' ']
     try:
         t.expect('Sessions')
-        t.resize(80, 139)  # Full-width graph in the stacked layout.
+        # Wide browsing keeps Git visible and live even with Sessions focused.
+        commit('Watch beside Sessions'); t.expect('Watch beside Sessions')
+        t.resize(80, 119)  # Full-width graph in the stacked layout.
+        t.send(b'\x1b`')
         t.expect('Watch second'); t.expect('[HEAD]'); settle()
         # Cross-repository search below intentionally uses the global scope.
-        t.send(b'\x1b[Z\x1bz\t')
+        t.send(b'\x1bz')
         t.wait(lambda: 'Folders · Focused' not in t.text())
         commit('Watch external'); t.expect('Watch external'); t.expect('[HEAD]')
         git('tag', 'watch-tag'); t.expect('tag: watch-tag')
@@ -58,22 +61,22 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
         git('pack-refs', '--all'); settle()
         assert '[watch-branch]' in t.text()
         # Manual navigation must survive an external commit.
-        t.send(b'\t\x1b[B'); t.expect('b Collapse')
+        t.send(b'\t\x1b[B'); t.expect('i Commit info')
         selected_oid = git('rev-parse', '--short=7', 'HEAD~1')
-        commit('Watch manual preserved'); t.expect('Watch manual preserved'); t.expect('b Collapse')
-        t.expect('> ● ' + selected_oid)
+        commit('Watch manual preserved'); t.expect('Watch manual preserved'); t.expect('i Commit info')
+        t.expect_selected_commit(git('show', '-s', '--format=%s', selected_oid))
         t.send(b'f'); t.expect('[HEAD]')
         git('checkout', '--detach', '-q'); settle(); t.expect('[HEAD]')
         git('checkout', '-q', 'main'); t.expect('[HEAD]')
-        t.send(b'b'); t.expect('Enter Embedded'); settle()
+        t.send(b'\x1b`'); t.expect('Enter Open'); settle()
         mark = len(read_calls())
         linked = root/'elsewhere'
         git('worktree', 'add', '-qb', 'watch-linked', str(linked))
-        t.expect('─ ◇ watch-linked'); settle()
+        settle()
         assert not any(' log ' in ' '+line+' ' for line in read_calls()[mark:]), read_calls()[mark:]
-        git('worktree', 'remove', str(linked)); t.wait(lambda: '─ ◇ watch-linked' not in t.text())
+        git('worktree', 'remove', str(linked)); settle()
         commit('Watch hidden commit'); settle()
-        t.send(b'\t'); t.expect('Watch hidden commit'); settle()
+        t.send(b'\x1b`'); t.expect('Watch hidden commit'); settle()
         mark = len(read_calls()); before = len(t.output)
         (project/'ordinary.txt').write_text('Source change is not metadata\n')
         t.expect('[main *]'); settle()

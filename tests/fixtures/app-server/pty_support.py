@@ -11,7 +11,7 @@ import time
 import tempfile
 
 class Terminal:
-    def __init__(self, command, env=None):
+    def __init__(self, command, env=None, *, start_in_sessions=True):
         self.state = tempfile.TemporaryDirectory(prefix='tracr-pty-state-')
         self.master, self.slave = pty.openpty()
         self.resize(80, 240)
@@ -20,8 +20,14 @@ class Terminal:
             os.setsid()
             fcntl.ioctl(self.slave, termios.TIOCSCTTY, 0)
         self.child = subprocess.Popen(command, stdin=self.slave, stdout=self.slave, stderr=self.slave,
-                                      preexec_fn=setup, env={**(env if env is not None else os.environ), 'XDG_STATE_HOME': (env or {}).get('XDG_STATE_HOME', self.state.name), 'TERM':'xterm-256color'})
+                                      preexec_fn=setup, env={**(env if env is not None else os.environ), 'XDG_STATE_HOME': ((env or {}).get('XDG_STATE_HOME') if (env or {}).get('XDG_STATE_HOME') != os.environ.get('XDG_STATE_HOME') else None) or self.state.name, 'TERM':'xterm-256color'})
         self.output = bytearray()
+        # Most interaction fixtures exercise Sessions first. Startup coverage opts
+        # out so it can verify the real initial drawer and its focus explicitly.
+        if start_in_sessions:
+            self.expect('→ Sessions')
+            self.send(b'\x1b')
+            self.wait(lambda: '→ Sessions' not in self.text())
     def resize(self, rows, cols):
         changed = getattr(self, 'dimensions', None) != (rows, cols)
         self.dimensions = (rows, cols)
@@ -71,6 +77,16 @@ class Terminal:
     def line(self, row, start=0, end=240):
         self.text()
         return ''.join(self.cells.get((row, col), ' ') for col in range(start, end))
+    def expect_selected_commit(self, title):
+        def selected():
+            self.text()
+            for row in range(self.dimensions[0]):
+                line = ''.join(self.cells.get((row, col), ' ') for col in range(self.dimensions[1]))
+                if '> ● ' in line and title in line:
+                    return True
+            return False
+        self.wait(selected)
+
     def send(self, data):
         os.write(self.master, data)
     def wait(self, predicate, timeout=15):
@@ -94,6 +110,20 @@ class Terminal:
                 raise RuntimeError(f'terminal process exited unexpectedly: {self.child.returncode}')
     def expect(self, text):
         self.wait(lambda: text in self.text())
+    def action(self, label):
+        self.send(b'?')
+        self.expect('Actions & shortcuts')
+        self.send(b'\x1b[H')
+        for _ in range(60):
+            end = time.monotonic() + .06
+            self.wait(lambda: time.monotonic() >= end)
+            if any('> ' in self.line(row) and label in self.line(row)
+                   for row in range(self.dimensions[0])):
+                self.send(b'\r')
+                return
+            self.send(b'\x1b[B')
+        raise AssertionError('Action not found: ' + label + ': ' + self.text())
+
     def inspect(self, expected):
         self.expect('Sessions')
         self.wait(lambda: all(marker not in self.text() for marker in ('Loading', 'refreshing', 'Fetching metadata')) and 'i Info' in self.text())

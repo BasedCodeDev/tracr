@@ -471,6 +471,9 @@ pub(crate) mod tests {
         let original = history.rows.clone();
         let revision = history.revision();
         let mut view = View {
+            drawer_open: true,
+            drawer_git: true,
+            dialog_area: true,
             history,
             git_focus: true,
             ..View::default()
@@ -560,6 +563,7 @@ pub(crate) mod tests {
         assert_eq!(browser.selected, Some(extra));
         assert_eq!(view.focus, 1);
         assert!(!view.git_focus);
+        assert!(!view.drawer_open);
     }
 
     #[tokio::test]

@@ -10,7 +10,7 @@ for mode in ['stop','refresh','unknown','attached','cancel']:
         state={'cwd':str(old),'loaded':True,'terminals':True,'attached':mode=='attached'}
         if mode=='unknown':state['malformed_terminals']=True
         native=home/'native.json';native.write_text(json.dumps(state))
-        env={'HOME':str(root),'XDG_STATE_HOME':str(root/'state'),'PATH':'/usr/bin:/bin'}
+        env={'HOME':str(root),'XDG_STATE_HOME':str(root/'state'),'PATH':'/usr/bin:/bin','GIT_CEILING_DIRECTORIES':str(root),'TMPDIR':str(root)}
         t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(old)],env)
         def calls():return (home/'live_requests.jsonl').read_text()
         try:

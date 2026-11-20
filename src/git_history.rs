@@ -1410,6 +1410,9 @@ mod tests {
         use ratatui::{Terminal, backend::TestBackend};
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut view = View {
+            drawer_open: true,
+            drawer_git: true,
+            dialog_area: true,
             history: History::with_backend(Arc::new(Controlled(tx))),
             git_focus: true,
             ..View::default()
@@ -2119,6 +2122,9 @@ mod tests {
         };
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut view = View {
+            drawer_open: true,
+            drawer_git: true,
+            dialog_area: true,
             history: History::with_backend(Arc::new(Controlled(tx))),
             ..View::default()
         };
@@ -2153,7 +2159,7 @@ mod tests {
                             && cell.modifier.contains(Modifier::BOLD)
                     })
                     .collect();
-                let visible = height >= 24 || focused;
+                let visible = true;
                 assert_eq!(
                     arrows.iter().any(|(_, c)| c.symbol() == "↑"),
                     visible && expected.0
@@ -2163,12 +2169,25 @@ mod tests {
                     visible && expected.1
                 );
                 for (index, cell) in arrows {
-                    assert_eq!(index % usize::from(width), usize::from(width - 3));
+                    assert_eq!(
+                        index % usize::from(width),
+                        usize::from(if width >= 120 {
+                            (width * 2 / 5).min(60) - 3
+                        } else {
+                            width - 3
+                        })
+                    );
                     assert_eq!(cell.fg, Color::Cyan);
                     assert!(cell.modifier.contains(Modifier::BOLD));
                     let row = index / usize::from(width);
                     assert_ne!(
-                        buffer.content[row * usize::from(width) + usize::from(width - 1)].symbol(),
+                        buffer.content[row * usize::from(width)
+                            + usize::from(if width >= 120 {
+                                (width * 2 / 5).min(60) - 1
+                            } else {
+                                width - 1
+                            })]
+                        .symbol(),
                         " "
                     );
                 }

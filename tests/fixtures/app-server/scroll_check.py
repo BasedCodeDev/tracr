@@ -22,27 +22,25 @@ with tempfile.TemporaryDirectory(prefix='tracr-scroll-') as directory:
         t.expect('COMPOSER')
         t.expect('HISTORY-0199')
         t.wait(lambda: b'\x1b[?1006h' in t.output)
-        # Pointer is in Sessions; keyboard focus remains in Folders.
-        t.send(b'\x1b[1;3D')
-        t.expect('Enter Sessions')
+        # With the drawer closed, the wheel belongs to the coding terminal.
         t.send(b'\x1b[<64;200;10M' * 20)
         t.expect('60 lines')
         t.expect('HISTORY-0100')
         assert 'COMPOSER' not in t.text()
         assert 'HISTORY-0199' not in t.text()
         assert not (home/'terminal-input.bin').exists()
-        t.send(b'\x1b[<64;2;10M')
-        t.send(b'?')
+        t.send(b'\x1b`?')
         t.expect('Actions & shortcuts')
         t.send(b'\x1b[<64;200;10M' * 5)
         t.send(b'\x1b')
         t.wait(lambda: 'Actions & shortcuts' not in t.text())
+        t.send(b'\x1b`')
         t.expect('60 lines')
         t.resize(80, 180)
         t.expect('60 lines')
-        t.send(b'\x1b[1;3C')
         t.send(b'a')
-        t.expect('COMPOSER')
+        # The static fixture does not redraw its composer after a height change.
+        t.wait(lambda: 'type to return' not in t.text())
         t.wait(lambda: (home/'terminal-input.bin').exists())
         assert (home/'terminal-input.bin').read_bytes() == b'a'
         t.send(b'\x1b[<64;160;10M')
@@ -50,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-scroll-') as directory:
         t.send(b'\x1b[<65;160;10M')
         t.wait(lambda: '3 lines' not in t.text())
         t.send(b'x')
-        t.wait(lambda: 'Ctrl+B background' not in t.text())
+        t.expect('Enter Open')
         t.finish()
         assert b'\x1b[?1006l' in t.output
     finally:

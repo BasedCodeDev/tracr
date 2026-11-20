@@ -39,6 +39,9 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
     env.update(PATH=str(wrapper_dir) + os.pathsep + env['PATH'], REAL_GIT=real_git, GIT_READ_LOG=str(home/'git-reads'))
     t = Terminal([binary, '--codex-home', tmp, '--codex-bin', str(fake), str(linked)], env)
     try:
+        t.expect('Sessions')
+        t.resize(40, 119)
+        t.send(b'\x1b`')
         t.expect('Running └─ Task first · codex · feature')
         t.send(b'\x1b[1;3C')  # Alt+Right focuses Git from Sessions.
         t.expect('Enter Folder')
@@ -56,18 +59,16 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         launch = json.loads((home/'launch.json').read_text())
         assert launch['args'] == ['resume', '--cd', str(linked), '--', 'first'], launch
         assert launch['cwd'] == str(linked) and launch['foreground'], launch
-        t.expect('Ctrl+B background')
-        t.expect('Folders')
-        t.send(b'\t')  # Embedded Sessions -> Git.
-        t.expect('Enter Resume')
-        assert 'Keyboard input goes to the terminal' not in t.text()
-        t.send(b'\x1b[Z')  # Git -> the same running session.
-        t.expect('Keyboard input goes to the terminal')
+        t.expect('FAKE CODING SESSION')
         assert json.loads((home/'launch.json').read_text())['pid'] == launch['pid']
         t.send(b'x')
         t.expect('i Info')
         t.inspect('ID: first')
-        t.send(b'\t\x1b[H\x1b[B')  # Sessions -> Git, then select the annotation
+        t.send(b'\x1b`')
+        t.expect('Git Worktrees')
+        t.send(b'\x1b[H')
+        t.expect('Enter Folder')
+        t.send(b'\x1b[B')
         t.expect('Enter Resume')
         settings({'type': 'notLoaded'})
         t.wait(lambda: 'Task first · codex' not in t.text())
