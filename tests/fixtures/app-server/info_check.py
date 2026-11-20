@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-info-') as tmp:
         t.resize(40,140);t.send(b'\x1b[H');t.expect('Waiting for approval')
         t.send(b'i');t.wait(lambda:'Session information' not in t.text())
         t.expect('Relink fixture');assert not (home/'launch.json').exists()
-        t.send(b'\x1b`');t.expect('Enter Sessions')
+        t.send(b'\x1b`');t.expect_focus('Folders')
         t.send(b'i');t.send(b'?');t.expect('Actions & shortcuts')
         t.send(b'\x1b');t.wait(lambda:'Actions & shortcuts' not in t.text())
         assert 'Session information' not in t.text()

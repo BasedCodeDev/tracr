@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-stash-history-') as directory:
         assert 'index on main' not in terminal.text()
         assert 'untracked files on main' not in terminal.text()
         terminal.send(b'\x1b[1;3B\x1b[H')
-        terminal.expect('Enter Stash')
+        terminal.expect_action('Describe saved stash')
         terminal.send(b'\r')
         terminal.expect('Saved stash stash@{0}')
         latest = git('rev-parse', 'refs/stash')

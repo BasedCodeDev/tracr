@@ -89,7 +89,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.resize(48, 119)
             # Open navigation without giving up the main session workspace.
             terminal.send(b'\x1b`')
-            terminal.expect('Enter Sessions')
+            terminal.expect_focus('Folders')
             if action == 'presentation':
                 terminal.expect('[remote: origin/main]')
                 terminal.expect('[tag: light] [tag: release]')
@@ -118,7 +118,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.send(b'f')
                 terminal.expect('[HEAD]')
                 terminal.expect_selected_commit('History 099')
-                terminal.send(b'\x1b[Z');terminal.expect('Enter Sessions')
+                terminal.send(b'\x1b[Z');terminal.expect_focus('Folders')
                 terminal.send(b'\x1bz')  # Reveal the main checkout outside the focused worktree.
                 for direction in [b'\x1b[A'] * 40 + [b'\x1b[B'] * 100:
                     if any(re.search(r'> .*project \(', terminal.line(row)) for row in range(terminal.dimensions[0])):
@@ -173,11 +173,11 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
             else:
                 terminal.expect('◇ feature')
                 terminal.expect('Lifecy')
-                terminal.expect('Enter Sessions')
+                terminal.expect_focus('Folders')
                 terminal.send(b'\t')
                 terminal.expect('i Commit info')
                 terminal.send(b'\x1b`')
-                terminal.expect('Enter Open')
+                terminal.expect_focus('Sessions')
                 terminal.send(b'?')
                 terminal.expect('Open session')
                 terminal.send(b'?')
@@ -189,7 +189,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.resize(80, 240)
                 terminal.expect('Lifecy')
                 terminal.send(b'\t')
-                terminal.expect('Enter Sessions')  # Tab already focuses Folders.
+                terminal.expect_focus('Folders')  # Tab already focuses Folders.
                 terminal.send(b'\r')
                 terminal.expect('Task first')
             pids = [int(p.name.split('-')[1]) for p in home.glob('pending-*')]
@@ -202,7 +202,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 # Inline sessions keep discovery and filesystem monitoring alive.
                 terminal.expect('FAKE CODING SESSION')
                 terminal.send(b'\x1b`')
-                terminal.expect('Enter Sessions')
+                terminal.expect_focus('Folders')
                 assert os.tcgetpgrp(terminal.master) == terminal.child.pid
                 if action == 'walkthrough':
                     # Preserve the selected folder while removing its Git registration.
@@ -216,7 +216,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                     terminal.wait(lambda: '─ ◇ feature' not in terminal.text())
                 else:
                     terminal.send(b'\x1b`')  # Reopening resumes visible-history reads.
-                    terminal.expect('Enter Sessions')
+                    terminal.expect_focus('Folders')
                     terminal.wait(lambda: len(list(home.glob('pending-*'))) > len(pids))
                 terminal.send(b'q')
             elif action == 'sigterm':

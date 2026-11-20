@@ -880,7 +880,7 @@ impl Manager {
             } else {
                 Color::DarkGray
             }))
-            .title(" Codex · Ctrl+B background · Alt+` drawer · Alt+C copy ");
+            .title(" Codex ");
         self.area = if framed { border.inner(area) } else { area };
         let Some(s) = self.sessions.iter_mut().find(|s| Some(s.id) == self.active) else {
             return false;

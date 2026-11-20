@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-reminder-') as directory:
                 assert 'Alt+~' not in t.text()
             if launch == 1:
                 t.send(b'\x1b~')
-                t.expect('Ctrl+B Background')
+                t.expect_action('Background session')
                 assert 'Alt+~' not in t.text()
                 marker = state/'tracr/drawer-shortcut-learned'
                 t.wait(marker.exists)

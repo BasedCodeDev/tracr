@@ -52,7 +52,7 @@ def history_visible(text, expected_messages):
 def ready(text, tid, cwd):
     return ('Sessions' in text and 'Folders' in text
             and 'Fetching metadata' not in text and 'Loading' not in text and 'refreshing' not in text
-            and 'i Info' in text)
+            and '? Actions' in text)
 
 def verify_inventory(inventory, tid, cwd):
     assert inventory['complete'], 'inventory incomplete'
@@ -203,7 +203,7 @@ def run_case(binary, codex, home, mode):
             blocker = startup_blocker(raw)
             if blocker:
                 raise Blocked(blocker)
-            assert 'Ctrl+B background' not in terminal.text(), 'Tracr border visible while coding'
+            assert 'Ctrl+B Browser' not in terminal.text(), 'Tracr border visible while coding'
             return history_visible(text, fixture['expected_messages']) and os.tcgetpgrp(terminal.master) == terminal.child.pid
         terminal.wait(started, timeout=30)
         passed(phase, foreground_group=os.tcgetpgrp(terminal.master))

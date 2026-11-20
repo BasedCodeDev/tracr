@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-reload-move-') as directory:
     try:
         terminal.inspect('ID: session')
         terminal.send(b'\x1b`')
-        terminal.expect('Enter Sessions')
+        terminal.expect_focus('Folders')
         terminal.send(b'm')
         terminal.expect('Destination folder')
         terminal.send(b'\x1b[Z\x15' + str(destination).encode() + b'\r')

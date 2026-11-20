@@ -131,7 +131,7 @@ class AcceptanceTests(unittest.TestCase):
                 live.verify_inventory({'complete':True, 'sessions':[{**row, **mutation}]}, 'abc', '/tmp/project')
 
     def test_readiness_and_stale_output(self):
-        good = 'Folders Sessions i Info ID: abc Folder: /project Resume: Enter'
+        good = 'Folders Sessions ? Actions ID: abc Folder: /project Resume: Enter'
         self.assertTrue(live.ready(good, 'abc', '/project'))
         self.assertFalse(live.ready(good+' Fetching metadata', 'abc', '/project'))
         terminal = live.Terminal.__new__(live.Terminal)
@@ -171,7 +171,7 @@ class SimulatedFlowTests(unittest.TestCase):
             executable = Path(temp)/'codex'
             executable.write_bytes(b'fake executable fingerprint')
             cwd = str(home/'old')
-            browser = f'Folders · Focused Sessions i Info ID: abc Folder: {cwd} Resume: Enter > old (1)'
+            browser = f'Folders · Focused Sessions ? Actions ID: abc Folder: {cwd} Resume: Enter > old (1)'
             class FakeTerminal:
                 def __init__(self, *args):
                     self.output = bytearray(browser.encode())
