@@ -36,18 +36,18 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         t.send(b'\x1b')
         t.wait(lambda: 'Choose harness' not in t.text())
         assert not any((h/'launch.json').exists() for h in homes)
-        t.expect('Enter Sessions')
+        t.expect('Create new session')
         t.send(b'\r\x1b[B\r')
         t.wait(lambda: (homes[1]/'launch.json').exists())
         launch = json.loads((homes[1]/'launch.json').read_text())
         assert launch['args'] == ['--cd', str(project)], launch
         assert launch['cwd'] == str(project) and launch['home'] == str(homes[1]) and launch['foreground'], launch
         assert not (homes[0]/'launch.json').exists()
-        t.wait(lambda: 'Folders' in t.text())
-        t.wait(lambda: (homes[1]/'terminal-size.json').exists() and json.loads((homes[1]/'terminal-size.json').read_text())['columns'] == 178)
+        t.expect('FAKE CODING SESSION')
+        t.wait(lambda: (homes[1]/'terminal-size.json').exists() and json.loads((homes[1]/'terminal-size.json').read_text())['columns'] == 240)
         saved = state/'tracr/browser-state.json'
         assert json.loads(saved.read_text())['folder'] == str(project)
-        t.send(b'\x1b`x')
+        t.send(b'x')
         t.wait(lambda: 'exited: Success' in t.text())
         t.expect('New session')
         t.inspect('ID: created')
@@ -76,9 +76,9 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         t.wait(lambda:(homes[1]/'launch.json').exists())
         resumed=json.loads((homes[1]/'launch.json').read_text())
         assert 'resume' in resumed['args'], resumed
-        t.wait(lambda:'Folders' in t.text())
-        t.wait(lambda:json.loads((homes[1]/'terminal-size.json').read_text())['columns']==178)
-        t.send(b'\x1b`x');t.wait(lambda:'exited: Success' in t.text() and 'FAKE CODING SESSION' not in t.text())
+        t.expect('FAKE CODING SESSION')
+        t.wait(lambda:json.loads((homes[1]/'terminal-size.json').read_text())['columns']==240)
+        t.send(b'x');t.wait(lambda:'exited: Success' in t.text() and 'FAKE CODING SESSION' not in t.text())
 
         t.finish()
     finally:t.close()

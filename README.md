@@ -284,7 +284,7 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   Left / `h` collapses it or selects its displayed parent.
 - Enter opens the only session, or starts creation when a folder has no
   sessions. With multiple sessions, the main view shows the list. The drawer
-  remains open in all cases; Alt+backtick returns to the main view. Incomplete discovery
+  closes and focus moves to the session or session list. Incomplete discovery
   does not start a session automatically.
 - Drawer selection and scroll positions survive toggles and terminal resizes.
   Dialogs belong to the area that opened them: toggling preserves unfinished

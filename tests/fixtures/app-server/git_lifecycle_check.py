@@ -188,7 +188,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.expect('Task first')
             pids = [int(p.name.split('-')[1]) for p in home.glob('pending-*')]
             if action in ('walkthrough', 'handoff'):
-                terminal.send(b'\x1b`\r')
+                terminal.send(b'\x1b`\r' if operation else b'\r')
                 terminal.wait(lambda: (home / 'launch.json').exists())
                 launch = json.loads((home / 'launch.json').read_text())
                 assert launch['cwd'] == str(linked), launch

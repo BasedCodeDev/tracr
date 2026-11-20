@@ -3374,11 +3374,14 @@ fn creation_sources(browser: &Browser) -> Vec<usize> {
         .collect()
 }
 fn enter_folder(browser: &mut Browser, view: &mut View) -> Action {
-    view.focus = 1;
-    view.git_focus = false;
     if !matches!(browser.folder, FolderFilter::Path(_)) {
         return Action::Continue;
     }
+    if view.drawer_open {
+        view.toggle_drawer();
+    }
+    view.focus = 1;
+    view.git_focus = false;
     browser.query.clear();
     browser.reconcile(0);
     if browser.loading() || browser.diagnostics().iter().any(|source| !source.complete) {
@@ -4179,6 +4182,9 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             view.source_control = 0;
         }
         Command::Resume => {
+            if view.drawer_open {
+                view.toggle_drawer();
+            }
             if selected_session(browser).is_some_and(|s| {
                 crate::domain::classify_folder(s.cwd.as_deref())
                     == crate::domain::FolderStatus::Unlinked
@@ -4707,6 +4713,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                 let mut terminals = view.terminals.borrow_mut();
                                 terminals.sync_folder(Some(&folder));
                             }
+                            if active.is_some() && view.drawer_open { view.toggle_drawer(); }
                             view.focus = 1; view.git_focus = false;
                         }
                         continue;
@@ -5361,7 +5368,8 @@ mod cleanup_tests {
                     _ => Action::Continue,
                 }
             );
-            assert_eq!(view.focus, 0);
+            assert_eq!(view.focus, 1);
+            assert!(!view.drawer_open);
             assert!(browser.query.is_empty());
             if count == 1 {
                 assert_eq!(browser.selected, Some(browser.visible()[0].key.clone()));
@@ -5381,7 +5389,8 @@ mod cleanup_tests {
                 }
                 let mut view = folder_view();
                 assert_eq!(enter(&mut browser, &mut view), Action::Continue);
-                assert_eq!(view.focus, 0);
+                assert_eq!(view.focus, 1);
+                assert!(!view.drawer_open);
                 assert!(view.source_picker.is_none());
             }
         }
@@ -5432,13 +5441,13 @@ mod cleanup_tests {
         let mut view = folder_view();
         assert_eq!(enter(&mut browser, &mut view), Action::CreateNew(0));
         browser.include_archived = true;
-        view.focus = 0;
+        view = folder_view();
         assert_eq!(enter(&mut browser, &mut view), Action::ResumeSelected);
         browser.folder = FolderFilter::All;
-        view.focus = 0;
+        view = folder_view();
         assert_eq!(enter(&mut browser, &mut view), Action::Continue);
         browser.open_folder("/tmp".into());
-        view.focus = 0;
+        view = folder_view();
         assert_eq!(
             handle_key(
                 &mut browser,
@@ -5481,7 +5490,8 @@ mod cleanup_tests {
                         _ => Action::Continue,
                     }
                 );
-                assert_eq!(view.context(), 2);
+                assert_eq!(view.context(), 1);
+                assert!(!view.drawer_open);
             }
         }
     }
@@ -5609,7 +5619,8 @@ mod cleanup_tests {
             ),
             Action::OpenRelink
         ));
-        assert_eq!(view.context(), 2);
+        assert_eq!(view.context(), 1);
+        assert!(!view.drawer_open);
         assert_eq!(browser.folder, FolderFilter::Path("/worktree/src".into()));
         assert_eq!(browser.selected, Some(key));
         assert!(browser.query.is_empty());
@@ -5661,7 +5672,8 @@ mod cleanup_tests {
             ));
             assert_eq!(browser.selected, Some(key));
             assert_eq!(browser.folder, FolderFilter::Path(cwd.path().into()));
-            assert_eq!(view.context(), 2);
+            assert_eq!(view.context(), 1);
+            assert!(!view.drawer_open);
         }
     }
 
@@ -5841,7 +5853,8 @@ mod cleanup_tests {
                 .any(|row| row.filter == browser.folder)
         );
         assert!(browser.expanded.contains(std::path::Path::new("/project")));
-        assert_eq!(view.context(), 2);
+        assert_eq!(view.context(), 1);
+        assert!(!view.drawer_open);
         assert!(browser.visible().is_empty());
         assert!(browser.selected.is_none());
         assert_eq!(
@@ -5881,7 +5894,8 @@ mod cleanup_tests {
         press(&mut browser, &mut view, KeyCode::Char('j'));
         press(&mut browser, &mut view, KeyCode::Enter);
         assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
-        assert_eq!(view.context(), 2);
+        assert_eq!(view.context(), 1);
+        assert!(!view.drawer_open);
     }
 
     #[tokio::test]
@@ -6063,7 +6077,8 @@ mod cleanup_tests {
         assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
         let expanded = browser.expanded.clone();
         handle_key(&mut browser, &mut view, key(KeyCode::Enter));
-        assert_eq!(view.focus, 0);
+        assert_eq!(view.focus, 1);
+        assert!(!view.drawer_open);
         assert_eq!(browser.expanded, expanded);
         assert_eq!(
             handle_key(
@@ -6073,7 +6088,6 @@ mod cleanup_tests {
             ),
             Action::Continue
         );
-        view.toggle_drawer();
         assert_eq!(
             handle_key(&mut browser, &mut view, key(KeyCode::Char('m'))),
             Action::OpenRelink
@@ -6662,7 +6676,7 @@ mod cleanup_tests {
     }
 
     #[test]
-    fn drawer_selection_retains_auto_open_and_focus() {
+    fn drawer_selection_closes_drawer_and_focuses_sessions() {
         for count in 0..=2 {
             let mut browser = entry_fixture(count, 1);
             let mut view = View::default();
@@ -6676,8 +6690,8 @@ mod cleanup_tests {
                     _ => Action::Continue,
                 }
             );
-            assert!(view.drawer_open);
-            assert_eq!(view.context(), 0);
+            assert!(!view.drawer_open);
+            assert_eq!(view.context(), 1);
         }
     }
 

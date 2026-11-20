@@ -561,8 +561,9 @@ pub(crate) mod tests {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         );
         assert_eq!(browser.selected, Some(extra));
-        assert_eq!(view.focus, 0);
-        assert!(view.git_focus);
+        assert_eq!(view.focus, 1);
+        assert!(!view.git_focus);
+        assert!(!view.drawer_open);
     }
 
     #[tokio::test]

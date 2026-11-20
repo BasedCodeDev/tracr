@@ -59,10 +59,6 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         launch = json.loads((home/'launch.json').read_text())
         assert launch['args'] == ['resume', '--cd', str(linked), '--', 'first'], launch
         assert launch['cwd'] == str(linked) and launch['foreground'], launch
-        t.expect('Enter Resume')  # Launch keeps drawer focus on Git.
-        t.expect('Enter Resume')
-        assert 'Keyboard input goes to the terminal' not in t.text()
-        t.send(b'\x1b`')  # Drawer -> the same running session.
         t.expect('FAKE CODING SESSION')
         assert json.loads((home/'launch.json').read_text())['pid'] == launch['pid']
         t.send(b'x')
