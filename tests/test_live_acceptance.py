@@ -152,7 +152,7 @@ class AcceptanceTests(unittest.TestCase):
             self.assertEqual(two['status'], 'failed')
 
     def test_terminal_early_exit_fails_promptly(self):
-        terminal = live.Terminal([sys.executable, '-c', 'pass'])
+        terminal = live.Terminal([sys.executable, '-c', 'pass'], start_in_sessions=False)
         try:
             with self.assertRaises(RuntimeError):
                 terminal.expect('never emitted')

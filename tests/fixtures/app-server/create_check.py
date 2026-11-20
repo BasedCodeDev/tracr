@@ -100,7 +100,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
             saved.unlink()
         else:
             saved.write_text(content)
-        t = Terminal(args, env)
+        t = Terminal(args, env, start_in_sessions=False)
         try:
             t.expect('Create new session')
             if content: t.expect('Invalid browser state')

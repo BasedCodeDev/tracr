@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.expect('#2 Task')
         terminal.send(b'\r')
         terminal.wait(lambda: 'Open terminals' not in terminal.text() and 'FAKE CODING SESSION' in terminal.text())
-        assert 'Alt+` / Esc Close' not in terminal.text()
+        terminal.wait(lambda: 'Alt+` / Esc Close' not in terminal.text())
         terminal.send(b'\x02g')
         terminal.expect('Open terminals')
         terminal.send(b'\r')

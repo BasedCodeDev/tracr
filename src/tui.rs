@@ -907,14 +907,14 @@ fn footer_shortcuts(width: u16, browser: &Browser, view: &View) -> (String, Stri
         line
     };
     let mut shared = if view.drawer_open {
-        "Alt+` / Esc Close drawer · Tab Switch panels".to_owned()
+        "Alt+` / Esc Close drawer · → Sessions · Tab Panels".to_owned()
     } else if width >= 80 {
         "Alt+` opens the Tracr drawer — key below Esc; no Shift needed".to_owned()
     } else {
         "Alt+` Drawer (below Esc)".to_owned()
     };
     if view.drawer_open && view.terminals.borrow().active.is_some() {
-        shared = "Alt+` / Esc Close · Ctrl+B Background".into();
+        shared = "Alt+` / Esc Close · → Sessions · Ctrl+B Background".into();
     }
     if view.recovery_available {
         if unicode_width::UnicodeWidthStr::width(shared.as_str()) + 12 > usize::from(width) {
@@ -2013,9 +2013,9 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             (
                 FolderRight,
                 "Folders",
-                "→ / l",
+                "l",
                 "Expand folder",
-                Some(("→/l Expand", "→/l Expand")),
+                Some(("l Expand", "l Expand")),
             ),
             (
                 MoveFolder,
@@ -2163,9 +2163,9 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                     "Git",
                     "← / h",
                     "Scroll left",
-                    Some(("←/→ Scroll", "←/→ Scroll")),
+                    Some(("h/l Scroll", "h/l Scroll")),
                 ),
-                (GitRight, "Git", "→ / l", "Scroll right", None),
+                (GitRight, "Git", "l", "Scroll right", None),
                 (GitHome, "Git", "PageUp / Home", "First loaded item", None),
                 (GitEnd, "Git", "PageDown / End", "Last loaded item", None),
             ]);
@@ -2191,6 +2191,15 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 Some(("Ctrl+B Background session", "Ctrl+B Background")),
             ),
         );
+    }
+    if view.drawer_open {
+        entries.push((
+            ToggleDrawer,
+            "Navigation",
+            "→",
+            "Focus session and close drawer",
+            None,
+        ));
     }
     if !view.drawer_open {
         entries.retain(|entry| !matches!(entry.0, CyclePane | CyclePaneBack));
@@ -3790,6 +3799,12 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         }
         return Action::Continue;
     }
+    if view.drawer_open && key.code == KeyCode::Right && key.modifiers == KeyModifiers::NONE {
+        if key.kind == KeyEventKind::Press {
+            view.toggle_drawer();
+        }
+        return Action::Continue;
+    }
     if view.drawer_open && key.code == KeyCode::Esc {
         view.toggle_drawer();
         return Action::Continue;
@@ -3833,7 +3848,7 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
             KeyCode::Up | KeyCode::Char('k') => Command::GitUp,
             KeyCode::Down | KeyCode::Char('j') => Command::GitDown,
             KeyCode::Left | KeyCode::Char('h') => Command::GitLeft,
-            KeyCode::Right | KeyCode::Char('l') => Command::GitRight,
+            KeyCode::Char('l') => Command::GitRight,
             KeyCode::PageUp | KeyCode::Home => Command::GitHome,
             KeyCode::PageDown | KeyCode::End => Command::GitEnd,
             KeyCode::Char('f') => Command::GitFollow,
@@ -3864,7 +3879,7 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         KeyCode::Char('w') if view.focus == 0 => Command::CreateWorktree,
         KeyCode::Char('u') => Command::Recover,
         KeyCode::Char('a') => Command::Archives,
-        KeyCode::Right | KeyCode::Char('l') if view.focus == 0 => Command::FolderRight,
+        KeyCode::Char('l') if view.focus == 0 => Command::FolderRight,
         KeyCode::Left | KeyCode::Char('h') if view.focus == 0 => Command::FolderLeft,
         KeyCode::Left | KeyCode::Backspace if view.focus == 1 => Command::PreviousPane,
         KeyCode::Esc => Command::PreviousPane,
@@ -4253,7 +4268,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     browser.invalidate_git();
     discovery.refresh(&mut browser);
     let mut view = View {
-        focus: 1,
+        drawer_open: true,
+        dialog_area: true,
+        focus: 0,
         message: browser.state_warning.take(),
         ..View::default()
     };
@@ -5962,10 +5979,40 @@ mod cleanup_tests {
         assert_eq!(browser.folder, original);
     }
 
+    #[tokio::test]
+    async fn right_closes_either_drawer_panel_without_changing_selection() {
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
+        let key = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
+        for git in [false, true] {
+            if !view.drawer_open {
+                view.toggle_drawer();
+            }
+            view.drawer_git = git;
+            view.normalize_focus();
+            let folder = browser.folder.clone();
+            let selected = browser.selected.clone();
+            let expanded = browser.expanded.clone();
+            view.editing = true;
+            handle_key(&mut browser, &mut view, key);
+            assert!(view.drawer_open);
+            view.editing = false;
+            for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+                handle_key(&mut browser, &mut view, KeyEvent { kind, ..key });
+                assert!(view.drawer_open);
+            }
+            handle_key(&mut browser, &mut view, key);
+            assert!(!view.drawer_open);
+            assert!(view.terminal_focused());
+            assert_eq!(browser.folder, folder);
+            assert_eq!(browser.selected, selected);
+            assert_eq!(browser.expanded, expanded);
+        }
+    }
+
     #[test]
-    fn right_expands_without_leaving_drawer_and_left_follows_displayed_parent() {
+    fn l_expands_without_leaving_drawer_and_left_follows_displayed_parent() {
         for (left, right) in [
-            (KeyCode::Left, KeyCode::Right),
+            (KeyCode::Left, KeyCode::Char('l')),
             (KeyCode::Char('h'), KeyCode::Char('l')),
         ] {
             let mut browser = Browser::new(vec![]);
@@ -5990,7 +6037,7 @@ mod cleanup_tests {
             assert!(
                 footer_shortcuts(240, &browser, &view)
                     .1
-                    .contains("→/l Expand")
+                    .contains("l Expand")
             );
             press(&mut browser, &mut view, right);
             assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
@@ -6009,7 +6056,7 @@ mod cleanup_tests {
             assert!(
                 footer_shortcuts(240, &browser, &view)
                     .1
-                    .contains("→/l Expand")
+                    .contains("l Expand")
             );
             press(&mut browser, &mut view, right);
             assert!(

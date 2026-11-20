@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-ui-') as tmp:
     # Simulate a lost final acknowledgement and inspect recovery on restart.
     journal=root/'state/tracr/folder-moves/current.json'
     data=json.loads(journal.read_text());data['phase']='verifying';journal.write_text(json.dumps(data))
-    t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(root/'moved')],env)
+    t=Terminal([binary,'--codex-home',str(home),'--codex-bin',fake,str(root/'moved')],env,start_in_sessions=False)
     try:
         t.expect('Unfinished folder move');t.expect('u Recover')
         t.send(b'u');t.expect('Inspect/recover folder move')

@@ -70,11 +70,12 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
     journals=list((state/'tracr/relocations').glob('*.json'));assert len(journals)==1
     data=json.loads(journals[0].read_text());data['phase']='verifying';journals[0].write_text(json.dumps(data))
     command[-1]=str(new)
-    t=Terminal(command,env)
+    t=Terminal(command,env,start_in_sessions=False)
     try:
         t.expect('unfinished relocation')
         t.send(b'u');t.expect('Inspect/recover relocation')
         t.send(b'\r');t.expect('Session relinked and verified.')
+        t.send(b'\x1b[C');t.wait(lambda:'Alt+` / Esc Close' not in t.text())
         t.inspect('ID: session');assert 'u Recover' not in t.text();t.finish()
     finally:t.close()
     requests=(home/'requests.jsonl').read_text()
@@ -151,7 +152,7 @@ for uncertain in (False, True):
         requests=(home/'requests.jsonl').read_text()
         if not uncertain:assert 'thread/settings/update' not in requests
         # A rejected attempt is terminal, not unfinished recovery on restart.
-        t=Terminal(command,env)
+        t=Terminal(command,env,start_in_sessions=not uncertain)
         try:
             t.inspect('ID: session') if not uncertain else t.expect('unfinished relocation')
             if not uncertain:assert 'unfinished relocation' not in t.text()

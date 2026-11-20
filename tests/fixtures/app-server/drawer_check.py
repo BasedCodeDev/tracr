@@ -22,10 +22,18 @@ with tempfile.TemporaryDirectory(prefix='tracr-drawer-') as directory:
         'report_size': True, 'scroll_fixture': True, 'read_cwd': str(project),
     }))
     t = Terminal([binary, '--config', str(config), '--codex-bin', str(fake),
-                  '--codex-home', str(root), str(project)])
+                  '--codex-home', str(root), str(project)], start_in_sessions=False)
     toggle = b'\x1b`'
     try:
+        t.expect('Alt+` / Esc Close')
+        t.expect('Enter Sessions')
+        assert t.line(0).startswith('┏Folders')
+        t.resize(30, 100)
+        t.expect('Enter Sessions')
+        assert 'Create new session' not in t.text()  # Narrow startup shows only the drawer.
+        t.resize(80, 240)
         t.expect('Create new session')
+        t.send(b'\x1b')
         t.expect('key below Esc; no Shift needed')
         assert 'Close drawer' not in t.text()
         # An unfinished main search and an unfinished drawer search are independent.
@@ -65,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-drawer-') as directory:
         t.expect('Alt+` / Esc Close')
         t.wait(lambda: size()['columns'] == 178)
         t.send(b'\t')
-        t.send(toggle)
+        t.send(b'\x1b[C')
         t.wait(lambda: size()['columns'] == 240)
         t.send(b'a')
         t.wait(lambda: inputs.read_bytes().endswith(b'a'))
@@ -88,6 +96,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-drawer-') as directory:
         t.resize(30, 119)
         t.expect('Alt+` / Esc Close')
         assert 'COMPOSER' not in t.text()
+        t.send(b'\x1b[C')
+        t.wait(lambda: size()['columns'] == 119)
+        t.wait(lambda: 'Alt+` / Esc Close' not in t.text())
+        t.send(toggle)
+        t.expect('Alt+` / Esc Close')
         t.resize(30, 120)
         t.wait(lambda: size()['columns'] == 70)
         t.send(toggle)

@@ -49,7 +49,10 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout', 'reload
                     output.extend(os.read(master, 65536))
         try:
             wait(lambda: b'Task first' in output)
-            # Wait for discovery and detail readiness, then resume from the initially focused sessions pane.
+            # Leave the startup drawer and focus Sessions before inspecting a session.
+            os.write(master, b'\x1b[C')
+            wait(lambda: 'Alt+` / Esc Close' not in screen.text())
+            # Wait for discovery and detail readiness before resuming.
             wait(lambda: (home / 'requests.jsonl').exists() and 'thread/read' in (home / 'requests.jsonl').read_text())
             os.write(master,b'i')
             wait(lambda: "Folder differs from Codex's current resume destination." in screen.text())

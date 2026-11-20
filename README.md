@@ -209,9 +209,11 @@ or reservation; activity can change immediately after it is read.
 A terminal is required on stdin and stdout; use `tracr list` in pipelines.
 
 Use `tracr .`, `tracr ~/Work/Seb.SysAdmin`, or `tracr browse PATH` to select a
-folder immediately, showing only sessions recorded directly there. The session
-pane starts focused: choose a session and press Enter to resume. Without a path, tracr restores the last visited folder; the first launch starts in your current directory. You can
-navigate to other folders or search globally; selecting a result opens its folder.
+folder immediately, showing only sessions recorded directly there. The Tracr
+drawer starts expanded with Folders focused: press Enter to open the folder’s
+sessions. Without a path, tracr restores the last visited folder; the first launch
+starts in your current directory. You can navigate to other folders or search
+globally; selecting a result opens its folder.
 
 In Folders or Sessions, press **n** or choose **Create new session** from `?` to
 start a new session in the selected folder, including folders with existing
@@ -265,7 +267,8 @@ are hidden unless independently referenced by ordinary history or a checkout.
 Stash rows are read-only: Enter describes the stash, and worktree creation is
 unavailable. Creating or removing stashes refreshes the history automatically.
 
-Sessions is the main workspace and starts with the Tracr drawer closed. Press
+Sessions is the main workspace. Tracr starts with the drawer expanded and Folders
+focused so the current location is visible. Press
 **Alt+backtick** (the key below Escape, no Shift needed) to toggle the drawer. Alt+tilde
 also works. The shortcut works while coding and over dialogs.
 
@@ -278,9 +281,10 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
 
 - Input belongs to the drawer while it is open. **Tab / Shift+Tab** switch between
   Folders and Git; Alt+Up/Left selects Folders and Alt+Down/Right selects Git.
+- **Right Arrow** closes either drawer panel and focuses the session area.
 - **Escape** closes a dialog or search first, then closes the drawer. Closing the
   drawer restores input to the session list or coding terminal.
-- Up / Down or `k/j` selects items. In Folders, Right / `l` expands a folder;
+- Up / Down or `k/j` selects items. In Folders, `l` expands a folder;
   Left / `h` collapses it or selects its displayed parent.
 - Enter opens the only session, or starts creation when a folder has no
   sessions. With multiple sessions, the main view shows the list. The drawer
@@ -291,7 +295,7 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   forms in both areas. Background operations continue and their results return
   to the originating area.
 - In Git history, Home / End selects the first / last loaded commit or session; approaching
-  the end loads more history. Left / Right or `h/l` scrolls horizontally. Manual movement
+  the end loads more history. Left or `h` scrolls left; `l` scrolls right. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
   root follows HEAD automatically. Escape closes the drawer; reopening it
   restores the selected drawer panel.

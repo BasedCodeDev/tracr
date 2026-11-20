@@ -11,7 +11,7 @@ import time
 import tempfile
 
 class Terminal:
-    def __init__(self, command, env=None):
+    def __init__(self, command, env=None, *, start_in_sessions=True):
         self.state = tempfile.TemporaryDirectory(prefix='tracr-pty-state-')
         self.master, self.slave = pty.openpty()
         self.resize(80, 240)
@@ -22,6 +22,12 @@ class Terminal:
         self.child = subprocess.Popen(command, stdin=self.slave, stdout=self.slave, stderr=self.slave,
                                       preexec_fn=setup, env={**(env if env is not None else os.environ), 'XDG_STATE_HOME': ((env or {}).get('XDG_STATE_HOME') if (env or {}).get('XDG_STATE_HOME') != os.environ.get('XDG_STATE_HOME') else None) or self.state.name, 'TERM':'xterm-256color'})
         self.output = bytearray()
+        # Most interaction fixtures exercise Sessions first. Startup coverage opts
+        # out so it can verify the real initial drawer and its focus explicitly.
+        if start_in_sessions:
+            self.expect('Alt+` / Esc Close')
+            self.send(b'\x1b')
+            self.wait(lambda: 'Alt+` / Esc Close' not in self.text())
     def resize(self, rows, cols):
         changed = getattr(self, 'dimensions', None) != (rows, cols)
         self.dimensions = (rows, cols)
