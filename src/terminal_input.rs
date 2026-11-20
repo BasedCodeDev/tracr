@@ -531,8 +531,60 @@ impl Decoder {
 #[derive(Default)]
 pub struct Reader {
     decoder: Decoder,
+    navigation_release: Option<KeyCode>,
 }
 impl Reader {
+    /// Read a main-list navigation run without replaying stale held-key input.
+    /// Other consumers (especially child terminals) must use `read` unchanged.
+    pub fn read_navigation(&mut self) -> io::Result<Input> {
+        self.navigation_release = None;
+        let mut packet = self.read()?;
+        let Event::Key(first) = packet.event else {
+            return Ok(packet);
+        };
+        if first.modifiers != KeyModifiers::NONE
+            || !matches!(
+                first.code,
+                KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k')
+            )
+            || first.kind == KeyEventKind::Release
+        {
+            return Ok(packet);
+        }
+        // Bound work even if stdin is continuously producing input. Polling after
+        // each decoded packet also reaches bytes still waiting in the OS buffer.
+        for _ in 0..4096 {
+            if !self.poll(Duration::ZERO)? {
+                break;
+            }
+            let next = self.read()?;
+            let merge = matches!(&next.event, Event::Key(key)
+                if key.code == first.code && key.modifiers == first.modifiers
+                    && (!self.enhanced() || key.kind != KeyEventKind::Press));
+            if !merge {
+                // Never consume an activation, direction change, or focus change
+                // on behalf of the currently focused list.
+                self.decoder.ready.push_front(next);
+                break;
+            }
+            let released =
+                matches!(&next.event, Event::Key(key) if key.kind == KeyEventKind::Release);
+            if released {
+                self.navigation_release = Some(first.code);
+                if first.kind == KeyEventKind::Repeat {
+                    packet = next;
+                }
+                // Keep an initial press so a quick press/release still moves once.
+                break;
+            }
+        }
+        Ok(packet)
+    }
+
+    pub fn take_navigation_release(&mut self) -> Option<KeyCode> {
+        self.navigation_release.take()
+    }
+
     pub fn enhanced(&self) -> bool {
         self.decoder.enhanced
     }
@@ -894,6 +946,112 @@ fn legacy(key: &Key, application: bool, keypad: bool) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn navigation_reader(events: Vec<Input>, enhanced: bool) -> Reader {
+        let mut ready: VecDeque<_> = events.into();
+        // A boundary avoids touching real stdin in these transport tests.
+        ready.push_back(Event::FocusLost.into());
+        Reader {
+            navigation_release: None,
+            decoder: Decoder {
+                ready,
+                enhanced,
+                ..Decoder::default()
+            },
+        }
+    }
+    fn navigation_key(code: KeyCode, kind: KeyEventKind) -> Input {
+        let key = Key::from_event(KeyEvent::new_with_kind(code, KeyModifiers::NONE, kind));
+        Input {
+            event: Event::Key(key.ui()),
+            key: Some(key),
+        }
+    }
+    #[test]
+    fn navigation_discards_repeats_released_during_slow_refresh() {
+        for code in [
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+        ] {
+            let mut events = vec![navigation_key(code, KeyEventKind::Repeat); 1000];
+            events.push(navigation_key(code, KeyEventKind::Release));
+            let mut reader = navigation_reader(events, true);
+            let packet = reader.read_navigation().unwrap();
+            assert_eq!(packet.key.unwrap().kind, KeyEventKind::Release);
+            assert_eq!(reader.take_navigation_release(), Some(code));
+            assert_eq!(reader.take_navigation_release(), None);
+            assert!(matches!(reader.read().unwrap().event, Event::FocusLost));
+        }
+    }
+    #[test]
+    fn navigation_preserves_distinct_taps_and_collapses_held_repeats() {
+        let press = navigation_key(KeyCode::Down, KeyEventKind::Press);
+        let repeat = navigation_key(KeyCode::Down, KeyEventKind::Repeat);
+        let release = navigation_key(KeyCode::Down, KeyEventKind::Release);
+        let mut reader = navigation_reader(
+            vec![
+                press.clone(),
+                repeat.clone(),
+                repeat.clone(),
+                release.clone(),
+                press,
+                release,
+            ],
+            true,
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                reader.read_navigation().unwrap().key.unwrap().kind,
+                KeyEventKind::Press
+            );
+            assert_eq!(reader.take_navigation_release(), Some(KeyCode::Down));
+        }
+        assert!(matches!(reader.read().unwrap().event, Event::FocusLost));
+        let mut reader = navigation_reader(vec![repeat; 1000], true);
+        assert_eq!(
+            reader.read_navigation().unwrap().key.unwrap().kind,
+            KeyEventKind::Repeat
+        );
+        assert!(matches!(reader.read().unwrap().event, Event::FocusLost));
+    }
+    #[test]
+    fn legacy_navigation_coalesces_bursts_but_keeps_event_boundaries() {
+        let down = navigation_key(KeyCode::Down, KeyEventKind::Press);
+        for boundary in [
+            Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)),
+            Event::Paste("text".into()),
+            Event::Resize(80, 24),
+            Event::FocusGained,
+        ] {
+            let mut events = vec![down.clone(); 1000];
+            events.push(boundary.clone().into());
+            events.push(down.clone());
+            let mut reader = navigation_reader(events, false);
+            assert_eq!(reader.read_navigation().unwrap().event, down.event);
+            assert_eq!(reader.read().unwrap().event, boundary);
+            assert_eq!(reader.read_navigation().unwrap().event, down.event);
+            assert!(matches!(reader.read().unwrap().event, Event::FocusLost));
+        }
+    }
+    #[test]
+    fn navigation_batch_is_bounded_and_raw_reads_remain_lossless() {
+        let repeat = navigation_key(KeyCode::Down, KeyEventKind::Repeat);
+        let mut reader = navigation_reader(vec![repeat.clone(); 5000], true);
+        reader.read_navigation().unwrap();
+        assert_eq!(reader.decoder.ready.len(), 5001 - 4097);
+        let mut reader = navigation_reader(vec![repeat.clone(); 1000], true);
+        for _ in 0..1000 {
+            let packet = reader.read().unwrap();
+            assert_eq!(packet.event, repeat.event);
+            assert_eq!(packet.key, repeat.key);
+        }
+        assert!(matches!(reader.read().unwrap().event, Event::FocusLost));
+    }
+
     fn decode(bytes: &[u8]) -> Vec<Input> {
         let mut decoder = Decoder::default();
         for byte in bytes {

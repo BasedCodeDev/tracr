@@ -248,7 +248,12 @@ impl Picker {
             }
             return false;
         }
-        if self.worktrees_active() && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+        if self.worktrees_active()
+            && matches!(
+                key.code,
+                KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown
+            )
+        {
             let w = self.worktrees.as_mut().unwrap();
             if !w.loading && !w.entries.is_empty() {
                 let current = w
@@ -256,6 +261,8 @@ impl Picker {
                     .iter()
                     .position(|r| Some(&r.path) == w.selected.as_ref());
                 let index = match (current, key.code) {
+                    (_, KeyCode::PageUp) => 0,
+                    (_, KeyCode::PageDown) => w.entries.len() - 1,
                     (Some(i), KeyCode::Up) => i.saturating_sub(1),
                     (Some(i), _) => (i + 1).min(w.entries.len() - 1),
                     _ => 0,
@@ -291,17 +298,18 @@ impl Picker {
                     _ => 0,
                 }
             }
-            KeyCode::Up | KeyCode::Down => {
+            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
                 if !self.rows.is_empty() {
                     let index = self
                         .rows
                         .iter()
                         .position(|r| Some(&r.path) == self.selected.as_ref())
                         .unwrap_or(0);
-                    let next = if key.code == KeyCode::Up {
-                        index.saturating_sub(1)
-                    } else {
-                        (index + 1).min(self.rows.len() - 1)
+                    let next = match key.code {
+                        KeyCode::PageUp => 0,
+                        KeyCode::PageDown => self.rows.len() - 1,
+                        KeyCode::Up => index.saturating_sub(1),
+                        _ => (index + 1).min(self.rows.len() - 1),
                     };
                     let path = self.rows[next].path.clone();
                     self.selected = Some(path.clone());
