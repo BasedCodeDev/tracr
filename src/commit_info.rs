@@ -137,7 +137,7 @@ impl Details {
                         &mut lines,
                         &self.refs,
                         width,
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(crate::git_render::BRANCH_COLOR),
                     );
                 }
             }
@@ -209,6 +209,13 @@ impl Details {
             }
             _ => {
                 for (label, value) in self.metadata() {
+                    let value_style = if label == "Refs" {
+                        Style::default().fg(crate::git_render::BRANCH_COLOR)
+                    } else if label == "Commit" && width >= 60 {
+                        Style::default().fg(Color::Cyan)
+                    } else {
+                        Style::default()
+                    };
                     if width >= 60 {
                         for (index, value) in wrap(&value, width - 14).into_iter().enumerate() {
                             lines.push(Line::from(vec![
@@ -216,14 +223,7 @@ impl Details {
                                     format!("{:<14}", if index == 0 { label } else { "" }),
                                     muted,
                                 ),
-                                Span::styled(
-                                    value,
-                                    if label == "Commit" || label == "Refs" {
-                                        Style::default().fg(Color::Cyan)
-                                    } else {
-                                        Style::default()
-                                    },
-                                ),
+                                Span::styled(value, value_style),
                             ]));
                         }
                         if label == "Parents" || label == "Commit date" {
@@ -232,7 +232,7 @@ impl Details {
                         continue;
                     }
                     section(&mut lines, &label.to_uppercase());
-                    append(&mut lines, &value, width, Style::default());
+                    append(&mut lines, &value, width, value_style);
                     lines.push(Line::default());
                 }
             }
@@ -638,7 +638,7 @@ async fn details(repository: &Path, oid: &str) -> Result<Details, String> {
         authored: date(&fields[4]),
         committer: format!("{} <{}>", fields[5], fields[6]),
         committed: date(&fields[7]),
-        refs: fields[8].clone(),
+        refs: fields[8].replace(", ", "\n"),
         message: fields[9].trim_end().to_owned(),
         files,
     })
@@ -657,7 +657,7 @@ mod tests {
             authored: "19 Nov 2026, 14:32 AEDT (+1100)".into(),
             committer: "Alex Morgan <alex@example.com>".into(),
             committed: "19 Nov 2026, 14:32 AEDT (+1100)".into(),
-            refs: "HEAD -> feature/commit-details, origin/feature/commit-details".into(),
+            refs: "HEAD -> feature/commit-details\norigin/feature/commit-details".into(),
             message: "Make commit history easier to explore\n\nGive each commit a readable overview, a focused file list, and complete metadata.\n\nKeep keyboard navigation predictable and preserve the reader’s place when switching tabs.".into(),
             files: vec![
                 FileChange { path: "src/commit_info.rs".into(), added: Some(142), removed: Some(38) },
