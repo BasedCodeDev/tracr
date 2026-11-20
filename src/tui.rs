@@ -1332,10 +1332,14 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                     };
                     let item =
                         ListItem::new(graph_viewport(spans, view.history.horizontal.get(), width));
-                    if matches!(row, crate::git_sessions::Row::Graph(i)
-                        if view.history.is_mainline(&view.history.rows[*i]))
-                    {
-                        item.style(Style::default().bg(crate::git_render::GRAPH_BACKGROUND))
+                    let background = match row {
+                        crate::git_sessions::Row::Graph(i) => {
+                            view.history.row_background(&view.history.rows[*i])
+                        }
+                        crate::git_sessions::Row::Session { .. } => None,
+                    };
+                    if let Some(background) = background {
+                        item.style(Style::default().bg(background))
                     } else {
                         item
                     }

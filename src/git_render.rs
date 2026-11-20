@@ -15,6 +15,8 @@ use crate::{
 pub const STASH_COLOR: ratatui::style::Color = ratatui::style::Color::Rgb(190, 145, 190);
 
 pub const GRAPH_BACKGROUND: ratatui::style::Color = ratatui::style::Color::Rgb(40, 40, 40);
+pub const MAINLINE_BACKGROUND: ratatui::style::Color = ratatui::style::Color::Rgb(56, 56, 56);
+pub const MAINLINE_MERGE_BACKGROUND: ratatui::style::Color = ratatui::style::Color::Rgb(48, 48, 48);
 
 pub const LANE_PITCH: usize = 4;
 pub const BRIDGE: char = '⌢';

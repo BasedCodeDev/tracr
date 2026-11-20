@@ -391,12 +391,16 @@ impl History {
         }
     }
 
-    pub(crate) fn is_mainline(&self, row: &GraphRow) -> bool {
-        row.oid.as_ref().is_some_and(|oid| {
-            self.mainline
-                .as_ref()
-                .is_some_and(|main| main.ancestry.contains(oid))
-        })
+    pub(crate) fn row_background(&self, row: &GraphRow) -> Option<ratatui::style::Color> {
+        let oid = row.oid.as_ref()?;
+        let main = self.mainline.as_ref()?;
+        if oid == &main.tip {
+            Some(crate::git_render::MAINLINE_BACKGROUND)
+        } else if row.parents.len() > 1 && main.ancestry.contains(oid) {
+            Some(crate::git_render::MAINLINE_MERGE_BACKGROUND)
+        } else {
+            None
+        }
     }
 
     pub fn row_spans(&self, row: &GraphRow) -> Vec<ratatui::text::Span<'static>> {
@@ -435,7 +439,9 @@ impl History {
             }
         }
         use unicode_width::UnicodeWidthStr;
-        let background = crate::git_render::GRAPH_BACKGROUND;
+        let background = self
+            .row_background(row)
+            .unwrap_or(crate::git_render::GRAPH_BACKGROUND);
         for span in &mut spans {
             span.style = span.style.bg(background);
         }
@@ -1089,6 +1095,45 @@ mod tests {
             })
             .collect()
     }
+    #[test]
+    fn tip_and_older_merges_have_distinct_row_highlights() {
+        use crate::git_render::{GRAPH_BACKGROUND, MAINLINE_BACKGROUND, MAINLINE_MERGE_BACKGROUND};
+        let mut h = History::default();
+        h.replace(rows(4), 128);
+        let oid = |i: usize| format!("{i:040x}");
+        h.mainline = Some(Arc::new(crate::git::Mainline {
+            reference: "refs/heads/main".into(),
+            tip: oid(0),
+            ancestry: [oid(0), oid(1), oid(2)].into_iter().collect(),
+        }));
+        h.rows[1].parents.push(oid(99)); // Older mainline merge.
+        h.rows[3].parents.push(oid(99)); // Feature merge, outside mainline.
+        let expected = [
+            Some(MAINLINE_BACKGROUND),
+            Some(MAINLINE_MERGE_BACKGROUND),
+            None,
+            None,
+        ];
+        for (row, background) in h.rows.iter().zip(expected) {
+            assert_eq!(h.row_background(row), background);
+            assert_eq!(
+                h.row_spans(row)[0].style.bg,
+                Some(background.unwrap_or(GRAPH_BACKGROUND))
+            );
+        }
+        h.rows[0].parents.push(oid(99));
+        assert_eq!(h.row_background(&h.rows[0]), Some(MAINLINE_BACKGROUND));
+        // Following a different checkout must not transfer the tip highlight.
+        h.head = Some(crate::git::Head {
+            oid: Some(oid(3)),
+            branch: Some("feature".into()),
+        });
+        assert_eq!(h.row_background(&h.rows[3]), None);
+        assert_eq!(h.row_background(&h.rows[0]), Some(MAINLINE_BACKGROUND));
+        h.mainline = None;
+        assert!(h.rows.iter().all(|row| h.row_background(row).is_none()));
+    }
+
     #[test]
     fn shading_aligns_commit_connector_and_session_rows() {
         use ratatui::style::Color;
