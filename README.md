@@ -217,7 +217,7 @@ globally; selecting a result opens its folder.
 
 In Folders or Sessions, press **n** or choose **Create new session** from `?` to
 start a new session in the selected folder, including folders with existing
-sessions. Starting creation closes the drawer and focuses Sessions immediately;
+sessions. Starting creation focuses Sessions immediately;
 any harness picker or launch error appears there. The new coding session fills
 the screen and receives keyboard input.
 When no sessions are shown, Enter also creates a session; otherwise Enter resumes
@@ -275,22 +275,25 @@ focused so the current location is visible. Press
 also works. The shortcut works while coding and over dialogs.
 
 At 120 columns and 12 rows or larger, the drawer opens on the left and the coding
-area resizes beside it. The drawer uses 40% of the width, capped at 60 columns.
+area resizes beside it. While browsing sessions, the drawer stays visible and
+Alt+backtick switches keyboard focus between Sessions and the remembered drawer
+panel. Starting a coding session hides the drawer; returning to the session list
+restores it. The drawer uses 40% of the width, capped at 60 columns.
 Smaller terminals show the drawer full-screen. Opening and closing is immediate.
 Folders appears above the existing Git Worktrees graph, which is available only
 in a repository. Folders uses one-third of the drawer height when Git is present.
 With fewer than 12 content rows, only the focused drawer panel is shown.
 
-- Input belongs to the drawer while it is open. **Tab / Shift+Tab** switch between
+- Input belongs to the focused area. **Tab / Shift+Tab** switch between
   Folders and Git; Alt+Up/Left selects Folders and Alt+Down/Right selects Git.
-- **Right Arrow** closes either drawer panel and focuses the session area.
-- **Escape** closes a dialog or search first, then closes the drawer. Closing the
-  drawer restores input to the session list or coding terminal.
+- **Right Arrow** from either drawer panel focuses the session area.
+- **Escape** closes a dialog or search first, then focuses Sessions. The drawer stays
+  visible beside the session list on wide screens.
 - Up / Down or `k/j` selects items. In Folders, `l` expands a folder;
   Left / `h` collapses it or selects its displayed parent.
 - Enter opens the only session, or starts creation when a folder has no
   sessions. With multiple sessions, the main view shows the list. The drawer
-  closes and focus moves to the session or session list. Incomplete discovery
+  hides for coding; focus moves to the session or session list. Incomplete discovery
   does not start a session automatically.
 - Drawer selection and scroll positions survive toggles and terminal resizes.
   Dialogs belong to the area that opened them: toggling preserves unfinished
@@ -299,7 +302,7 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
 - In Git history, Home / End selects the first / last loaded commit or session; approaching
   the end loads more history. Left or `h` scrolls left; `l` scrolls right. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
-  root follows HEAD automatically. Escape closes the drawer; reopening it
+  root follows HEAD automatically. Escape focuses Sessions; returning to the drawer
   restores the selected drawer panel.
   The top-right `↑` border marker indicates rows above the preview; the
   bottom-right `↓` indicates rows below it or more history available to load.

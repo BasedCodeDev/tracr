@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
         t.expect('unfinished relocation')
         t.send(b'u');t.expect('Inspect/recover relocation')
         t.send(b'\r');t.expect('Session relinked and verified.')
-        t.send(b'\x1b[C');t.wait(lambda:'Alt+` / Esc Close' not in t.text())
+        t.send(b'\x1b[C');t.wait(lambda:'→ Sessions' not in t.text())
         t.inspect('ID: session');assert 'u Recover' not in t.text();t.finish()
     finally:t.close()
     requests=(home/'requests.jsonl').read_text()

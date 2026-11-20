@@ -25,9 +25,9 @@ class Terminal:
         # Most interaction fixtures exercise Sessions first. Startup coverage opts
         # out so it can verify the real initial drawer and its focus explicitly.
         if start_in_sessions:
-            self.expect('Alt+` / Esc Close')
+            self.expect('→ Sessions')
             self.send(b'\x1b')
-            self.wait(lambda: 'Alt+` / Esc Close' not in self.text())
+            self.wait(lambda: '→ Sessions' not in self.text())
     def resize(self, rows, cols):
         changed = getattr(self, 'dimensions', None) != (rows, cols)
         self.dimensions = (rows, cols)

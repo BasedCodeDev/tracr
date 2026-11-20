@@ -312,6 +312,7 @@ pub struct View {
     /// Scoped to the displayed frame and its next input; cleared before updates.
     pub folder_rows_snapshot: Option<std::rc::Rc<Vec<crate::browser::FolderRow>>>,
     pub drawer_reminder: std::cell::Cell<DrawerReminder>,
+    // Keyboard focus / explicit opening; wide session browsing also pins visibility.
     pub drawer_open: bool,
     pub drawer_git: bool,
     /// Area whose dialog fields are currently loaded: false = main, true = drawer.
@@ -509,6 +510,14 @@ impl View {
         self.git_hidden = false;
     }
 
+    fn browser_drawer_pinned(&self) -> bool {
+        self.layout_mode.get() == LayoutMode::Columns && self.terminals.borrow().active.is_none()
+    }
+
+    fn drawer_visible(&self) -> bool {
+        self.drawer_open || self.browser_drawer_pinned()
+    }
+
     fn toggle_drawer(&mut self) {
         self.drawer_open = !self.drawer_open;
         self.select_dialog_area(self.drawer_open);
@@ -608,7 +617,7 @@ fn panel_layout(area: Rect, terminal_height: u16, view: &View, present: bool) ->
         git: None,
         graph_visible: false,
     };
-    if !view.drawer_open {
+    if !view.drawer_visible() {
         result.sessions = Some(area);
         return result;
     }
@@ -627,7 +636,7 @@ fn panel_layout(area: Rect, terminal_height: u16, view: &View, present: bool) ->
     if !present {
         result.folders = Some(drawer);
     } else if drawer.height < 12 {
-        if view.context() == 2 {
+        if view.drawer_git {
             result.git = Some(drawer);
         } else {
             result.folders = Some(drawer);
@@ -906,7 +915,13 @@ fn footer_shortcuts(width: u16, browser: &Browser, view: &View) -> (String, Stri
         }
         line
     };
-    let mut shared = if view.drawer_open {
+    let mut shared = if view.browser_drawer_pinned() {
+        if view.drawer_open {
+            "Alt+` / Esc Focus Sessions · → Sessions · Tab Panels".to_owned()
+        } else {
+            "Alt+` Focus drawer".to_owned()
+        }
+    } else if view.drawer_open {
         "Alt+` / Esc Close drawer · → Sessions · Tab Panels".to_owned()
     } else if width >= 80 {
         "Alt+` opens the Tracr drawer — key below Esc; no Shift needed".to_owned()
@@ -2179,6 +2194,17 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         "Toggle Tracr drawer",
         None,
     ));
+    if view.browser_drawer_pinned() {
+        for entry in &mut entries {
+            if matches!(entry.0, ToggleDrawer | GitReturn) {
+                entry.3 = if view.drawer_open {
+                    "Focus Sessions"
+                } else {
+                    "Focus drawer"
+                };
+            }
+        }
+    }
     entries.retain(|entry| !matches!(entry.0, PreviousPane | FolderToggle | GitToggle));
     if view.drawer_open && view.terminals.borrow().active.is_some() {
         entries.insert(
@@ -2197,7 +2223,11 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             ToggleDrawer,
             "Navigation",
             "→",
-            "Focus session and close drawer",
+            if view.browser_drawer_pinned() {
+                "Focus Sessions"
+            } else {
+                "Focus session and close drawer"
+            },
             None,
         ));
     }
@@ -2934,11 +2964,12 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             );
         }
         1 => {
+            let drawer_visible = view.drawer_visible();
             if view.terminals.borrow_mut().draw(
                 frame,
                 area,
                 view.terminal_focused(),
-                view.drawer_open,
+                drawer_visible,
             ) {
                 return;
             }
@@ -6688,12 +6719,15 @@ mod cleanup_tests {
             let mut view = View::default();
             let area = Rect::new(0, 0, width, height - 2);
             let closed = panel_layout(area, height, &view, true);
-            assert_eq!(closed.sessions, Some(area));
-            assert!(closed.folders.is_none() && closed.git.is_none());
+            let wide = width >= 120 && height >= 12;
+            assert_eq!(closed.folders.is_some(), wide);
+            assert_eq!(closed.sessions.unwrap().x > 0, wide);
+            assert_eq!(view.drawer_visible(), wide);
             view.toggle_drawer();
             for present in [false, true] {
                 for git in [false, true] {
                     view.git_focus = git;
+                    view.drawer_git = git;
                     let panels = panel_layout(area, height, &view, present);
                     let wide = width >= 120 && height >= 12;
                     assert_eq!(panels.sessions.is_some(), wide);
@@ -6736,7 +6770,7 @@ mod cleanup_tests {
     }
 
     #[test]
-    fn drawer_selection_closes_drawer_and_focuses_sessions() {
+    fn drawer_selection_focuses_sessions() {
         for count in 0..=2 {
             let mut browser = entry_fixture(count, 1);
             let mut view = View::default();

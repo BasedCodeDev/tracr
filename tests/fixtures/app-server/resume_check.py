@@ -51,7 +51,7 @@ for action in ('normal', 'nonzero', 'ctrl-c', 'sigterm', 'kill-timeout', 'reload
             wait(lambda: b'Task first' in output)
             # Leave the startup drawer and focus Sessions before inspecting a session.
             os.write(master, b'\x1b[C')
-            wait(lambda: 'Alt+` / Esc Close' not in screen.text())
+            wait(lambda: '→ Sessions' not in screen.text())
             # Wait for discovery and detail readiness before resuming.
             wait(lambda: (home / 'requests.jsonl').exists() and 'thread/read' in (home / 'requests.jsonl').read_text())
             os.write(master,b'i')

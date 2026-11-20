@@ -47,6 +47,8 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
     def read_calls(): return [line for line in calls.read_text().splitlines() if ' status ' not in ' '+line+' ']
     try:
         t.expect('Sessions')
+        # Wide browsing keeps Git visible and live even with Sessions focused.
+        commit('Watch beside Sessions'); t.expect('Watch beside Sessions')
         t.resize(80, 119)  # Full-width graph in the stacked layout.
         t.send(b'\x1b`')
         t.expect('Watch second'); t.expect('[HEAD]'); settle()
