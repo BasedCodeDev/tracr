@@ -4184,6 +4184,9 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 view.message = Some(reason);
                 return Action::Continue;
             }
+            if view.drawer_open {
+                view.toggle_drawer();
+            }
             view.focus = 1;
             view.creation_folder = match &browser.folder {
                 FolderFilter::Path(path) => Some(path.clone()),
@@ -5298,8 +5301,9 @@ mod cleanup_tests {
                 ),
                 Action::CreateNew(0)
             );
-            assert_eq!(view.focus, 0);
-            view.toggle_drawer();
+            assert_eq!(view.focus, 1);
+            assert!(!view.drawer_open);
+            assert!(!view.dialog_area);
             assert_eq!(
                 handle_key(
                     &mut browser,
@@ -5316,6 +5320,8 @@ mod cleanup_tests {
                 .position(|entry| entry.command == Command::Create)
                 .unwrap();
             assert_eq!(enter(&mut browser, &mut view), Action::CreateNew(0));
+            assert!(!view.drawer_open);
+            assert_eq!(view.focus, 1);
         }
     }
 
@@ -5325,10 +5331,13 @@ mod cleanup_tests {
         let mut view = folder_view();
         press(&mut browser, &mut view, KeyCode::Char('n'));
         assert_eq!(view.source_picker, Some(0));
+        assert!(!view.drawer_open);
+        assert!(!view.dialog_area);
+        assert_eq!(view.creation_folder, Some("/tmp".into()));
         press(&mut browser, &mut view, KeyCode::Down);
         assert_eq!(enter(&mut browser, &mut view), Action::CreateNew(1));
 
-        view.focus = 0;
+        view.toggle_drawer();
         press(&mut browser, &mut view, KeyCode::Char('n'));
         assert_eq!(
             handle_key(
@@ -5339,6 +5348,8 @@ mod cleanup_tests {
             Action::Continue
         );
         assert!(view.source_picker.is_none());
+        assert!(!view.drawer_open);
+        assert_eq!(view.focus, 1);
     }
 
     #[test]
@@ -5366,6 +5377,8 @@ mod cleanup_tests {
                 Action::Continue
             );
             assert!(view.message.is_some());
+            assert!(view.drawer_open);
+            assert_eq!(view.focus, 0);
             assert!(view.source_picker.is_none());
         }
     }

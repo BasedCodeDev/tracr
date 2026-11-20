@@ -217,7 +217,9 @@ globally; selecting a result opens its folder.
 
 In Folders or Sessions, press **n** or choose **Create new session** from `?` to
 start a new session in the selected folder, including folders with existing
-sessions. Closing the drawer gives the coding session the entire screen.
+sessions. Starting creation closes the drawer and focuses Sessions immediately;
+any harness picker or launch error appears there. The new coding session fills
+the screen and receives keyboard input.
 When no sessions are shown, Enter also creates a session; otherwise Enter resumes
 the selected session.
 This opens Codex interactively in that folder and returns to tracr when you exit.
