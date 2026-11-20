@@ -3,6 +3,8 @@
 //! Input is child-before-parent. Vacant columns are reused, never compacted.
 //! A lane targets an unresolved commit; multiple child connections can converge
 //! on that target without losing their separate (child OID, parent index) identity.
+//! With a mainline, a side lane may temporarily share its target with column zero;
+//! they converge immediately above that target, never at an intervening commit.
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
@@ -67,6 +69,8 @@ pub struct ParentConnection {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayoutRow {
+    /// Incoming side lanes that converge immediately above this commit.
+    pub joins: Vec<Lane>,
     pub node: Node,
     /// Column-sorted active lanes before and after this commit's transition.
     pub incoming: Vec<Lane>,
@@ -104,10 +108,30 @@ pub struct Builder {
     slots: Vec<Option<Lane>>,
     targets: HashMap<Arc<str>, usize>,
     next_lane: usize,
+    mainline: HashSet<String>,
 }
 impl Builder {
     pub fn new() -> Self {
         Self::default()
+    }
+    pub fn with_mainline(mainline: HashSet<String>) -> Self {
+        let mut builder = Self {
+            mainline,
+            ..Self::default()
+        };
+        if !builder.mainline.is_empty() {
+            builder.slots.push(None);
+        }
+        builder
+    }
+    fn main_lane(&mut self, target: Arc<str>) -> Lane {
+        self.layout.width = self.layout.width.max(1);
+        Lane {
+            id: usize::MAX,
+            column: 0,
+            color: LaneColor::Cyan,
+            target,
+        }
     }
     pub fn snapshot(&self) -> &Layout {
         &self.layout
@@ -124,7 +148,9 @@ impl Builder {
             .slots
             .iter()
             .enumerate()
-            .find(|(i, lane)| lane.is_none() && Some(*i) != reserved)
+            .find(|(i, lane)| {
+                lane.is_none() && Some(*i) != reserved && (self.mainline.is_empty() || *i != 0)
+            })
             .map(|(i, _)| i)
             .unwrap_or(self.slots.len());
         if column == self.slots.len() {
@@ -136,7 +162,17 @@ impl Builder {
         Lane {
             id,
             column,
-            color: LaneColor::for_id(id),
+            color: if self.mainline.is_empty() {
+                LaneColor::for_id(id)
+            } else {
+                [
+                    LaneColor::Magenta,
+                    LaneColor::Yellow,
+                    LaneColor::Green,
+                    LaneColor::Blue,
+                    LaneColor::Red,
+                ][id % 5]
+            },
             target,
         }
     }
@@ -187,7 +223,20 @@ impl Builder {
         // All fallible input validation is complete before any mutation.
         let incoming = self.active();
         let oid: Arc<str> = Arc::from(commit.oid.as_str());
-        let node_lane = if let Some(column) = self.targets.remove(commit.oid.as_str()) {
+        let is_main = self.mainline.contains(&commit.oid);
+        let mut joins = Vec::new();
+        let node_lane = if is_main {
+            self.targets.remove(commit.oid.as_str());
+            for slot in &mut self.slots {
+                if slot.as_ref().is_some_and(|lane| lane.target == oid) {
+                    let lane = slot.take().unwrap();
+                    if lane.column != 0 {
+                        joins.push(lane);
+                    }
+                }
+            }
+            self.main_lane(oid.clone())
+        } else if let Some(column) = self.targets.remove(commit.oid.as_str()) {
             self.slots[column]
                 .take()
                 .expect("target map and slots agree")
@@ -199,7 +248,11 @@ impl Builder {
             if cancelled() {
                 return Err(LayoutError::Cancelled);
             }
-            let lane = if let Some(&column) = self.targets.get(parent.as_str()) {
+            let lane = if is_main && parent_index == 0 {
+                let lane = self.main_lane(Arc::from(parent.as_str()));
+                self.place(lane.clone());
+                lane
+            } else if let Some(&column) = self.targets.get(parent.as_str()) {
                 self.slots[column]
                     .as_ref()
                     .expect("active target has a lane")
@@ -231,6 +284,7 @@ impl Builder {
             .insert(oid.clone(), self.layout.rows.len());
         self.layout.unresolved = outgoing.clone();
         self.layout.rows.push(LayoutRow {
+            joins,
             node: Node {
                 oid,
                 column: node_lane.column,

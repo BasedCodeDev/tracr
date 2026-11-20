@@ -1330,7 +1330,19 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                             name_width,
                         ),
                     };
-                    ListItem::new(graph_viewport(spans, view.history.horizontal.get(), width))
+                    let item =
+                        ListItem::new(graph_viewport(spans, view.history.horizontal.get(), width));
+                    let background = match row {
+                        crate::git_sessions::Row::Graph(i) => {
+                            view.history.row_background(&view.history.rows[*i])
+                        }
+                        crate::git_sessions::Row::Session { .. } => None,
+                    };
+                    if let Some(background) = background {
+                        item.style(Style::default().bg(background))
+                    } else {
+                        item
+                    }
                 })
                 .collect();
             frame.render_stateful_widget(

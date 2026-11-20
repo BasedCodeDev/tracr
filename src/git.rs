@@ -109,6 +109,86 @@ pub async fn references(path: &Path) -> Result<References, String> {
         Err(error) => Err(error),
     }
 }
+/// Repository default branch, independent of the selected checkout's HEAD.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mainline {
+    pub reference: String,
+    pub tip: String,
+    pub ancestry: std::collections::HashSet<String>,
+}
+
+pub async fn mainline(path: &Path) -> Result<Option<Mainline>, String> {
+    let bytes = read(
+        path,
+        &[
+            "for-each-ref",
+            "--format=%(refname)%09%(objectname)%09%(symref)",
+            "refs/heads/",
+            "refs/remotes/",
+        ],
+    )
+    .await?;
+    let text = String::from_utf8_lossy(&bytes);
+    let refs: std::collections::BTreeMap<_, _> = text
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            Some((fields.next()?, (fields.next()?, fields.next()?)))
+        })
+        .collect();
+    let local = ["refs/heads/main", "refs/heads/master"]
+        .into_iter()
+        .find(|name| refs.contains_key(name));
+    let remote = |name: &str| -> Option<&str> {
+        let target = refs.get(name)?.1;
+        target.strip_prefix("refs/remotes/")?;
+        refs.contains_key(target).then_some(target)
+    };
+    let selected = local
+        .or_else(|| remote("refs/remotes/origin/HEAD"))
+        .or_else(|| {
+            let candidates: Vec<_> = refs
+                .keys()
+                .filter(|name| name.starts_with("refs/remotes/") && name.ends_with("/HEAD"))
+                .filter_map(|name| remote(name))
+                .collect();
+            let first = *candidates.first()?;
+            let identity = |name: &str| {
+                (
+                    name.strip_prefix("refs/remotes/")
+                        .and_then(|s| s.split_once('/'))
+                        .map(|(_, branch)| branch.to_owned()),
+                    refs[name].0,
+                )
+            };
+            candidates
+                .iter()
+                .all(|name| identity(name) == identity(first))
+                .then_some(first)
+        });
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let local_name = selected
+        .strip_prefix("refs/remotes/")
+        .and_then(|s| s.split_once('/'))
+        .map(|(_, name)| format!("refs/heads/{name}"));
+    let reference = local_name
+        .as_deref()
+        .filter(|name| refs.contains_key(name))
+        .unwrap_or(selected);
+    let tip = refs[reference].0.to_owned();
+    let ancestry = read(path, &["rev-list", "--first-parent", &tip, "--"]).await?;
+    Ok(Some(Mainline {
+        reference: reference.to_owned(),
+        tip,
+        ancestry: String::from_utf8_lossy(&ancestry)
+            .lines()
+            .map(str::to_owned)
+            .collect(),
+    }))
+}
+
 static READ_WORKERS: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>> =
     std::sync::Mutex::new(Vec::new());
 

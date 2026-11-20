@@ -14,6 +14,10 @@ use crate::{
 
 pub const STASH_COLOR: ratatui::style::Color = ratatui::style::Color::Rgb(190, 145, 190);
 
+pub const GRAPH_BACKGROUND: ratatui::style::Color = ratatui::style::Color::Rgb(40, 40, 40);
+pub const MAINLINE_BACKGROUND: ratatui::style::Color = ratatui::style::Color::Rgb(56, 56, 56);
+pub const MAINLINE_MERGE_BACKGROUND: ratatui::style::Color = ratatui::style::Color::Rgb(48, 48, 48);
+
 pub const LANE_PITCH: usize = 4;
 pub const BRIDGE: char = '⌢';
 
@@ -113,6 +117,36 @@ fn block(
     cancelled: &impl Fn() -> bool,
 ) -> Option<()> {
     let mut active: BTreeMap<_, _> = row.incoming.iter().map(|l| (l.column, l.color)).collect();
+    // Side connections to an older mainline commit remain separate until here.
+    for lane in &row.joins {
+        if cancelled() {
+            return None;
+        }
+        let source = lane.column * LANE_PITCH;
+        let target = row.node.column * LANE_PITCH;
+        let mut line = Line::verticals(&active);
+        for x in target + 1..source {
+            if x % 256 == 0 && cancelled() {
+                return None;
+            }
+            let crossing = x % LANE_PITCH == 0 && active.contains_key(&(x / LANE_PITCH));
+            line.set(x, if crossing { BRIDGE } else { '─' }, lane.color);
+        }
+        line.set(source - 1, '←', lane.color);
+        line.set(source, '╯', lane.color);
+        line.set(
+            target,
+            if active.contains_key(&row.node.column) {
+                '├'
+            } else {
+                '╭'
+            },
+            row.node.color,
+        );
+        output.push(line.finish(None));
+        active.remove(&lane.column);
+        active.insert(row.node.column, row.node.color);
+    }
     let source = row.node.column * LANE_PITCH;
     let mut node = Line::verticals(&active);
     node.set(source, '●', row.node.color);
@@ -227,10 +261,10 @@ pub fn render_cancellable(layout: &Layout, cancelled: impl Fn() -> bool) -> Opti
         if cancelled() {
             return None;
         }
-        result
-            .positions
-            .insert(row.node.oid.clone(), result.rows.len());
+        let start = result.rows.len();
         block(row, &mut result.rows, &cancelled)?;
+        let node = (start..result.rows.len()).find(|&i| result.rows[i].oid.is_some())?;
+        result.positions.insert(row.node.oid.clone(), node);
     }
     if !layout.unresolved.is_empty() {
         let mut line = Line::default();
