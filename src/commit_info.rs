@@ -137,7 +137,7 @@ impl Details {
                         &mut lines,
                         &self.refs,
                         width,
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(crate::git_render::BRANCH_COLOR),
                     );
                 }
             }
@@ -209,6 +209,13 @@ impl Details {
             }
             _ => {
                 for (label, value) in self.metadata() {
+                    let value_style = if label == "Refs" {
+                        Style::default().fg(crate::git_render::BRANCH_COLOR)
+                    } else if label == "Commit" && width >= 60 {
+                        Style::default().fg(Color::Cyan)
+                    } else {
+                        Style::default()
+                    };
                     if width >= 60 {
                         for (index, value) in wrap(&value, width - 14).into_iter().enumerate() {
                             lines.push(Line::from(vec![
@@ -216,14 +223,7 @@ impl Details {
                                     format!("{:<14}", if index == 0 { label } else { "" }),
                                     muted,
                                 ),
-                                Span::styled(
-                                    value,
-                                    if label == "Commit" || label == "Refs" {
-                                        Style::default().fg(Color::Cyan)
-                                    } else {
-                                        Style::default()
-                                    },
-                                ),
+                                Span::styled(value, value_style),
                             ]));
                         }
                         if label == "Parents" || label == "Commit date" {
@@ -232,7 +232,7 @@ impl Details {
                         continue;
                     }
                     section(&mut lines, &label.to_uppercase());
-                    append(&mut lines, &value, width, Style::default());
+                    append(&mut lines, &value, width, value_style);
                     lines.push(Line::default());
                 }
             }
