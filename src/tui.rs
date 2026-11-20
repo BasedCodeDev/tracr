@@ -6744,9 +6744,9 @@ mod graph_viewport_tests {
         let spans = vec![
             Span::styled(
                 "| * ",
-                Style::default().fg(Color::Cyan).bg(Color::Rgb(48, 48, 48)),
+                Style::default().fg(Color::Cyan).bg(Color::Rgb(40, 40, 40)),
             ),
-            Span::raw(" "),
+            Span::raw("  "),
             Span::styled(
                 "[main] ",
                 Style::default().fg(crate::git_render::BRANCH_COLOR),
@@ -6782,7 +6782,7 @@ mod graph_viewport_tests {
                 assert_eq!(
                     buffer[(x, 1)].bg,
                     if usize::from(x - 3) + offset < 4 {
-                        Color::Rgb(48, 48, 48)
+                        Color::Rgb(40, 40, 40)
                     } else {
                         Color::Reset
                     }
