@@ -6742,8 +6742,11 @@ mod graph_viewport_tests {
         use ratatui::{Terminal, backend::TestBackend};
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         let spans = vec![
-            Span::styled("| * ", Style::default().fg(Color::Cyan)),
-            Span::raw("abcdef0 "),
+            Span::styled(
+                "| * ",
+                Style::default().fg(Color::Cyan).bg(Color::Rgb(32, 32, 32)),
+            ),
+            Span::raw(" "),
             Span::styled(
                 "[main] ",
                 Style::default().fg(crate::git_render::BRANCH_COLOR),
@@ -6752,7 +6755,10 @@ mod graph_viewport_tests {
             Span::styled("[tag: v1] ", Style::default().fg(Color::Yellow)),
             Span::raw("long subject 界界"),
         ];
-        for offset in [0, 4, 20] {
+        for (focused, offset) in [true, false]
+            .into_iter()
+            .flat_map(|focused| [0, 2, 4, 20].map(|offset| (focused, offset)))
+        {
             terminal
                 .draw(|frame| {
                     frame.render_stateful_widget(
@@ -6763,7 +6769,7 @@ mod graph_viewport_tests {
                         ))])
                         .block(block("Git history", true))
                         .highlight_symbol("> ")
-                        .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
+                        .highlight_style(selection_style(focused)),
                         frame.area(),
                         &mut ListState::default().with_selected(Some(0)),
                     )
@@ -6771,6 +6777,22 @@ mod graph_viewport_tests {
                 .unwrap();
             let buffer = terminal.backend().buffer();
             assert_eq!(buffer[(1, 1)].symbol(), ">");
+            assert_eq!(buffer[(1, 1)].bg, Color::Reset);
+            for x in 3..39 {
+                assert_eq!(
+                    buffer[(x, 1)].bg,
+                    if usize::from(x - 3) + offset < 4 {
+                        Color::Rgb(32, 32, 32)
+                    } else {
+                        Color::Reset
+                    }
+                );
+            }
+            assert!(buffer[(3, 1)].modifier.contains(if focused {
+                Modifier::BOLD
+            } else {
+                Modifier::DIM
+            }));
             assert_eq!(buffer[(39, 1)].symbol(), "┃");
             assert!(buffer.content.iter().any(|cell| cell.fg == Color::Cyan));
             if offset == 0 {

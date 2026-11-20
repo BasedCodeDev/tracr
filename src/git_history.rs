@@ -398,10 +398,14 @@ impl History {
             }
         }
         use unicode_width::UnicodeWidthStr;
-        spans.push(Span::raw(
-            " ".repeat(self.graph_width.saturating_sub(row.graph.width()) + 1),
+        let background = Color::Rgb(32, 32, 32);
+        for span in &mut spans {
+            span.style = span.style.bg(background);
+        }
+        spans.push(Span::styled(
+            " ".repeat(self.graph_width.saturating_sub(row.graph.width())),
+            Style::default().bg(background),
         ));
-        spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
         spans.push(Span::raw(" "));
         if let Some(oid) = &row.oid {
             if let Some(stash) = &row.stash {
@@ -463,7 +467,7 @@ impl History {
                     .rows
                     .iter()
                     .map(|row| {
-                        let mut width = self.graph_width + 3;
+                        let mut width = self.graph_width + 1;
                         if let Some(oid) = &row.oid {
                             width += row.subject.width() + if self.is_head(row) { 7 } else { 0 };
                             if let Some(stash) = &row.stash {
@@ -1026,7 +1030,7 @@ mod tests {
             .collect()
     }
     #[test]
-    fn divider_aligns_commit_connector_and_session_rows() {
+    fn shading_aligns_commit_connector_and_session_rows() {
         use ratatui::style::Color;
         use unicode_width::UnicodeWidthStr;
 
@@ -1050,29 +1054,23 @@ mod tests {
         let session = h.session_spans(0, None);
         let shared_session = h.session_spans(0, Some(2));
         for spans in [&commit, &connector, &session, &shared_session] {
-            let dividers: Vec<_> = spans
+            let shaded: Vec<_> = spans
                 .iter()
-                .enumerate()
-                .filter(|(_, span)| span.style.fg == Some(Color::DarkGray))
+                .take_while(|span| span.style.bg == Some(Color::Rgb(32, 32, 32)))
                 .collect();
-            assert_eq!(dividers.len(), 1);
-            let (index, divider) = dividers[0];
-            assert_eq!(divider.content, "│");
             assert_eq!(
-                spans[..index]
-                    .iter()
-                    .map(|s| s.content.width())
-                    .sum::<usize>(),
-                h.graph_width + 1
+                shaded.iter().map(|s| s.content.width()).sum::<usize>(),
+                h.graph_width
             );
+            assert!(spans[shaded.len()..].iter().all(|s| s.style.bg.is_none()));
         }
         let text = |spans: &[ratatui::text::Span<'_>]| {
             spans.iter().map(|s| s.content.as_ref()).collect::<String>()
         };
-        assert_eq!(text(&commit), "●   │ commit 0");
-        assert_eq!(text(&connector), "│ │ │ ");
-        assert!(text(&session).ends_with("│   "));
-        assert_eq!(text(&shared_session), "│ │ │   ");
+        assert_eq!(text(&commit), "●   commit 0");
+        assert_eq!(text(&connector), "│ │ ");
+        assert_eq!(text(&session).width(), h.graph_width + 3);
+        assert_eq!(text(&shared_session), "│ │   ");
         let widest = h
             .rows
             .iter()
@@ -1487,7 +1485,7 @@ mod tests {
         assert!(!screen.contains("Git history"));
         assert!(!screen.contains("detached HEAD"));
         assert!(screen.contains("[HEAD] commit 3"));
-        assert!(screen.contains("> ● │ commit 2"));
+        assert!(screen.contains("> ● commit 2"));
         assert_eq!(screen.matches("[HEAD]").count(), 1);
     }
     type HeadReply = oneshot::Sender<Result<crate::git::Head, String>>;
