@@ -863,7 +863,7 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
                 .iter()
                 .map(|cell| cell.symbol())
                 .collect();
-            assert!(text.contains("Zoom"), "{width}x{height}");
+            assert!(text.contains("archived sessions"), "{width}x{height}");
             assert!(text.contains("Esc close"));
             view.help_selected = 0;
             terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
@@ -874,7 +874,7 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
                 .iter()
                 .map(|cell| cell.symbol())
                 .collect();
-            assert!(text.contains("Help / actions"));
+            assert!(text.contains("Open location / session"));
         }
     }
 }

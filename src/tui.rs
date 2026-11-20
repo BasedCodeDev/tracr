@@ -1826,10 +1826,14 @@ pub struct MenuEntry {
 }
 fn open_help(browser: &Browser, view: &mut View) {
     view.help = false;
-    view.help_entries = Some(menu_entries(browser, view));
+    let entries = menu_entries(browser, view);
+    view.help_selected = entries
+        .iter()
+        .position(|entry| unavailable(entry.command, browser, view).is_none())
+        .unwrap_or(0);
+    view.help_entries = Some(entries);
     view.help = true;
     view.help_control = 0;
-    view.help_selected = 0;
     view.help_query.clear();
     view.help_searching = false;
 }
@@ -2078,6 +2082,25 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     if view.context() == 0 && view.folders_hidden {
         entries.retain(|entry| available_when_folders_hidden(entry.0));
     }
+    let tab_section = match view.context() {
+        0 => "Folders",
+        1 => "Sessions",
+        _ => "Git",
+    };
+    // Stable sorting preserves the established order within each group. This is
+    // captured by open_help, so changing availability cannot move the selection.
+    entries.sort_by_key(|(command, section, _, _)| {
+        if *section == tab_section {
+            (0, unavailable(*command, browser, view).is_some())
+        } else {
+            let rank = match *section {
+                "Navigation" => 1,
+                "Terminals" => 2,
+                _ => 3,
+            };
+            (rank, false)
+        }
+    });
     entries
         .into_iter()
         .map(|(command, section, shortcut, label)| MenuEntry {
@@ -3745,10 +3768,7 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
             KeyCode::Char('x') if view.focus == 1 => Command::CloseTerminal,
             KeyCode::Char('q') => Command::Quit,
             KeyCode::Char('r') => Command::Refresh,
-            KeyCode::Char('?') => {
-                view.help_selected = 0;
-                Command::Help
-            }
+            KeyCode::Char('?') => Command::Help,
             _ if view.git_hidden || view.git_size_limited || view.folder_navigation.pending() => {
                 return Action::Continue;
             }
@@ -3769,10 +3789,6 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
     let command = match key.code {
         KeyCode::Char('?') => {
             open_help(browser, view);
-            view.help_selected = menu_entries(browser, view)
-                .iter()
-                .position(|entry| unavailable(entry.command, browser, view).is_none())
-                .unwrap_or(0);
             return Action::Continue;
         }
         KeyCode::Char('g') => Command::OpenTerminals,
@@ -7313,6 +7329,107 @@ mod action_discovery_tests {
     }
 
     #[test]
+    fn current_tab_actions_lead_shared_sections_and_select_first_available() {
+        let browser = Browser::new(vec![]);
+        for (context, section) in [(0, "Folders"), (1, "Sessions"), (2, "Git")] {
+            let mut view = View {
+                drawer_open: context != 1,
+                drawer_git: context == 2,
+                git_focus: context == 2,
+                focus: if context == 1 { 1 } else { 0 },
+                ..View::default()
+            };
+            open_help(&browser, &mut view);
+            let entries = menu_entries(&browser, &view);
+            assert_eq!(entries[0].section, section);
+            let ranks: Vec<_> = entries
+                .iter()
+                .map(|entry| match entry.section {
+                    name if name == section => {
+                        usize::from(unavailable(entry.command, &browser, &view).is_some())
+                    }
+                    "Navigation" => 2,
+                    "Terminals" => 3,
+                    "General" => 4,
+                    other => panic!("Unexpected section: {other}"),
+                })
+                .collect();
+            assert!(ranks.windows(2).all(|pair| pair[0] <= pair[1]));
+            assert_eq!(
+                view.help_selected,
+                entries
+                    .iter()
+                    .position(|entry| unavailable(entry.command, &browser, &view).is_none())
+                    .unwrap()
+            );
+            // An empty Sessions tab has no enabled local actions: select navigation.
+            if context == 1 {
+                assert_eq!(entries[view.help_selected].section, "Navigation");
+            }
+            view.help_query = section.into();
+            let expected: Vec<_> = entries
+                .iter()
+                .filter(|entry| {
+                    format!("{} {} {}", entry.section, entry.label, entry.shortcut)
+                        .to_lowercase()
+                        .contains(&section.to_lowercase())
+                })
+                .map(|entry| entry.command)
+                .collect();
+            assert_eq!(
+                filtered_menu_entries(&browser, &view)
+                    .iter()
+                    .map(|entry| entry.command)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn availability_changes_do_not_reorder_open_menu() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View::default();
+        view.toggle_drawer();
+        open_help(&browser, &mut view);
+        let entries = menu_entries(&browser, &view);
+        view.help_selected = entries
+            .iter()
+            .position(|entry| entry.command == Command::FolderFocus)
+            .unwrap();
+        assert!(unavailable(Command::FolderFocus, &browser, &view).is_some());
+        browser.focus_root = Some("/synthetic".into());
+        assert!(unavailable(Command::FolderFocus, &browser, &view).is_none());
+        let updated = menu_entries(&browser, &view);
+        assert_eq!(
+            updated
+                .iter()
+                .map(|entry| entry.command)
+                .collect::<Vec<_>>(),
+            entries
+                .iter()
+                .map(|entry| entry.command)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(updated[view.help_selected].command, Command::FolderFocus);
+        open_help(&browser, &mut view);
+        let reopened = menu_entries(&browser, &view);
+        assert!(
+            reopened
+                .iter()
+                .position(|entry| entry.command == Command::FolderFocus)
+                .unwrap()
+                < view
+                    .help_entries
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .position(|entry| entry.command == Command::Create)
+                    .unwrap()
+        );
+    }
+
+    #[test]
     fn searching_matches_terms_shortcuts_and_executes_original_action() {
         let mut browser = Browser::new(vec![]);
         let mut view = View::default();
@@ -7327,7 +7444,14 @@ mod action_discovery_tests {
         open_help(&browser, &mut view);
         assert!(view.help_query.is_empty());
         assert!(!view.help_searching);
-        assert_eq!(view.help_selected, 0);
+        assert!(
+            unavailable(
+                menu_entries(&browser, &view)[view.help_selected].command,
+                &browser,
+                &view,
+            )
+            .is_none()
+        );
         view.help = false;
         view.toggle_drawer();
         open_help(&browser, &mut view);
