@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         t.send(b'\x1b[B\r')
         t.wait(lambda: (homes[1]/'launch.json').exists())
         launch = json.loads((homes[1]/'launch.json').read_text())
-        assert launch['args'] == ['--cd', str(project)], launch
+        assert launch['args'] == ['--cd', str(project), '--approve-for-me'], launch
         assert launch['cwd'] == str(project) and launch['home'] == str(homes[1]) and launch['foreground'], launch
         assert not (homes[0]/'launch.json').exists()
         t.expect('FAKE CODING SESSION')
@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-') as directory:
         t.send(b'n')
         t.wait(lambda:(homes[1]/'launch.json').exists())
         launch=json.loads((homes[1]/'launch.json').read_text())
-        assert launch['args']==['--cd',str(project)] and launch['cwd']==str(project)
+        assert launch['args']==['--cd',str(project),'--approve-for-me'] and launch['cwd']==str(project)
         t.expect('FAKE CODING SESSION')
         assert 'Choose harness' not in t.text()
         t.wait(lambda: '→ Sessions' not in t.text())
