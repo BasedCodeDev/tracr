@@ -140,6 +140,32 @@ fn generated_dags_preserve_every_edge_and_boundary() {
                 }
             })
             .collect();
+        let mut spine = std::collections::HashSet::new();
+        let mut next = Some(commits[case % commits.len()].oid.as_str());
+        while let Some(oid) = next {
+            spine.insert(oid.to_owned());
+            next = commits
+                .iter()
+                .find(|c| c.oid == oid)
+                .and_then(|c| c.parents.first())
+                .map(String::as_str);
+        }
+        let mut pinned = tracr::git_layout::Builder::with_mainline(spine.clone());
+        for commit in &commits {
+            pinned.append(commit).unwrap();
+        }
+        let pinned_full = render(&pinned.into_layout());
+        for count in [1, 4, 12, 20] {
+            let mut pinned = tracr::git_layout::Builder::with_mainline(spine.clone());
+            for commit in &commits[..count] {
+                pinned.append(commit).unwrap();
+            }
+            let model = pinned.into_layout();
+            let graph = render(&model);
+            oracle::check(&commits[..count], &model, &graph)
+                .unwrap_or_else(|e| panic!("pinned case {case}, prefix {count}: {e}"));
+            assert_eq!(graph.rows, pinned_full.rows[..graph.rows.len()]);
+        }
         let full = render(&layout(&commits).unwrap());
         for count in [1, 4, 12, 20] {
             let model = layout(&commits[..count]).unwrap();
@@ -263,6 +289,63 @@ fn shared_session_rows_preserve_topology_across_every_fixture_and_prefix() {
                 }
                 oracle::check(commits, &model, &graph)
                     .unwrap_or_else(|e| panic!("{name}/{len}/{count}: {e}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn pinned_mainline_preserves_topology_and_every_prefix() {
+    use std::collections::HashSet;
+    use tracr::git_layout::{Builder, LaneColor};
+    for (name, commits) in fixtures::fixtures() {
+        for tip in &commits {
+            let mut spine = HashSet::new();
+            let mut next = Some(tip.oid.as_str());
+            while let Some(oid) = next {
+                spine.insert(oid.to_owned());
+                next = commits
+                    .iter()
+                    .find(|c| c.oid == oid)
+                    .and_then(|c| c.parents.first())
+                    .map(String::as_str);
+            }
+            let mut builder = Builder::with_mainline(spine.clone());
+            for commit in &commits {
+                builder.append(commit).unwrap();
+            }
+            let full = render(&builder.into_layout());
+            let mut builder = Builder::with_mainline(spine.clone());
+            for (i, commit) in commits.iter().enumerate() {
+                builder.append(commit).unwrap();
+                let model = builder.snapshot();
+                let graph = render(model);
+                oracle::check(&commits[..=i], model, &graph).unwrap_or_else(|error| {
+                    panic!(
+                        "{name}/{} prefix {i}: {error}\n{}",
+                        tip.oid,
+                        graph
+                            .rows
+                            .iter()
+                            .chain(graph.boundary.iter())
+                            .map(|r| format!("{} {:?}", r.text(), r.oid))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    )
+                });
+                assert_eq!(
+                    graph.rows,
+                    full.rows[..graph.rows.len()],
+                    "{name}/{}",
+                    tip.oid
+                );
+                for row in &model.rows {
+                    assert_eq!(row.node.column == 0, spine.contains(row.node.oid.as_ref()));
+                    assert_eq!(row.node.color == LaneColor::Cyan, row.node.column == 0);
+                    for lane in row.incoming.iter().chain(&row.outgoing) {
+                        assert_eq!(lane.color == LaneColor::Cyan, lane.column == 0);
+                    }
+                }
             }
         }
     }

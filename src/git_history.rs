@@ -6,6 +6,12 @@ use std::{cell::Cell, path::PathBuf, sync::Arc};
 use tokio::task::JoinHandle;
 
 pub trait Backend: Send + Sync {
+    fn mainline(
+        &self,
+        _path: PathBuf,
+    ) -> BackendFuture<Result<Option<crate::git::Mainline>, String>> {
+        Box::pin(async { Ok(None) })
+    }
     fn references(&self, _path: PathBuf) -> BackendFuture<Result<crate::git::References, String>> {
         Box::pin(async { Ok(crate::git::References::new()) })
     }
@@ -30,6 +36,12 @@ pub trait Backend: Send + Sync {
 }
 struct Native;
 impl Backend for Native {
+    fn mainline(
+        &self,
+        path: PathBuf,
+    ) -> BackendFuture<Result<Option<crate::git::Mainline>, String>> {
+        Box::pin(async move { crate::git::mainline(&path).await })
+    }
     fn references(&self, path: PathBuf) -> BackendFuture<Result<crate::git::References, String>> {
         Box::pin(async move { crate::git::references(&path).await })
     }
@@ -61,20 +73,34 @@ pub enum Movement {
 }
 type ReadResult = (
     Result<Vec<CommitRecord>, String>,
-    Option<Result<crate::git::References, String>>,
+    Option<Result<(crate::git::References, Option<Arc<crate::git::Mainline>>), String>>,
 );
 type ReadTask = (u64, usize, JoinHandle<ReadResult>);
 
 struct Snapshot {
+    mainline: Option<Arc<crate::git::Mainline>>,
     rows: Vec<GraphRow>,
     tails: std::collections::BTreeMap<usize, std::ops::Range<usize>>,
     positions: std::collections::HashMap<String, usize>,
     selectable: Vec<usize>,
     width: usize,
 }
+#[cfg(test)]
 fn construct(records: Vec<CommitRecord>, cancel: &AtomicBool) -> Result<Option<Snapshot>, String> {
+    construct_mainline(records, None, cancel)
+}
+fn construct_mainline(
+    records: Vec<CommitRecord>,
+    mainline: Option<Arc<crate::git::Mainline>>,
+    cancel: &AtomicBool,
+) -> Result<Option<Snapshot>, String> {
     let cancelled = || cancel.load(Ordering::Relaxed);
-    let mut builder = crate::git_layout::Builder::new();
+    let mut builder = crate::git_layout::Builder::with_mainline(
+        mainline
+            .as_ref()
+            .map(|m| m.ancestry.clone())
+            .unwrap_or_default(),
+    );
     for record in &records {
         if cancelled() {
             return Ok(None);
@@ -132,6 +158,7 @@ fn construct(records: Vec<CommitRecord>, cancel: &AtomicBool) -> Result<Option<S
         });
     }
     Ok(Some(Snapshot {
+        mainline,
         rows,
         tails,
         positions,
@@ -152,6 +179,7 @@ impl Drop for BuildTask {
 }
 
 pub struct History {
+    mainline: Option<Arc<crate::git::Mainline>>,
     pub(crate) tails: std::collections::BTreeMap<usize, std::ops::Range<usize>>,
     revision: u64,
     build: Option<BuildTask>,
@@ -199,6 +227,7 @@ impl Default for History {
 impl History {
     pub fn with_backend(backend: Arc<dyn Backend>) -> Self {
         Self {
+            mainline: None,
             build: None,
             #[cfg(test)]
             builds_started: 0,
@@ -429,7 +458,17 @@ impl History {
                         crate::git::RefKind::Remote => ("remote: ", Color::Cyan),
                         crate::git::RefKind::Tag => ("tag: ", Color::Yellow),
                     };
-                    let style = Style::default().fg(color);
+                    let main_label = self.mainline.as_ref().is_some_and(|main| {
+                        let prefix = match label.kind {
+                            crate::git::RefKind::Local => "refs/heads/",
+                            crate::git::RefKind::Remote => "refs/remotes/",
+                            crate::git::RefKind::Tag => return false,
+                        };
+                        main.reference
+                            .strip_prefix(prefix)
+                            .is_some_and(|name| crate::browser::safe_text(name) == label.name)
+                    });
+                    let style = Style::default().fg(if main_label { Color::Cyan } else { color });
                     if self.worktree_prefix(label).is_empty() && !self.is_dirty(label) {
                         spans.push(Span::styled(format!("[{prefix}{}] ", label.name), style));
                     } else {
@@ -679,6 +718,7 @@ impl History {
             .unwrap_or(0);
         self.install(
             Snapshot {
+                mainline: None,
                 tails: Default::default(),
                 rows,
                 positions,
@@ -690,12 +730,14 @@ impl History {
     }
     fn install(&mut self, snapshot: Snapshot, limit: usize) {
         let Snapshot {
+            mainline,
             rows,
             tails,
             positions,
             selectable,
             width,
         } = snapshot;
+        self.mainline = mainline;
         let offset = self.selected.saturating_sub(self.top.get());
         let selected = self
             .rows
@@ -775,6 +817,7 @@ impl History {
                 self.head_row = None;
                 self.max_width.set(None);
                 self.references.clear();
+                self.mainline = None;
                 self.linked_branches.clear();
                 self.dirty_branches.clear();
                 self.reference_error = None;
@@ -850,9 +893,11 @@ impl History {
                 .await
                 .unwrap_or_else(|error| (Err(error.to_string()), None));
             if token == self.token {
+                let mut mainline = self.mainline.clone();
                 if let Some(references) = references {
                     match references {
-                        Ok(refs) => {
+                        Ok((refs, resolved)) => {
+                            mainline = resolved;
                             self.references = refs;
                             self.max_width.set(None);
                             self.reference_error = None;
@@ -863,6 +908,7 @@ impl History {
                 match result {
                     Ok(records)
                         if self.loaded
+                            && mainline == self.mainline
                             && records.len() == self.selectable.len()
                             && records.iter().zip(&self.selectable).all(|(record, index)| {
                                 let row = &self.rows[*index];
@@ -894,7 +940,7 @@ impl History {
                             limit,
                             cancel,
                             handle: tokio::task::spawn_blocking(move || {
-                                construct(records, &signal)
+                                construct_mainline(records, mainline, &signal)
                             }),
                         });
                     }
@@ -949,6 +995,7 @@ impl History {
                 };
                 self.token += 1;
                 let refs = self.refresh.then(|| self.backend.references(path.clone()));
+                let mainline = self.refresh.then(|| self.backend.mainline(path.clone()));
                 let history = self.backend.history_at(
                     path,
                     limit,
@@ -959,7 +1006,12 @@ impl History {
                     limit,
                     tokio::spawn(async move {
                         let refs = match refs {
-                            Some(future) => Some(future.await),
+                            Some(future) => {
+                                let (refs, mainline) = tokio::join!(future, mainline.unwrap());
+                                Some(refs.and_then(|refs| {
+                                    mainline.map(|mainline| (refs, mainline.map(Arc::new)))
+                                }))
+                            }
                             None => None,
                         };
                         (history.await, refs)
@@ -1097,6 +1149,134 @@ mod tests {
         .await
         .unwrap();
     }
+    #[tokio::test]
+    async fn mainline_refresh_rebuilds_geometry_and_expansion_reuses_metadata() {
+        struct MainBackend {
+            main: std::sync::Mutex<Result<Option<crate::git::Mainline>, String>>,
+            calls: std::sync::atomic::AtomicUsize,
+            reads: Controlled,
+        }
+        impl Backend for MainBackend {
+            fn mainline(
+                &self,
+                _: PathBuf,
+            ) -> BackendFuture<Result<Option<crate::git::Mainline>, String>> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                let result = self.main.lock().unwrap().clone();
+                Box::pin(async move { result })
+            }
+            fn history(
+                &self,
+                path: PathBuf,
+                limit: usize,
+            ) -> BackendFuture<Result<Vec<CommitRecord>, String>> {
+                self.reads.history(path, limit)
+            }
+        }
+        let main = |tip: usize| crate::git::Mainline {
+            reference: "refs/heads/main".into(),
+            tip: format!("{tip:040x}"),
+            ancestry: (tip..=200).map(|i| format!("{i:040x}")).collect(),
+        };
+        let (tx, mut reads) = mpsc::unbounded_channel();
+        let backend = Arc::new(MainBackend {
+            main: std::sync::Mutex::new(Ok(Some(main(130)))),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            reads: Controlled(tx),
+        });
+        let mut h = History::with_backend(backend.clone());
+        tick(&mut h).await;
+        reads.recv().await.unwrap().1.send(Ok(rows(128))).unwrap();
+        finish(&mut h).await;
+        assert!(h.rows[0].graph.starts_with("    ●"));
+        let prefix = h.rows[..h.rows.len() - 1].to_vec();
+        h.navigate(Movement::End);
+        tick(&mut h).await;
+        reads.recv().await.unwrap().1.send(Ok(rows(200))).unwrap();
+        finish(&mut h).await;
+        assert_eq!(backend.calls.load(Ordering::Relaxed), 1);
+        assert_eq!(prefix, h.rows[..prefix.len()]);
+        assert!(
+            h.rows[h.positions[&format!("{:040x}", 130)]]
+                .graph
+                .starts_with('●')
+        );
+        let selected = h.rows[h.selected].oid.clone();
+        let builds = h.builds_started;
+        *backend.main.lock().unwrap() = Ok(Some(main(5)));
+        h.refresh = true;
+        tick(&mut h).await;
+        reads.recv().await.unwrap().1.send(Ok(rows(200))).unwrap();
+        finish(&mut h).await;
+        assert_eq!(h.builds_started, builds + 1);
+        assert_eq!(h.rows[h.selected].oid, selected);
+        assert_eq!(h.mainline.as_ref().unwrap().tip, format!("{:040x}", 5));
+        let graph = h.rows.clone();
+        *backend.main.lock().unwrap() = Err("metadata unavailable".into());
+        h.refresh = true;
+        tick(&mut h).await;
+        reads.recv().await.unwrap().1.send(Ok(rows(200))).unwrap();
+        finish(&mut h).await;
+        assert_eq!(h.rows, graph);
+        assert!(h.reference_error.is_some());
+        *backend.main.lock().unwrap() = Ok(None);
+        h.refresh = true;
+        tick(&mut h).await;
+        reads.recv().await.unwrap().1.send(Ok(rows(200))).unwrap();
+        finish(&mut h).await;
+        assert!(h.mainline.is_none());
+        assert!(h.reference_error.is_none());
+        assert!(h.rows[0].graph.starts_with('●'));
+    }
+
+    #[test]
+    fn mainline_label_keeps_dirty_and_worktree_accents() {
+        use crate::git::{RefKind, RefLabel};
+        use ratatui::style::Color;
+        let mut h = History::default();
+        h.replace(rows(1), 128);
+        h.mainline = Some(Arc::new(crate::git::Mainline {
+            reference: "refs/heads/main".into(),
+            tip: h.rows[0].oid.clone().unwrap(),
+            ancestry: Default::default(),
+        }));
+        h.references.insert(
+            h.rows[0].oid.clone().unwrap(),
+            vec![
+                RefLabel {
+                    kind: RefKind::Local,
+                    name: "main".into(),
+                },
+                RefLabel {
+                    kind: RefKind::Local,
+                    name: "feature".into(),
+                },
+            ],
+        );
+        h.linked_branches.insert("refs/heads/main".into());
+        h.dirty_branches.insert("refs/heads/main".into());
+        let spans = h.row_spans(&h.rows[0]);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.content == "main" && s.style.fg == Some(Color::Cyan))
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.content == "◇" && s.style.fg == Some(crate::git_render::WORKTREE_COLOR))
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.content == "*" && s.style.fg == Some(crate::git_render::DIRTY_COLOR))
+        );
+        assert!(
+            spans.iter().any(|s| s.content == "[feature] "
+                && s.style.fg == Some(crate::git_render::BRANCH_COLOR))
+        );
+    }
+
     #[tokio::test]
     async fn stash_labels_refresh_without_losing_selection_and_render_distinctly() {
         let (tx, mut rx) = mpsc::unbounded_channel();
