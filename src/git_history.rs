@@ -398,7 +398,7 @@ impl History {
             }
         }
         use unicode_width::UnicodeWidthStr;
-        let background = Color::Rgb(32, 32, 32);
+        let background = Color::Rgb(48, 48, 48);
         for span in &mut spans {
             span.style = span.style.bg(background);
         }
@@ -1056,7 +1056,7 @@ mod tests {
         for spans in [&commit, &connector, &session, &shared_session] {
             let shaded: Vec<_> = spans
                 .iter()
-                .take_while(|span| span.style.bg == Some(Color::Rgb(32, 32, 32)))
+                .take_while(|span| span.style.bg == Some(Color::Rgb(48, 48, 48)))
                 .collect();
             assert_eq!(
                 shaded.iter().map(|s| s.content.width()).sum::<usize>(),

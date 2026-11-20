@@ -6744,7 +6744,7 @@ mod graph_viewport_tests {
         let spans = vec![
             Span::styled(
                 "| * ",
-                Style::default().fg(Color::Cyan).bg(Color::Rgb(32, 32, 32)),
+                Style::default().fg(Color::Cyan).bg(Color::Rgb(48, 48, 48)),
             ),
             Span::raw(" "),
             Span::styled(
@@ -6782,7 +6782,7 @@ mod graph_viewport_tests {
                 assert_eq!(
                     buffer[(x, 1)].bg,
                     if usize::from(x - 3) + offset < 4 {
-                        Color::Rgb(32, 32, 32)
+                        Color::Rgb(48, 48, 48)
                     } else {
                         Color::Reset
                     }
