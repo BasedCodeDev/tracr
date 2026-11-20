@@ -293,8 +293,9 @@ Tab cycles through Folders, Sessions, and Git (when available); Shift+Tab revers
 - Tab cycles Folders → Sessions → Git → Folders; Shift-Tab reverses the order.
   Without a Git panel, both keys switch between Folders and Sessions. Entering
   Git expands collapsed history, and leaving preserves its expansion state.
-  Page Up / Page Down scroll through history when it is focused.
-- In Git history, Home / End selects the first / last loaded commit or session; approaching
+  Page Up / Page Down select the first / last item in lists, including folders,
+  sessions, search results, and pickers.
+- In Git history, Page Up / Page Down (or Home / End) selects the first / last loaded commit or session; approaching
   the end loads more history. Left / Right or `h/l` scrolls horizontally. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
   root follows HEAD automatically. `b` collapses Git and focuses Sessions;
@@ -349,7 +350,7 @@ Tab cycles through Folders, Sessions, and Git (when available); Shift+Tab revers
 - `?`: open the grouped action menu. Up/Down or `j/k` selects a command; Enter
   closes the menu and runs it. Unavailable commands show a reason and remain
   disabled. Esc or `?` closes without changing the browser. PageUp/PageDown and
-  Home/End navigate longer menus; the selection scrolls into view automatically.
+  Home/End select the first/last command; the selection scrolls into view automatically.
 - `q` or Ctrl-C: quit. While editing search, `q` is text.
 
 By default, search requires every whitespace-separated term to match a metadata field:

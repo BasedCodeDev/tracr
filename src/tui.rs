@@ -1574,8 +1574,6 @@ enum Command {
     GitDown,
     GitLeft,
     GitRight,
-    GitPageUp,
-    GitPageDown,
     GitHome,
     GitEnd,
     GitFollow,
@@ -1591,6 +1589,8 @@ enum Command {
     PaneRight,
     PreviousItem,
     NextItem,
+    FirstItem,
+    LastItem,
     FolderFocus,
     FolderLeft,
     FolderRight,
@@ -1745,11 +1745,14 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             "Next item / scroll down",
             None,
         ),
+        (FirstItem, "Navigation", "PageUp", "First item", None),
+        (LastItem, "Navigation", "PageDown", "Last item", None),
     ];
     entries.retain(|entry| {
         (entry.0 != Recover || view.recovery_available)
             && (entry.0 != EnterFolder || view.context() == 0)
             && (entry.0 != PreviousPane || view.context() == 1)
+            && (!matches!(entry.0, FirstItem | LastItem) || view.context() != 2)
     });
     if view.context() == 0 {
         entries.push((
@@ -1942,10 +1945,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                     Some(("←/→ Scroll", "←/→ Scroll")),
                 ),
                 (GitRight, "Git", "→ / l", "Scroll right", None),
-                (GitPageUp, "Git", "PageUp", "Previous page", None),
-                (GitPageDown, "Git", "PageDown", "Next page", None),
-                (GitHome, "Git", "Home", "First loaded commit", None),
-                (GitEnd, "Git", "End", "Last loaded commit", None),
+                (GitHome, "Git", "PageUp / Home", "First loaded item", None),
+                (GitEnd, "Git", "PageDown / End", "Last loaded item", None),
             ]);
         }
         entries.push((GitReturn, "Navigation", "Esc", "Return to Sessions", None));
@@ -3282,6 +3283,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
     if let Some(mut picker) = view.worktree_picker.take() {
         match key.code {
             KeyCode::Esc => return Action::Continue,
+            KeyCode::PageUp => picker.selected = 0,
+            KeyCode::PageDown => picker.selected = picker.matches.len().saturating_sub(1),
             KeyCode::Up | KeyCode::Char('k') => picker.selected = picker.selected.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('j') => {
                 picker.selected = (picker.selected + 1).min(picker.matches.len().saturating_sub(1))
@@ -3437,6 +3440,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             KeyCode::Esc => view.source_picker = None,
             KeyCode::Up => *selected = selected.saturating_sub(1),
             KeyCode::Down => *selected = (*selected + 1).min(sources.len().saturating_sub(1)),
+            KeyCode::PageUp => *selected = 0,
+            KeyCode::PageDown => *selected = sources.len().saturating_sub(1),
             KeyCode::Enter => {
                 let source = sources.get(*selected).copied();
                 view.source_picker = None;
@@ -3451,7 +3456,6 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
     if view.help {
         let entries = menu_entries(browser, view);
         view.help_selected = view.help_selected.min(entries.len() - 1);
-        let step = view.help_page_size.max(1);
         let action_enabled =
             unavailable(entries[view.help_selected].command, browser, view).is_none();
         match key.code {
@@ -3468,12 +3472,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             KeyCode::Down | KeyCode::Char('j') => {
                 view.help_selected = (view.help_selected + 1).min(entries.len() - 1)
             }
-            KeyCode::PageUp => view.help_selected = view.help_selected.saturating_sub(step),
-            KeyCode::PageDown => {
-                view.help_selected = (view.help_selected + step).min(entries.len() - 1)
-            }
-            KeyCode::Home => view.help_selected = 0,
-            KeyCode::End => view.help_selected = entries.len() - 1,
+            KeyCode::PageUp | KeyCode::Home => view.help_selected = 0,
+            KeyCode::PageDown | KeyCode::End => view.help_selected = entries.len() - 1,
             KeyCode::Enter | KeyCode::Char(' ') if key.kind != KeyEventKind::Repeat => {
                 let command = entries[view.help_selected].command;
                 if unavailable(command, browser, view).is_none() {
@@ -3516,11 +3516,12 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             }
             KeyCode::Enter | KeyCode::Char(' ') if view.search_control == 1 => view.editing = false,
             KeyCode::Esc => view.editing = false,
-            KeyCode::Up | KeyCode::Down => {
-                let next = if key.code == KeyCode::Up {
-                    index.saturating_sub(1)
-                } else {
-                    (index + 1).min(results.len().saturating_sub(1))
+            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
+                let next = match key.code {
+                    KeyCode::PageUp => 0,
+                    KeyCode::PageDown => results.len().saturating_sub(1),
+                    KeyCode::Up => index.saturating_sub(1),
+                    _ => (index + 1).min(results.len().saturating_sub(1)),
                 };
                 view.search_selected = results.get(next).map(|s| s.key.clone());
             }
@@ -3594,10 +3595,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
             KeyCode::Down | KeyCode::Char('j') => Command::GitDown,
             KeyCode::Left | KeyCode::Char('h') => Command::GitLeft,
             KeyCode::Right | KeyCode::Char('l') => Command::GitRight,
-            KeyCode::PageUp => Command::GitPageUp,
-            KeyCode::PageDown => Command::GitPageDown,
-            KeyCode::Home => Command::GitHome,
-            KeyCode::End => Command::GitEnd,
+            KeyCode::PageUp | KeyCode::Home => Command::GitHome,
+            KeyCode::PageDown | KeyCode::End => Command::GitEnd,
             KeyCode::Char('f') => Command::GitFollow,
             _ => return Action::Continue,
         };
@@ -3632,6 +3631,8 @@ pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Acti
         KeyCode::Esc => Command::PreviousPane,
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
+        KeyCode::PageUp => Command::FirstItem,
+        KeyCode::PageDown => Command::LastItem,
         KeyCode::Enter if key.kind == KeyEventKind::Repeat => return Action::Continue,
         KeyCode::Enter if view.focus == 0 => Command::EnterFolder,
         KeyCode::Enter
@@ -3659,8 +3660,6 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 | Command::CommitInfo
                 | Command::GitUp
                 | Command::GitDown
-                | Command::GitPageUp
-                | Command::GitPageDown
                 | Command::GitHome
                 | Command::GitEnd
                 | Command::GitFollow
@@ -3808,12 +3807,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             view.git_sessions.borrow_mut().follow();
             view.history.follow();
         }
-        Command::GitUp
-        | Command::GitDown
-        | Command::GitPageUp
-        | Command::GitPageDown
-        | Command::GitHome
-        | Command::GitEnd => {
+        Command::GitUp | Command::GitDown | Command::GitHome | Command::GitEnd => {
             use crate::git_history::Movement;
             let mut presentation = view.git_sessions.borrow_mut();
             presentation.sync(browser, &view.history);
@@ -3821,8 +3815,6 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 match command {
                     Command::GitUp => Movement::Up,
                     Command::GitDown => Movement::Down,
-                    Command::GitPageUp => Movement::PageUp,
-                    Command::GitPageDown => Movement::PageDown,
                     Command::GitHome => Movement::Home,
                     _ => Movement::End,
                 },
@@ -3948,6 +3940,27 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                     }
                 }
                 1 => browser.move_selection(delta),
+                _ => {}
+            }
+        }
+        Command::FirstItem | Command::LastItem => {
+            let first = command == Command::FirstItem;
+            match view.focus {
+                0 => {
+                    let rows = view.folder_rows(browser);
+                    if let Some(row) = if first { rows.first() } else { rows.last() } {
+                        browser.select_folder(row.filter.clone());
+                    }
+                }
+                1 => {
+                    let sessions = browser.visible();
+                    browser.selected = (if first {
+                        sessions.first()
+                    } else {
+                        sessions.last()
+                    })
+                    .map(|session| session.key.clone());
+                }
                 _ => {}
             }
         }
@@ -4732,6 +4745,90 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
 #[cfg(test)]
 mod cleanup_tests {
     use super::*;
+
+    #[test]
+    fn page_keys_select_list_endpoints_and_handle_empty_results() {
+        let mut browser = entry_fixture(12, 1);
+        let mut view = View::default();
+        let rows = browser.folder_rows();
+        press(&mut browser, &mut view, KeyCode::PageDown);
+        assert_eq!(browser.folder, rows.last().unwrap().filter);
+        press(&mut browser, &mut view, KeyCode::PageUp);
+        assert_eq!(browser.folder, rows.first().unwrap().filter);
+        browser.open_folder("/tmp".into());
+        view.focus = 1;
+        for (key, first) in [(KeyCode::PageDown, false), (KeyCode::PageUp, true)] {
+            let sessions = browser.visible();
+            let expected = if first {
+                sessions.first()
+            } else {
+                sessions.last()
+            }
+            .unwrap()
+            .key
+            .clone();
+            press(&mut browser, &mut view, key);
+            assert_eq!(browser.selected.as_ref(), Some(&expected));
+            view.editing = true;
+            let results = browser.search_results("");
+            let expected = if first {
+                results.first()
+            } else {
+                results.last()
+            }
+            .unwrap()
+            .key
+            .clone();
+            press(&mut browser, &mut view, key);
+            assert_eq!(view.search_selected.as_ref(), Some(&expected));
+            view.editing = false;
+        }
+        view.editing = true;
+        view.search_query = "no matching session".into();
+        press(&mut browser, &mut view, KeyCode::PageDown);
+        assert!(view.search_selected.is_none());
+        view.editing = false;
+        browser.open_folder("/empty".into());
+        press(&mut browser, &mut view, KeyCode::PageUp);
+        assert!(browser.selected.is_none());
+        view.help = true;
+        press(&mut browser, &mut view, KeyCode::PageDown);
+        assert_eq!(view.help_selected, menu_entries(&browser, &view).len() - 1);
+        press(&mut browser, &mut view, KeyCode::PageUp);
+        assert_eq!(view.help_selected, 0);
+    }
+
+    #[tokio::test]
+    async fn git_page_keys_jump_past_a_page_of_sessions() {
+        use crate::git_sessions::tests::{add_session, fixture};
+        let (mut browser, history) = fixture().await;
+        for i in 0..12 {
+            add_session(
+                &mut browser,
+                &format!("session-{i}"),
+                "/worktree",
+                "/worktree",
+                "/repo/.git",
+                crate::domain::RuntimeStatus::Idle,
+                i,
+            );
+        }
+        let mut view = View {
+            history,
+            git_focus: true,
+            ..View::default()
+        };
+        view.history.page.set(2);
+        press(&mut browser, &mut view, KeyCode::PageDown);
+        assert_eq!(view.history.selected, 1);
+        assert_eq!(
+            view.git_sessions.borrow().selected,
+            view.git_sessions.borrow().rows.len() - 1
+        );
+        press(&mut browser, &mut view, KeyCode::PageUp);
+        assert_eq!(view.history.selected, 0);
+        assert_eq!(view.git_sessions.borrow().selected, 0);
+    }
 
     #[test]
     fn folder_preview_waits_for_release_or_quiet_and_prioritizes_queued_input() {

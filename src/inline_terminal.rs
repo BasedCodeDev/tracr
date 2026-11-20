@@ -786,6 +786,8 @@ impl Manager {
                 }
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('g') => self.picker = false,
+                    KeyCode::PageUp => self.selected = 0,
+                    KeyCode::PageDown => self.selected = self.sessions.len().saturating_sub(1),
                     KeyCode::Up | KeyCode::Char('k') => {
                         self.selected = self.selected.saturating_sub(1)
                     }
