@@ -573,7 +573,11 @@ pub fn prepare_new(
     }
     Ok(LaunchCommand {
         executable: binary.to_owned(),
-        args: vec!["--cd".into(), cwd.as_os_str().to_owned()],
+        args: vec![
+            "--cd".into(),
+            cwd.as_os_str().to_owned(),
+            "--approve-for-me".into(),
+        ],
         cwd: cwd.to_owned(),
         env: vec![("CODEX_HOME".into(), source.home.as_os_str().to_owned())],
     })

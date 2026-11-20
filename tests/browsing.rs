@@ -738,7 +738,8 @@ fn empty_folder_creation_picker_and_validation() {
         command.args,
         vec![
             std::ffi::OsString::from("--cd"),
-            temp.path().as_os_str().to_owned()
+            temp.path().as_os_str().to_owned(),
+            "--approve-for-me".into(),
         ]
     );
     assert_eq!(command.env[0].1, temp.path().join("one").as_os_str());
