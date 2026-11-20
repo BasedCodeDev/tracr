@@ -434,8 +434,8 @@ why they cannot run. Each opening starts unfiltered, and the drawer preserves it
 own search state when you switch areas.
 
 Normal browsing reserves no shortcut footer rows. Feedback, diagnostics, and
-focused-folder status use one row when needed. Framed coding terminals show
-**Ctrl+B Browser** on their border; full-screen coding retains the drawer reminder.
+focused-folder status use one row when needed. Full-screen coding retains the drawer
+reminder. Open the drawer’s action menu to find **Background session (Ctrl+B)**.
 The drawer shortcut and navigation behavior are unchanged.
 
 Press **i** in Sessions, or
