@@ -246,8 +246,14 @@ impl Manager {
     }
     /// Restore a folder's view without moving keyboard focus or restarting its PTY.
     pub fn sync_folder(&mut self, folder: Option<&std::path::Path>) {
-        let next = folder.and_then(|path| self.folder_views.get(path)).copied();
-        self.active = next;
+        self.sync_preview(folder, None);
+    }
+    /// Temporarily display an owned session without changing any folder's saved view.
+    pub fn sync_preview(&mut self, folder: Option<&std::path::Path>, key: Option<&SessionKey>) {
+        self.active = key
+            .and_then(|key| self.sessions.iter().find(|s| s.key.as_ref() == Some(key)))
+            .map(|session| session.id)
+            .or_else(|| folder.and_then(|path| self.folder_views.get(path)).copied());
     }
     pub fn active_folder(&self) -> Option<std::path::PathBuf> {
         self.sessions
@@ -1496,6 +1502,65 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+    #[test]
+    fn session_previews_preserve_folder_choices_and_processes() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut manager = Manager::default();
+        let mut launch = command("import time; time.sleep(60)");
+        launch.cwd = temp.path().into();
+        let key = |name: &str| SessionKey {
+            provider: crate::domain::ProviderId("preview-test".into()),
+            source_id: crate::domain::SourceId("local".into()),
+            native_id: name.into(),
+        };
+        // Assign keys after launch so this test needs no external ownership locks.
+        for name in ["first", "second", "third"] {
+            manager.launch(&launch, None, name.into()).unwrap();
+            manager.sessions.last_mut().unwrap().key = Some(key(name));
+        }
+        let original = manager.active;
+        let pids: Vec<_> = manager.sessions.iter().map(|s| s.pid).collect();
+        for name in ["first", "second", "first"] {
+            manager.sync_preview(Some(temp.path()), Some(&key(name)));
+            let expected = manager
+                .sessions
+                .iter()
+                .find(|s| s.key == Some(key(name)))
+                .unwrap()
+                .id;
+            assert_eq!(manager.active, Some(expected));
+            manager.sync_preview(Some(temp.path()), Some(&key(name)));
+            assert_eq!(manager.active, Some(expected));
+            assert_eq!(
+                manager.sessions.iter().map(|s| s.pid).collect::<Vec<_>>(),
+                pids
+            );
+        }
+        manager.sync_preview(Some(temp.path()), Some(&key("external")));
+        assert_eq!(manager.active, original);
+        manager.sync_folder(Some(temp.path()));
+        assert_eq!(manager.active, original);
+        manager.background();
+        manager.sync_preview(Some(temp.path()), Some(&key("first")));
+        assert!(manager.active.is_some());
+        manager.sync_folder(Some(temp.path()));
+        assert_eq!(manager.active, None);
+        manager.sync_preview(None, Some(&key("second")));
+        assert!(manager.active.is_some());
+        manager.sync_folder(None);
+        assert_eq!(manager.active, None);
+        assert!(manager.attach(&key("third")));
+        manager.sync_preview(Some(temp.path()), Some(&key("first")));
+        manager.sessions[0].stop();
+        wait(&mut manager, |m| m.sessions.len() == 2);
+        manager.sync_preview(Some(temp.path()), Some(&key("first")));
+        assert_eq!(manager.active, original);
+        assert!(manager.attach(&key("second")));
+        let selected = manager.active;
+        manager.sync_folder(Some(temp.path()));
+        assert_eq!(manager.active, selected);
+    }
+
     #[test]
     fn real_readline_and_neovim_accept_nested_editing() {
         let temp = tempfile::tempdir().unwrap();
