@@ -391,6 +391,14 @@ impl History {
         }
     }
 
+    pub(crate) fn is_mainline(&self, row: &GraphRow) -> bool {
+        row.oid.as_ref().is_some_and(|oid| {
+            self.mainline
+                .as_ref()
+                .is_some_and(|main| main.ancestry.contains(oid))
+        })
+    }
+
     pub fn row_spans(&self, row: &GraphRow) -> Vec<ratatui::text::Span<'static>> {
         use ratatui::{
             style::{Color, Modifier, Style},
@@ -427,7 +435,7 @@ impl History {
             }
         }
         use unicode_width::UnicodeWidthStr;
-        let background = Color::Rgb(40, 40, 40);
+        let background = crate::git_render::GRAPH_BACKGROUND;
         for span in &mut spans {
             span.style = span.style.bg(background);
         }

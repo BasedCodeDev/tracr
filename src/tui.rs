@@ -1330,7 +1330,15 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                             name_width,
                         ),
                     };
-                    ListItem::new(graph_viewport(spans, view.history.horizontal.get(), width))
+                    let item =
+                        ListItem::new(graph_viewport(spans, view.history.horizontal.get(), width));
+                    if matches!(row, crate::git_sessions::Row::Graph(i)
+                        if view.history.is_mainline(&view.history.rows[*i]))
+                    {
+                        item.style(Style::default().bg(crate::git_render::GRAPH_BACKGROUND))
+                    } else {
+                        item
+                    }
                 })
                 .collect();
             frame.render_stateful_widget(
