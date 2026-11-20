@@ -107,27 +107,33 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                 terminal.expect('[HEAD] [◇ feature] History 099')
                 terminal.send(b'\t\x1b[A')
                 oid = subprocess.check_output([real_git, '-C', str(project), 'rev-parse', 'HEAD~199'], env=env).decode().strip()[:7]
-                terminal.expect('> ● ' + oid)
+                terminal.expect_selected_commit(subprocess.check_output([real_git, '-C', str(project), 'show', '-s', '--format=%s', oid], env=env).decode().strip())
                 (home / 'gate-refresh').touch()
                 terminal.send(b'r')
                 terminal.wait(lambda: (home / 'refresh-started').exists())
                 terminal.expect('loading more')
                 (home / 'allow-refresh').touch()
                 terminal.wait(lambda: 'loading more' not in terminal.text())
-                terminal.expect('> ● ' + oid)
+                terminal.expect_selected_commit(subprocess.check_output([real_git, '-C', str(project), 'show', '-s', '--format=%s', oid], env=env).decode().strip())
                 terminal.send(b'f')
                 terminal.expect('[HEAD]')
-                terminal.wait(lambda: '> ● ' + subprocess.check_output([real_git, '-C', str(project), 'rev-parse', 'HEAD~200'], env=env).decode().strip()[:7] in terminal.text())
+                terminal.expect_selected_commit('History 099')
                 terminal.send(b'\x1b[Z');terminal.expect('Enter Sessions')
                 terminal.send(b'\x1bz')  # Reveal the main checkout outside the focused worktree.
-                for direction in [b'\x1b[A'] * 10 + [b'\x1b[B'] * 30:
+                for direction in [b'\x1b[A'] * 40 + [b'\x1b[B'] * 100:
                     if any(re.search(r'> .*project \(', terminal.line(row)) for row in range(terminal.dimensions[0])):
                         break
                     terminal.send(direction)
-                    deadline = time.monotonic() + .04
+                    deadline = time.monotonic() + .15
                     terminal.wait(lambda: time.monotonic() >= deadline)
                 terminal.expect(f'[HEAD] [{main_branch}] History 299')
-                terminal.send(b'l\x1b[B')
+                terminal.send(b'l')
+                for direction in [b'\x1b[A'] * 40 + [b'\x1b[B'] * 100:
+                    if any(re.search(r'> .* (?:listed|feature) \(', terminal.line(row)) for row in range(terminal.dimensions[0])):
+                        break
+                    terminal.send(direction)
+                    deadline = time.monotonic() + .15
+                    terminal.wait(lambda: time.monotonic() >= deadline)
                 terminal.expect('[HEAD] [◇ feature] History 099')
                 terminal.finish()
                 return
@@ -155,7 +161,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                     terminal.expect('loading more')
                     (home / 'allow-refresh').touch()
                     terminal.wait(lambda: 'loading more' not in terminal.text())
-                    terminal.expect('> ● ' + oid)
+                    terminal.expect_selected_commit(subprocess.check_output([real_git, '-C', str(project), 'show', '-s', '--format=%s', oid], env=env).decode().strip())
                 terminal.send(b'q')
                 terminal.wait(lambda: terminal.child.poll() is not None)
                 assert terminal.child.returncode == 0

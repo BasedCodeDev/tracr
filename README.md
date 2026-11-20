@@ -299,7 +299,8 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   Dialogs belong to the area that opened them: toggling preserves unfinished
   forms in both areas. Background operations continue and their results return
   to the originating area.
-- In Git history, Home / End selects the first / last loaded commit or session; approaching
+- Page Up / Page Down select the first / last item in lists, search results, and pickers.
+- In Git history, Page Up / Page Down (or Home / End) selects the first / last loaded commit or session; approaching
   the end loads more history. Left or `h` scrolls left; `l` scrolls right. Manual movement
   stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
   root follows HEAD automatically. Escape focuses Sessions; returning to the drawer

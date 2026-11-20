@@ -214,7 +214,6 @@ fn select_git_worktree(browser: &mut Browser, view: &mut View, picker: &Worktree
     Action::Continue
 }
 
-/// Dialogs, drafts, and feedback preserved for the inactive application area.
 #[derive(Default)]
 pub struct FolderNavigation {
     deadline: Option<std::time::Instant>,
@@ -250,6 +249,7 @@ impl FolderNavigation {
     }
 }
 
+/// Dialogs, drafts, and feedback preserved for the inactive application area.
 #[derive(Default)]
 pub struct AreaDialogs {
     pub terminal_recovery: Option<crate::terminal_recovery::Dialog>,
@@ -5030,14 +5030,14 @@ mod cleanup_tests {
     #[test]
     fn page_keys_select_list_endpoints_and_handle_empty_results() {
         let mut browser = entry_fixture(12, 1);
-        let mut view = View::default();
+        let mut view = folder_view();
         let rows = browser.folder_rows();
         press(&mut browser, &mut view, KeyCode::PageDown);
         assert_eq!(browser.folder, rows.last().unwrap().filter);
         press(&mut browser, &mut view, KeyCode::PageUp);
         assert_eq!(browser.folder, rows.first().unwrap().filter);
         browser.open_folder("/tmp".into());
-        view.focus = 1;
+        view.toggle_drawer();
         for (key, first) in [(KeyCode::PageDown, false), (KeyCode::PageUp, true)] {
             let sessions = browser.visible();
             let expected = if first {
@@ -5097,6 +5097,9 @@ mod cleanup_tests {
         let mut view = View {
             history,
             git_focus: true,
+            drawer_open: true,
+            drawer_git: true,
+            dialog_area: true,
             ..View::default()
         };
         view.history.page.set(2);
@@ -5203,7 +5206,7 @@ mod cleanup_tests {
     #[test]
     fn folder_navigation_reuses_displayed_rows_and_release_keeps_selection() {
         let mut browser = entry_fixture(3, 1);
-        let mut view = View::default();
+        let mut view = folder_view();
         let rows = std::rc::Rc::new(browser.folder_rows());
         browser.folder = rows[0].filter.clone();
         view.folder_rows_snapshot = Some(rows.clone());

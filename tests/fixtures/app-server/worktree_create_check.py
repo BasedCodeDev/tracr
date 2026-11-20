@@ -83,7 +83,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         t.expect('─ ◇ feature/from-folder')
         t.expect('Second creation commit')
         t.send(b'\x1b[Z\x1b[B')
-        t.expect('> ● ' + first[:7])
+        t.expect_selected_commit(git(project, 'show', '-s', '--format=%s', first))
         open_worktree(t)
         t.expect(first[:8])
         t.send(b'from-history\r\r\r')

@@ -786,9 +786,13 @@ async fn action_menu_navigates_cancels_and_dispatches_without_changing_context()
     let selected = browser.selected.clone();
     handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
     handle_key(&mut browser, &mut view, key(KeyCode::PageDown));
-    assert_eq!(view.help_selected, 4);
+    assert_eq!(
+        view.help_selected,
+        view.help_entries.as_ref().unwrap().len() - 1
+    );
+    handle_key(&mut browser, &mut view, key(KeyCode::PageUp));
     handle_key(&mut browser, &mut view, key(KeyCode::Down));
-    assert_eq!(view.help_selected, 5);
+    assert_eq!(view.help_selected, 1);
     view.help_selected = view
         .help_entries
         .as_ref()

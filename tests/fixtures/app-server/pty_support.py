@@ -77,6 +77,16 @@ class Terminal:
     def line(self, row, start=0, end=240):
         self.text()
         return ''.join(self.cells.get((row, col), ' ') for col in range(start, end))
+    def expect_selected_commit(self, title):
+        def selected():
+            self.text()
+            for row in range(self.dimensions[0]):
+                line = ''.join(self.cells.get((row, col), ' ') for col in range(self.dimensions[1]))
+                if '> ● ' in line and title in line:
+                    return True
+            return False
+        self.wait(selected)
+
     def send(self, data):
         os.write(self.master, data)
     def wait(self, predicate, timeout=15):
