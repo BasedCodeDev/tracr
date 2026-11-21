@@ -97,7 +97,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.expect_action('Restore Git panel')
         t.send(b'\x1b[B')  # First session beneath the commit.
         t.expect_action('Resume session')
-        t.expect('Select a commit to view details')
+        t.expect('No extended commit message.')
+        assert 'Select a commit to view details' not in t.text()
         settled = time.monotonic() + 1
         t.wait(lambda: time.monotonic() >= settled)
         count = (home/'git-reads').read_text()

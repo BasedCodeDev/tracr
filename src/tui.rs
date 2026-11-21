@@ -2710,13 +2710,20 @@ fn selected_commit(browser: &Browser, view: &View) -> Option<(std::path::PathBuf
         || !view.git_focus
         || view.git_hidden
         || view.git_size_limited
-        || selected_git_session(browser, view).is_some()
+        || (!view.git_zoomed && selected_git_session(browser, view).is_some())
     {
         return None;
     }
+    let anchor = if view.git_zoomed {
+        let mut presentation = view.git_sessions.borrow_mut();
+        presentation.sync(browser, &view.history);
+        presentation.anchor()?
+    } else {
+        view.history.selected
+    };
     Some((
         view.history.repository()?,
-        view.history.rows.get(view.history.selected)?.oid.clone()?,
+        view.history.rows.get(anchor)?.oid.clone()?,
     ))
 }
 
@@ -7388,6 +7395,76 @@ mod cleanup_tests {
         sync_git_details(&browser, &mut view);
         assert!(view.git_details.is_none());
         assert!(view.git_details_key.is_none());
+    }
+
+    #[tokio::test]
+    async fn zoom_details_follow_the_commit_for_branches_and_sessions() {
+        use crate::git_sessions::tests::{add_session, fixture};
+        let (mut browser, history) = fixture().await;
+        select_git_fixture(&mut browser, "/repo/.git");
+        add_session(
+            &mut browser,
+            "Running session",
+            "/worktree/src",
+            "/worktree",
+            "/repo/.git",
+            crate::domain::RuntimeStatus::Running,
+            1,
+        );
+        let mut view = View {
+            history,
+            git_focus: true,
+            drawer_git: true,
+            git_zoomed: true,
+            ..folder_view()
+        };
+        sync_git_details(&browser, &mut view);
+        let commit = view.git_details_key.clone();
+        view.git_details
+            .as_mut()
+            .unwrap()
+            .key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE));
+        view.git_details.as_mut().unwrap().dialog.scroll = 3;
+        view.history
+            .set_references(std::collections::BTreeMap::from([(
+                "head".into(),
+                vec![crate::git::RefLabel {
+                    kind: crate::git::RefKind::Local,
+                    name: "feature".into(),
+                }],
+            )]));
+        {
+            let mut presentation = view.git_sessions.borrow_mut();
+            presentation.sync(&browser, &view.history);
+            assert!(
+                presentation.rows.iter().any(|row| matches!(
+                    row,
+                    crate::git_sessions::Row::References { anchor: 0, .. }
+                ))
+            );
+            presentation.range(1);
+        }
+        // Navigate across the branch label and onto its session using real input.
+        for _ in 0..10 {
+            press(&mut browser, &mut view, KeyCode::Down);
+            sync_git_details(&browser, &mut view);
+            assert_eq!(view.git_details_key, commit);
+            assert_eq!(view.git_details.as_ref().unwrap().dialog.scroll, 3);
+            if selected_git_session(&browser, &view).is_some() {
+                break;
+            }
+            view.git_sessions.borrow_mut().range(1);
+        }
+        assert!(selected_git_session(&browser, &view).is_some());
+        sync_git_details(&browser, &mut view);
+        assert_eq!(view.git_details_key, commit);
+        assert_eq!(view.git_details.as_ref().unwrap().selected_tab(), 1);
+        assert_eq!(view.git_details.as_ref().unwrap().dialog.scroll, 3);
+        press(&mut browser, &mut view, KeyCode::Char('i'));
+        assert!(view.git_details_focused);
+        assert!(worktree_unavailable(&browser, &view).is_some());
+        view.git_zoomed = false;
+        assert!(selected_commit(&browser, &view).is_none());
     }
 
     #[tokio::test]

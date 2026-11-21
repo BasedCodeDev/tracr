@@ -323,7 +323,8 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   bottom-right `↓` indicates rows below it or more history available to load.
 - With Git focused, **Alt+Z** opens an equal split: Git history on the left and
   commit information on the right. Details follow the selected commit automatically,
-  keeping your chosen Overview, Files or Details tab as you browse. Each new commit
+  including the related commit for branch labels and session rows, and keeps your
+  chosen Overview, Files or Details tab as you browse. Each new commit
   starts at the top of that tab.
   Tab or Shift+Tab switches focus between history and details. Press `i` to focus
   details and use its tabs, scrolling and copy shortcuts; Escape, Backspace or `i`
