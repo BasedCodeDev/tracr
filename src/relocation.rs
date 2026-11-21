@@ -101,7 +101,7 @@ pub fn destination(input: &str, launch: &Path) -> Result<PathBuf, String> {
     }
     fs::canonicalize(path).map_err(err)
 }
-fn journal_path(state: &Path, key: &SessionKey) -> PathBuf {
+pub(crate) fn journal_path(state: &Path, key: &SessionKey) -> PathBuf {
     // Stable bounded filename; journals themselves retain and verify the full identity.
     let hash =
         key.source_id.0.as_bytes().iter().fold(

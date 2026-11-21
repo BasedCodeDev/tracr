@@ -17,6 +17,42 @@ roots and no network access; read-only must remain read-only with network disabl
 Custom/full-access profiles, unknown policy forms and multi-root workspaces remain
 unsupported. New Codex versions require new compatibility evidence.
 
+## Live CLI relocation (0.170.0)
+
+`tracr move-session ID DESTINATION --live [--from OLD]` has a separate compatibility
+boundary from exclusive-writer/TUI relocation. The binary and owning daemon must
+both report 0.170.0, and the daemon's canonical Codex home must match the selected
+source. The exact ID must resolve uniquely through a complete source inventory.
+The session must already be loaded, unarchived, and use a single local environment.
+Supported profile/root restrictions above still apply.
+
+An operational proxy attaches using override-free `thread/resume` with
+`excludeTurns: true`, validates identity, cwd and recorded/native permissions, then
+issues only a cwd update through `thread/settings/update`. It does not acquire an
+independent writer, stop tools, interrupt turns, or unload other clients. It polls
+resolved runtime settings and verifies native read plus a separate database-first
+listing. Model, permission and other returned settings are compared before/after.
+Cooperating Tracr operations share the folder-move lock; another Codex client can
+still change settings concurrently. Disagreement is unresolved, not rolled back.
+
+Before mutation, a private audit journal records source/session identity, original
+and target directories and model/permission settings. The journal is marked complete
+only after readback. Transport loss after issuing the update is unresolved.
+Live journals are inspection records, not inputs to the exclusive-writer recovery
+engine. Inspect native state and the journal before retrying. An active turn can
+retain its earlier tool context and existing processes retain their OS cwd, so
+branch-closing skills should relocate as their final step and use explicit paths
+for remaining work. Project-root/client sidebar changes are not part of this API.
+
+`check_codex_live_move.py` verifies 12 combinations of legacy/paginated history,
+legacy/read-only/workspace permissions, and attached idle/active sessions against
+real 0.170.0 with a local scripted model. It checks history/settings preservation,
+continued active status, expected-source rejection, dry runs, repeat invocations,
+owner readback and persisted directory/roots after daemon restart. CLI protocol
+fault tests cover daemon-version mismatch, unloaded/multi-root sessions, lost
+update acknowledgement and concurrent settings changes. No real user session is
+moved by these tests.
+
 ## Native mechanism and invariants
 
 Codex's default scan-based listing can report the original rollout directory after

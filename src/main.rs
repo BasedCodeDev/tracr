@@ -28,6 +28,22 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Move a session's directory association (JSON output).
+    MoveSession {
+        /// Exact native session ID, as shown by list --json.
+        session_id: String,
+        #[arg(value_parser = clap::builder::OsStringValueParser::new().try_map(parse_folder))]
+        destination: PathBuf,
+        /// Update an attached session through its shared Codex daemon.
+        #[arg(long)]
+        live: bool,
+        /// Require the session to start in this directory (or already be at destination).
+        #[arg(long, value_parser = clap::builder::OsStringValueParser::new().try_map(parse_folder))]
+        from: Option<PathBuf>,
+        /// Validate selection and settings without changing the directory.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Report worktrees and live agent activity as JSON.
     Worktrees {
         #[arg(value_name = "PATH", value_parser = clap::builder::OsStringValueParser::new().try_map(parse_folder))]
@@ -88,6 +104,35 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
         fixture: None,
         include_archived: false,
     });
+    if let Command::MoveSession {
+        session_id,
+        destination,
+        live,
+        from,
+        dry_run,
+    } = &command
+    {
+        let binary = if cli.codex_bin.components().count() > 1 {
+            config::absolute_path(&cli.codex_bin, &env.cwd)?
+        } else {
+            cli.codex_bin
+        };
+        let request = tracr::move_session::Request {
+            id: session_id.clone(),
+            target: config::absolute_path(destination, &env.cwd)?,
+            from: from
+                .as_deref()
+                .map(|p| config::absolute_path(p, &env.cwd))
+                .transpose()?,
+            live: *live,
+            dry_run: *dry_run,
+        };
+        let report =
+            tracr::move_session::run(&binary, config.codex_sources, &config.state_dir, request)
+                .await;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(if report.success() { 0 } else { 1 });
+    }
     if let Command::Worktrees { path, text } = &command {
         let path = config::absolute_path(path.as_deref().unwrap_or(&env.cwd), &env.cwd)?;
         let binary = if cli.codex_bin.components().count() > 1 {
@@ -100,7 +145,7 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
         return Ok(if report.complete { 0 } else { 1 });
     }
     let (fixture, include_archived) = match &command {
-        Command::Worktrees { .. } => unreachable!(),
+        Command::Worktrees { .. } | Command::MoveSession { .. } => unreachable!(),
         Command::Browse {
             fixture,
             include_archived,
@@ -172,7 +217,7 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
         }
     }
     match command {
-        Command::Worktrees { .. } => unreachable!(),
+        Command::Worktrees { .. } | Command::MoveSession { .. } => unreachable!(),
         Command::Browse { .. } => {
             tracr::tui::run(browser).await?;
             Ok(tracr::dev_reload::exit_code())
@@ -284,10 +329,20 @@ async fn main() -> ExitCode {
         Some(Command::Worktrees { text, .. }) => Some(*text),
         _ => None,
     };
+    let move_destination = match &cli.command {
+        Some(Command::MoveSession { destination, .. }) => Some(destination.clone()),
+        _ => None,
+    };
     match run(cli).await {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
-            if let Some(text) = worktree_text {
+            if let Some(destination) = move_destination {
+                let report = tracr::move_session::Report::failure(destination, error.to_string());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).expect("serialize report")
+                );
+            } else if let Some(text) = worktree_text {
                 let _ = tracr::worktree_report::Report::failure(error.to_string()).print(text);
             } else {
                 eprintln!("tracr: {}", tracr::browser::safe_text(&error.to_string()));

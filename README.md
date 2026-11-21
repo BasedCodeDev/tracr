@@ -577,6 +577,65 @@ stay above the buttons. In small terminals spacing is reduced; an explicit resiz
 message appears when controls cannot fit. Running file/session mutations retain
 their existing cancellation restrictions.
 
+## Move a session from the CLI
+
+Use the exact native ID from `tracr list --json` (`session.key.native_id`) and an
+existing destination directory:
+
+```sh
+tracr move-session SESSION_ID /path/to/main-checkout --live --from /path/to/worktree
+```
+
+This is the interface for a branch-closing skill: finish the merge and any
+worktree synchronization first, resolve the main checkout through Git, then move
+that conversation there. Use the current conversation's known ID; do not guess
+from titles or select the newest session. `--from` guards against moving a session
+that has changed directories, while allowing retries already at the destination.
+The CLI does not merge branches, delete worktrees, move files, or change BasedGit
+instructions. The destination is a checkout directory, not a branch name.
+
+`--live` supports attached idle **and active** sessions on the shared Codex
+0.170.0 daemon. It updates native settings without interrupting the turn,
+releasing the owner, or launching another model turn. History, identity, archive
+state, model and supported permission settings are preserved. Tracr verifies the
+runtime directory/root, native read, and database listing before reporting
+`moved`. Both legacy and paginated history are supported. A single local runtime
+root and verified legacy read-only/workspace-write or built-in `:read-only` /
+`:workspace` permissions are required; custom/full-access profiles, explicit extra
+writable roots, multiple environments and archived sessions are rejected.
+
+Existing shell processes retain their working directories, and a running turn or
+client may retain earlier instructions and explicit tool paths. Perform the move
+as the final branch-closing operation; use explicit main-checkout paths for any
+remaining commands. This command does not promise to transfer an already-running
+shell or refresh a client's project/sidebar association. Native session-directory
+listing is verified; project-root associations are unchanged.
+
+Add `--dry-run` to validate selection and permissions without changing cwd. Live
+validation briefly attaches to the existing runtime. Without `--live`, the command
+uses the same exclusive-writer relocation as the TUI (currently Codex 0.167.2 /
+0.169.0), including archive restoration. It does not silently fall back between
+live and exclusive-writer modes. Global `--config`, `--codex-home` and `--codex-bin`
+select the same sources as other commands. Ambiguous IDs and incomplete discovery
+fail before the move; use an explicit `--codex-home` when selecting among sources.
+
+JSON output has `schema_version: 1`, `status`, `session` (the discovered metadata
+before the move), `destination` (canonical path), `journal`, and `error`. Status is
+`preview`, `moved`, `already_at_destination`, `rejected`, or `unresolved`.
+Exit 0 means success/preview, 1 means rejection or unresolved/error, and 2 means
+invalid arguments. Treat `unresolved` as potentially applied, never as proof the
+session stayed in the worktree. Check the reported journal and `tracr list --json`
+before deciding to retry; no automatic rollback is attempted. Live audit journals
+are private files under the Tracr state directory's `live-relocations/` and are
+not recovered by the TUI's `u` action. The ordinary offline journals retain their
+existing TUI recovery workflow.
+
+Native acceptance (disposable homes, local scripted model, no credentials):
+
+```sh
+python3 -B scripts/check_codex_live_move.py --codex /absolute/path/to/codex --tracr target/debug/tracr
+```
+
 ## Relink or relocate a session
 
 Select the session and press `m`, or choose **Move session** from `?`. Supply an
