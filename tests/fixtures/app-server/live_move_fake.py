@@ -10,7 +10,9 @@ import struct
 import sys
 
 if sys.argv[1:] == ['--version']:
-    print('codex-cli 0.170.0')
+    if os.environ.get('TRACR_TEST_VERSION_QUERY_FAIL'):
+        raise SystemExit(1)
+    print('codex-cli 0.171.0')
     raise SystemExit
 if sys.argv[1:] != ['app-server', 'proxy']:
     runpy.run_path(str(Path(__file__).with_name('relink_fake.py')), run_name='__main__')
@@ -51,33 +53,49 @@ while True:
                   path=str(home / 'sessions/fixture.jsonl'),
                   environments=[{'environmentId': 'local', 'cwd': cwd, 'runtimeWorkspaceRoots': [cwd]}])
     method = request['method']
+    error = None
     if method == 'initialize':
-        version = '0.169.0' if scenario == 'old-daemon' else '0.170.0'
-        result = {'userAgent': 'tracr/' + version, 'codexHome': str(home)}
+        result = {'codexHome': str(home)}
+        if scenario != 'missing-agent':
+            result['userAgent'] = 'codex/0.170.0'
+        if scenario == 'missing-home':
+            del result['codexHome']
+        elif scenario == 'wrong-home':
+            result['codexHome'] = str(home.parent)
     elif method == 'thread/loaded/list':
         result = {'data': [] if scenario == 'unloaded' else ['session'], 'nextCursor': None}
     elif method == 'thread/read':
         result = {'thread': thread}
+        if scenario == 'readback-error' and state.get('updated'):
+            error = {'code': -32603, 'message': 'injected readback failure'}
     elif method == 'thread/resume':
         assert set(request['params']) == {'threadId', 'excludeTurns'}
         result = dict(thread=thread, cwd=cwd, runtimeWorkspaceRoots=[cwd], model='probe', modelProvider='probe',
                       sandbox={'type': 'readOnly', 'networkAccess': False}, approvalPolicy='never', activePermissionProfile=None)
+        if scenario == 'preflight-error':
+            error = {'code': -32601, 'message': 'injected missing resume method'}
         if scenario == 'extra-root':
             result['runtimeWorkspaceRoots'].append('/extra')
         if state.get('changed_settings'):
             result['model'] = 'different'
     elif method == 'thread/settings/update':
         assert set(request['params']) == {'threadId', 'cwd'}
-        state['cwd'] = request['params']['cwd']
-        if scenario == 'settings-race':
-            state['changed_settings'] = True
-        (home / 'native.json').write_text(json.dumps(state))
-        if scenario == 'lost-ack':
-            break
+        if scenario == 'update-error':
+            error = {'code': -32601, 'message': 'injected missing update method'}
+        else:
+            state['cwd'] = request['params']['cwd']
+            state['updated'] = True
+            if scenario == 'settings-race':
+                state['changed_settings'] = True
+            (home / 'native.json').write_text(json.dumps(state))
+            if scenario == 'lost-ack':
+                break
         result = {}
     else:
         raise AssertionError('Forbidden live operation: ' + method)
-    data = json.dumps({'id': request['id'], 'result': result}).encode()
+    response = {'id': request['id']}
+    response.update({'error': error} if error else {'result': result})
+    data = json.dumps(response).encode()
     prefix = bytes([129, len(data)]) if len(data) < 126 else bytes([129, 126]) + struct.pack('!H', len(data))
     sys.stdout.buffer.write(prefix + data)
     sys.stdout.buffer.flush()

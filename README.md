@@ -621,8 +621,9 @@ that has changed directories, while allowing retries already at the destination.
 The CLI does not merge branches, delete worktrees, move files, or change BasedGit
 instructions. The destination is a checkout directory, not a branch name.
 
-`--live` supports attached idle **and active** sessions on the shared Codex
-0.170.0 daemon. It updates native settings without interrupting the turn,
+`--live` supports attached idle **and active** sessions on a shared Codex
+daemon. Tracr validates the daemon and native responses at runtime. It updates
+native settings without interrupting the turn,
 releasing the owner, or launching another model turn. History, identity, archive
 state, model and supported permission settings are preserved. Tracr verifies the
 runtime directory/root, native read, and database listing before reporting

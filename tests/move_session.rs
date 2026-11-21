@@ -25,6 +25,9 @@ fn run_binary(
     for home in homes {
         command.arg("--codex-home").arg(home);
     }
+    if extra.contains(&"--live") && homes[0].ends_with("missing-agent") {
+        command.env("TRACR_TEST_VERSION_QUERY_FAIL", "1");
+    }
     let output = command
         .arg("move-session")
         .arg(id)
@@ -112,13 +115,15 @@ fn rejects_ambiguous_missing_and_stale_selection_without_updates() {
     );
 }
 #[test]
-fn live_requires_verified_version_and_never_falls_back_to_offline_move() {
+fn live_without_a_shared_daemon_never_falls_back_to_offline_move() {
     let temp = setup();
     let root = temp.path();
     let home = home(root, "codex", json!({}));
     let (code, report) = run(root, &[&home], "session", &["--live"]);
     assert_eq!(code, 1);
-    assert!(report["error"].as_str().unwrap().contains("0.170.0"));
+    assert_eq!(report["status"], "rejected");
+    assert!(report["error"].is_string());
+    assert!(report["journal"].is_null());
     assert!(
         !std::fs::read_to_string(home.join("requests.jsonl"))
             .unwrap()
@@ -138,14 +143,69 @@ fn writer_conflict_is_reported_and_directory_is_unchanged() {
 }
 
 #[test]
+fn live_closeout_moves_with_mismatched_or_unavailable_versions() {
+    for scenario in ["normal", "missing-agent"] {
+        let temp = setup();
+        let root = temp.path();
+        let home = home(root, scenario, json!({"scenario":scenario}));
+        let from = root.join("old");
+        let preview = ["--live", "--from", from.to_str().unwrap(), "--dry-run"];
+        let run =
+            |flags: &[&str]| run_binary(root, &[&home], "session", flags, "live_move_fake.py");
+        let (code, report) = run(&preview);
+        assert_eq!(code, 0, "{scenario}: {report}");
+        assert_eq!(report["schema_version"], 1);
+        assert_eq!(report["status"], "preview");
+        assert!(report["journal"].is_null());
+        assert!(
+            !std::fs::read_to_string(home.join("live_requests.jsonl"))
+                .unwrap()
+                .contains("thread/settings/update")
+        );
+
+        let (code, report) = run(&preview[..3]);
+        assert_eq!(code, 0, "{scenario}: {report}");
+        assert_eq!(report["status"], "moved");
+        assert_eq!(report["destination"], root.join("new").to_str().unwrap());
+        assert!(report["error"].is_null());
+        let journal: Value =
+            serde_json::from_slice(&std::fs::read(report["journal"].as_str().unwrap()).unwrap())
+                .unwrap();
+        assert_eq!(journal["phase"], "complete");
+
+        let (code, report) = run(&preview[..3]);
+        assert_eq!(code, 0, "{scenario}: {report}");
+        assert_eq!(report["status"], "already_at_destination");
+    }
+}
+
+#[test]
 fn live_faults_distinguish_preflight_rejection_from_uncertain_writes() {
-    for scenario in [
-        "old-daemon",
-        "unloaded",
-        "extra-root",
-        "lost-ack",
-        "settings-race",
-        "normal",
+    for (scenario, error, attempted, changed) in [
+        (
+            "missing-home",
+            "did not report its Codex home",
+            false,
+            false,
+        ),
+        ("wrong-home", "different Codex home", false, false),
+        ("unloaded", "already loaded", false, false),
+        ("extra-root", "Multi-root", false, false),
+        (
+            "preflight-error",
+            "injected missing resume method",
+            false,
+            false,
+        ),
+        (
+            "update-error",
+            "injected missing update method",
+            true,
+            false,
+        ),
+        ("lost-ack", "Live directory update failed", true, true),
+        ("readback-error", "injected readback failure", true, true),
+        ("settings-race", "Settings changed", true, true),
     ] {
         let temp = setup();
         let root = temp.path();
@@ -154,42 +214,37 @@ fn live_faults_distinguish_preflight_rejection_from_uncertain_writes() {
             run_binary(root, &[&home], "session", &["--live"], "live_move_fake.py");
         let state: Value =
             serde_json::from_slice(&std::fs::read(home.join("native.json")).unwrap()).unwrap();
-        let changed = matches!(scenario, "lost-ack" | "settings-race" | "normal");
-        assert_eq!(
-            code,
-            if scenario == "normal" { 0 } else { 1 },
-            "{scenario}: {report}"
-        );
+        assert_eq!(code, 1, "{scenario}: {report}");
+        assert_eq!(report["schema_version"], 1);
         assert_eq!(
             report["status"],
-            if scenario == "normal" {
-                "moved"
-            } else if changed {
-                "unresolved"
-            } else {
-                "rejected"
-            },
+            if attempted { "unresolved" } else { "rejected" },
+            "{scenario}: {report}"
+        );
+        assert!(
+            report["error"].as_str().unwrap().contains(error),
             "{scenario}: {report}"
         );
         assert_eq!(
             state["cwd"],
             root.join(if changed { "new" } else { "old" })
                 .to_str()
-                .unwrap()
+                .unwrap(),
         );
-        if changed {
+        let requests = std::fs::read_to_string(home.join("live_requests.jsonl")).unwrap();
+        assert_eq!(
+            requests.contains("thread/settings/update"),
+            attempted,
+            "{scenario}"
+        );
+        if attempted {
             let journal: Value = serde_json::from_slice(
                 &std::fs::read(report["journal"].as_str().unwrap()).unwrap(),
             )
             .unwrap();
-            assert_eq!(
-                journal["phase"],
-                if scenario == "normal" {
-                    "complete"
-                } else {
-                    "updating"
-                }
-            );
+            assert_eq!(journal["phase"], "updating");
+        } else {
+            assert!(report["journal"].is_null());
         }
     }
 }

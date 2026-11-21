@@ -21,13 +21,13 @@ unsupported. Native acceptance tests provide regression evidence without gating
 new Codex releases. API failures and state mismatches use the existing rejection
 and recovery flow.
 
-## Live CLI relocation (0.170.0)
+## Live CLI relocation
 
-`tracr move-session ID DESTINATION --live [--from OLD]` has a separate compatibility
-boundary from exclusive-writer/TUI relocation. The binary and owning daemon must
-both report 0.170.0, and the daemon's canonical Codex home must match the selected
-source. The exact ID must resolve uniquely through a complete source inventory.
-The session must already be loaded, unarchived, and use a single local environment.
+`tracr move-session ID DESTINATION --live [--from OLD]` uses the shared Codex daemon.
+Tracr validates the API responses at runtime. The daemon's reported Codex home
+must resolve to the selected source. The exact ID must resolve uniquely through a
+complete source inventory. The session must already be loaded, unarchived, and use
+a single local environment.
 Supported profile/root restrictions above still apply.
 
 An operational proxy attaches using override-free `thread/resume` with
@@ -49,13 +49,13 @@ branch-closing skills should relocate as their final step and use explicit paths
 for remaining work. Project-root/client sidebar changes are not part of this API.
 
 `check_codex_live_move.py` verifies 12 combinations of legacy/paginated history,
-legacy/read-only/workspace permissions, and attached idle/active sessions against
-real 0.170.0 with a local scripted model. It checks history/settings preservation,
+legacy/read-only/workspace permissions, and attached idle/active sessions with a
+local scripted model. The matrix has passed on Codex 0.170.0 and 0.171.0. It checks history/settings preservation,
 continued active status, expected-source rejection, dry runs, repeat invocations,
 owner readback and persisted directory/roots after daemon restart. CLI protocol
-fault tests cover daemon-version mismatch, unloaded/multi-root sessions, lost
-update acknowledgement and concurrent settings changes. No real user session is
-moved by these tests.
+fault tests cover absent or differing version information, daemon home mismatches,
+unloaded/multi-root sessions, API failures, and concurrent settings changes.
+The tests move only disposable sessions.
 
 ## Native mechanism and invariants
 
