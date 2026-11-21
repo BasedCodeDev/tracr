@@ -220,7 +220,18 @@ pub(crate) struct OverlayState {
     selected: usize,
     confirmation: Option<Confirmation>,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorktreeTerminal {
+    pub(crate) id: u64,
+    pub(crate) title: String,
+    pub(crate) folder: std::path::PathBuf,
+    pub(crate) key: Option<SessionKey>,
+    pub(crate) owned: bool,
+}
+
 pub struct ExitNotice {
+    pub(crate) id: u64,
+    pub(crate) exit_verified: bool,
     pub message: String,
     pub failed: bool,
     pub was_active: bool,
@@ -248,6 +259,46 @@ impl Manager {
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
+    pub(crate) fn worktree_terminals(&self, root: &std::path::Path) -> Vec<WorktreeTerminal> {
+        self.sessions
+            .iter()
+            .filter(|session| {
+                session.folder.starts_with(root)
+                    || std::fs::canonicalize(&session.folder)
+                        .is_ok_and(|path| path.starts_with(root))
+            })
+            .map(|session| WorktreeTerminal {
+                id: session.id,
+                title: session.title.clone(),
+                folder: session.folder.clone(),
+                key: session.key.clone(),
+                owned: session.ownership == Ownership::Owned,
+            })
+            .collect()
+    }
+
+    pub(crate) fn close_worktree_terminals(
+        &mut self,
+        root: &std::path::Path,
+        reviewed: &[WorktreeTerminal],
+    ) -> std::result::Result<Vec<WorktreeTerminal>, Vec<WorktreeTerminal>> {
+        let mut current = self.worktree_terminals(root);
+        if current.iter().any(|terminal| !reviewed.contains(terminal)) {
+            return Err(current);
+        }
+        current.retain(|terminal| terminal.owned);
+        for terminal in &current {
+            if let Some(session) = self
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == terminal.id)
+            {
+                session.stop();
+            }
+        }
+        Ok(current)
+    }
+
     pub fn owns(&self, key: &SessionKey) -> bool {
         self.sessions.iter().any(|s| s.key.as_ref() == Some(key))
     }
@@ -593,6 +644,8 @@ impl Manager {
                         )
                     };
                     exited.push(ExitNotice {
+                        id: s.id,
+                        exit_verified: true,
                         message: format!("{} exited: {status}{details}", s.title),
                         failed: !status.success() && s.stopping.is_none(),
                         was_active: self.active == Some(s.id),
@@ -604,6 +657,8 @@ impl Manager {
                 }
                 Err(error) => {
                     exited.push(ExitNotice {
+                        id: s.id,
+                        exit_verified: false,
                         message: format!("{}: {error}", s.title),
                         failed: true,
                         was_active: self.active == Some(s.id),
@@ -1642,6 +1697,51 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+    #[tokio::test]
+    async fn closing_worktree_terminals_requires_a_current_review_and_preserves_other_folders() {
+        let fixture = tempfile::tempdir().unwrap();
+        let target = fixture.path().join("feature");
+        let nested = target.join("src");
+        let other = fixture.path().join("feature-other");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir(&other).unwrap();
+        let mut manager = Manager::default();
+        let mut launch = command("import time; time.sleep(30)");
+        launch.cwd = target.clone();
+        manager.launch(&launch, None, "Root".into()).unwrap();
+        launch.cwd = other;
+        manager.launch(&launch, None, "Outside".into()).unwrap();
+
+        let first_review = manager.worktree_terminals(&target);
+        assert_eq!(first_review.len(), 1);
+        launch.cwd = nested;
+        manager.launch(&launch, None, "Nested".into()).unwrap();
+
+        let updated = manager
+            .close_worktree_terminals(&target, &first_review)
+            .unwrap_err();
+        assert_eq!(updated.len(), 2);
+        manager.sessions[0].title = "Updated root".into();
+        let reviewed = manager
+            .close_worktree_terminals(&target, &updated)
+            .unwrap_err();
+        assert!(
+            manager
+                .sessions
+                .iter()
+                .all(|terminal| terminal.stopping.is_none())
+        );
+
+        let closing = manager
+            .close_worktree_terminals(&target, &reviewed)
+            .unwrap();
+        assert_eq!(closing, reviewed);
+        wait(&mut manager, |manager| manager.sessions.len() == 1);
+        assert_eq!(manager.sessions[0].title, "Outside");
+        assert!(manager.sessions[0].stopping.is_none());
+        manager.shutdown().await;
+    }
+
     #[test]
     fn session_previews_preserve_folder_choices_and_processes() {
         let temp = tempfile::tempdir().unwrap();

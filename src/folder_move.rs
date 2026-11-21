@@ -134,7 +134,7 @@ fn absent(path: &Path) -> Result<()> {
     }
 }
 // Resolve existing ancestors without creating the state directory.
-fn resolved(path: &Path) -> Result<PathBuf> {
+pub(crate) fn resolved(path: &Path) -> Result<PathBuf> {
     if path.exists() {
         return fs::canonicalize(path).map_err(|e| e.to_string());
     }

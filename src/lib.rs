@@ -45,6 +45,8 @@ pub mod git_layout;
 pub mod git_render;
 
 pub mod worktree_create;
+pub(crate) mod worktree_discard;
+mod worktree_discard_ui;
 
 mod worktree_create_ui;
 

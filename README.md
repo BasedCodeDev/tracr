@@ -809,6 +809,28 @@ links. This does not update Codex session paths after a move outside tracr. Use
 or relink affected sessions after an external move. Existing absolute-linked
 worktrees are not converted or repaired by creating a new one.
 
+## Discard a Git worktree and its conversations
+
+Select a linked feature worktree in **Folders** and press **Delete**, or choose
+**Discard worktree…** from `?`. The warning dialog previews local changes,
+unmerged commits, and saved Codex conversations, including archived sessions
+and side chats. Scroll to review the list, use Tab to focus the confirmation
+field, and type the branch name. Then focus **Discard worktree** and press Enter.
+
+Tracr verifies permanent deletion in Codex before removing the worktree. The
+discard includes staged, modified, untracked, and ignored files and the local
+feature branch. The dialog lists self-contained nested Git repositories whose
+history will also be deleted. Submodules, linked checkouts, and repositories
+using shared Git storage block discard.
+
+Use **Close listed terminals…** and confirm to close the Tracr terminals shown
+in the dialog. Tracr checks Codex readiness again after those terminals exit.
+If a conversation stays loaded, close its client and choose **Retry**, or choose
+**Release idle conversations** for eligible idle conversations. Review and
+confirm the discard after the blockers clear.
+If cleanup stops partway through, press **D** to review verified progress and
+confirm the remaining cleanup.
+
 ## Move a folder and its sessions
 
 Select an existing folder in the **Folders** pane and press **m**, or choose

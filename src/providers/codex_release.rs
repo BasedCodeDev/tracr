@@ -28,6 +28,23 @@ pub(crate) async fn release_idle(
     source: &SourceConfig,
     session: &crate::domain::SessionSummary,
 ) -> Result<ReleaseOutcome, String> {
+    release_idle_checked(binary, source, session, false).await
+}
+
+pub(crate) async fn release_discard_idle(
+    binary: &Path,
+    source: &SourceConfig,
+    session: &crate::domain::SessionSummary,
+) -> Result<ReleaseOutcome, String> {
+    release_idle_checked(binary, source, session, true).await
+}
+
+async fn release_idle_checked(
+    binary: &Path,
+    source: &SourceConfig,
+    session: &crate::domain::SessionSummary,
+    discard: bool,
+) -> Result<ReleaseOutcome, String> {
     timeout(Duration::from_secs(30), async {
         let mut rpc = Rpc::start(binary, &source.home)
             .await
@@ -36,6 +53,7 @@ pub(crate) async fn release_idle(
         let old = session.cwd.clone().ok_or("Missing session directory")?;
         if thread["cwd"].as_str() != old.to_str()
             || thread["createdAt"].as_i64() != Some(session.created_at)
+            || (discard && (archived || thread["updatedAt"].as_i64() != Some(session.updated_at)))
         {
             return Err("Session changed before release".into());
         }
@@ -50,7 +68,7 @@ pub(crate) async fn release_idle(
             profile: r::recorded_profile(source, &detail).await?,
         };
         rpc.close().await;
-        release_inner(binary, source, &context).await
+        release_inner(binary, source, &context, discard).await
     })
     .await
     .map_err(|_| "Idle release check timed out".to_owned())?
@@ -110,6 +128,7 @@ pub async fn release(
                 fingerprint: preview.fingerprint.clone(),
                 profile: preview.profile,
             },
+            false,
         ),
     )
     .await
@@ -148,6 +167,7 @@ async fn release_inner(
     binary: &Path,
     source: &SourceConfig,
     p: &ReleaseContext,
+    verify_home: bool,
 ) -> Result<ReleaseOutcome, String> {
     if p.key.source_id != source.id || p.key.provider.0 != "codex" {
         return Err("Release source does not match the session".into());
@@ -156,6 +176,9 @@ async fn release_inner(
         Ok(client) => client,
         Err(_) => return Ok(ReleaseOutcome::Unavailable),
     };
+    if verify_home {
+        client.validate_server_home(&source.home)?;
+    }
     let id = &p.key.native_id;
     if !loaded(&mut client, id).await? {
         return Ok(ReleaseOutcome::AlreadyUnloaded);
