@@ -1123,19 +1123,6 @@ fn browser_footer(_area: Rect, browser: &Browser, view: &View) -> (String, u16) 
         } else {
             message
         };
-    let message = if let Some(root) = &browser.focus_root {
-        format!(
-            "{}Focused: {} · Alt+Z in Folders zooms out",
-            if message.is_empty() {
-                String::new()
-            } else {
-                format!("{message} | ")
-            },
-            safe_text(&root.display().to_string())
-        )
-    } else {
-        message
-    };
     let height = u16::from(!message.is_empty());
     (message, height)
 }
@@ -1425,7 +1412,8 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     }
     if let Some(area) = panels.folders {
         if view.folders_hidden {
-            draw_rail(frame, area, panels.mode, " Folders ");
+            let title = folder_title(browser, area.width.saturating_sub(2));
+            draw_rail(frame, area, panels.mode, &format!(" {title} "));
         } else {
             draw_pane(frame, area, 0, browser, view);
         }
@@ -2927,6 +2915,23 @@ fn folder_tree_line(
     graph_viewport(spans, offset, width)
 }
 
+fn folder_title(browser: &Browser, width: u16) -> String {
+    use unicode_width::UnicodeWidthStr;
+    let prefix = "Folders · ";
+    let available = usize::from(width).saturating_sub(prefix.width());
+    let Some(root) = browser.focus_root.as_ref().filter(|_| available > 0) else {
+        return "Folders".into();
+    };
+    let path = safe_text(&root.display().to_string());
+    let path_width = path.width();
+    if path_width <= available {
+        return format!("{prefix}{path}");
+    }
+    let remaining = available - 1;
+    let suffix = graph_viewport(vec![Span::raw(path)], path_width - remaining, remaining);
+    format!("{prefix}…{suffix}")
+}
+
 fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, view: &View) {
     match pane {
         0 => {
@@ -2956,14 +2961,8 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 .collect();
             // Folder rows occupy one line each. Keep the selection centered,
             // clamping at the ends so the viewport stays filled.
-            let block = pane_block(
-                if browser.focus_root.is_some() {
-                    "Folders · Focused"
-                } else {
-                    "Folders"
-                },
-                view.context() == 0,
-            );
+            let title = folder_title(browser, area.width.saturating_sub(2));
+            let block = pane_block(&title, view.context() == 0);
             let visible_rows = usize::from(block.inner(area).height);
             let top = selected
                 .filter(|_| visible_rows > 0)
@@ -7905,19 +7904,17 @@ mod action_discovery_tests {
         assert_eq!(updated[view.help_selected].command, Command::FolderFocus);
         open_help(&browser, &mut view);
         let reopened = menu_entries(&browser, &view);
-        assert!(
-            reopened
-                .iter()
-                .position(|entry| entry.command == Command::FolderFocus)
-                .unwrap()
-                < view
-                    .help_entries
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .position(|entry| entry.command == Command::Create)
-                    .unwrap()
-        );
+        let zoom = reopened
+            .iter()
+            .position(|entry| entry.command == Command::FolderFocus)
+            .unwrap();
+        assert_eq!(reopened[zoom].shortcut, "Alt+Z");
+        assert_eq!(reopened[zoom].label, "Zoom out of folder");
+        let create = reopened
+            .iter()
+            .position(|entry| entry.command == Command::Create)
+            .unwrap();
+        assert!(zoom < create);
     }
 
     #[test]
@@ -8041,6 +8038,8 @@ mod action_discovery_tests {
         let mut clean = View::default();
         let area = Rect::new(0, 0, 80, 24);
         assert_eq!(browser_footer(area, &browser, &clean).1, 0);
+        browser.focus_root = Some("/synthetic/repo".into());
+        assert_eq!(browser_footer(area, &browser, &clean), (String::new(), 0));
         clean.message = Some("Refreshed".into());
         assert_eq!(
             browser_footer(area, &browser, &clean),

@@ -26,7 +26,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
     try:
         terminal.inspect('ID: first')
         terminal.send(b'\x1b`')
-        terminal.expect('Folders · Focused')
+        terminal.expect_focus('Folders · ')
+        assert '/listed' in terminal.line(0, 0, 60)
         terminal.send(b'\x1b`/')
         terminal.expect('Search within folder')
         terminal.expect('Within:')
@@ -39,10 +40,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
         terminal.wait(lambda: (home/'terminal-size.json').exists())
         original = size()
         terminal.send(b'\x1b`\x1bz')
-        terminal.wait(lambda: 'Folders · Focused' not in terminal.text() and size()['columns'] == original['columns'] - 62)
+        terminal.wait(lambda: 'Folders ·' not in terminal.text() and size()['columns'] == original['columns'] - 62)
         assert size()['pid'] == original['pid']
         terminal.send(b'\x1bz')
-        terminal.expect('Folders · Focused')
+        terminal.expect_focus('Folders · ')
+        assert '/listed' in terminal.line(0, 0, 60)
         terminal.wait(lambda: size()['columns'] == original['columns'] - 62)
         terminal.send(b'\x1b`x')
         terminal.wait(lambda: 'FAKE CODING SESSION' not in terminal.text())
@@ -53,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
     terminal = Terminal(args, env)
     try:
         terminal.inspect('ID: first')
-        assert 'Folders · Focused' not in terminal.text()
+        assert 'Folders ·' not in terminal.text()
         terminal.send(b'/')
         terminal.expect('Search sessions')
         terminal.send(b'\x1b')
@@ -65,7 +67,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-folder-focus-') as directory:
     terminal = Terminal(args+[str(outside)], env)
     try:
         terminal.send(b'\x1b`')
-        terminal.expect('Folders · Focused')
+        terminal.expect_focus('Folders · ')
+        assert '/outside' in terminal.line(0, 0, 60)
         terminal.send(b'/')
         terminal.expect('Search within folder')
         terminal.expect('Within:')
