@@ -1821,6 +1821,7 @@ fn available_when_folders_hidden(command: Command) -> bool {
 pub struct MenuEntry {
     command: Command,
     section: &'static str,
+    group: &'static str,
     shortcut: &'static str,
     pub label: &'static str,
 }
@@ -2087,29 +2088,40 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         1 => "Sessions",
         _ => "Git",
     };
-    // Stable sorting preserves the established order within each group. This is
-    // captured by open_help, so changing availability cannot move the selection.
-    entries.sort_by_key(|(command, section, _, _)| {
-        if *section == tab_section {
-            (0, unavailable(*command, browser, view).is_some())
-        } else {
-            let rank = match *section {
-                "Navigation" => 1,
-                "Terminals" => 2,
-                _ => 3,
-            };
-            (rank, false)
-        }
-    });
-    entries
+    let mut entries: Vec<_> = entries
         .into_iter()
         .map(|(command, section, shortcut, label)| MenuEntry {
             command,
             section,
+            group: if section == tab_section
+                || matches!(command, PreviousItem | NextItem | FirstItem | LastItem)
+            {
+                tab_section
+            } else {
+                "Global"
+            },
             shortcut,
             label,
         })
-        .collect()
+        .collect();
+    // Capture a stable order on opening; live availability must not move selection.
+    entries.sort_by_key(|entry| {
+        if entry.group == tab_section {
+            (
+                0,
+                unavailable(entry.command, browser, view).is_some(),
+                usize::from(entry.section == "Navigation"),
+            )
+        } else {
+            let rank = match entry.section {
+                "Navigation" => 1,
+                "Terminals" => 2,
+                _ => 3,
+            };
+            (1, false, rank)
+        }
+    });
+    entries
 }
 
 fn selected_commit(browser: &Browser, view: &View) -> Option<(std::path::PathBuf, String)> {
@@ -2242,8 +2254,11 @@ fn filtered_menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     menu_entries(browser, view)
         .into_iter()
         .filter(|entry| {
-            let text =
-                format!("{} {} {}", entry.section, entry.label, entry.shortcut).to_lowercase();
+            let text = format!(
+                "{} {} {} {}",
+                entry.group, entry.section, entry.label, entry.shortcut
+            )
+            .to_lowercase();
             query.split_whitespace().all(|term| text.contains(term))
         })
         .collect()
@@ -2308,14 +2323,21 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     let mut last_section = "";
     let mut selected_row = 0;
     for (i, entry) in entries.iter().enumerate() {
-        if entry.section != last_section {
+        if entry.group != last_section {
+            if !last_section.is_empty() {
+                items.push(ListItem::new(""));
+                items.push(ListItem::new(Line::styled(
+                    "─".repeat(usize::from(sections[0].width.saturating_sub(3))),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
             items.push(ListItem::new(Line::styled(
-                entry.section,
+                entry.group,
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )));
-            last_section = entry.section;
+            last_section = entry.group;
         }
         if i == selected {
             selected_row = items.len();
@@ -7341,16 +7363,14 @@ mod action_discovery_tests {
             };
             open_help(&browser, &mut view);
             let entries = menu_entries(&browser, &view);
-            assert_eq!(entries[0].section, section);
+            assert_eq!(entries[0].group, section);
             let ranks: Vec<_> = entries
                 .iter()
-                .map(|entry| match entry.section {
+                .map(|entry| match entry.group {
                     name if name == section => {
                         usize::from(unavailable(entry.command, &browser, &view).is_some())
                     }
-                    "Navigation" => 2,
-                    "Terminals" => 3,
-                    "General" => 4,
+                    "Global" => 2,
                     other => panic!("Unexpected section: {other}"),
                 })
                 .collect();
@@ -7362,17 +7382,20 @@ mod action_discovery_tests {
                     .position(|entry| unavailable(entry.command, &browser, &view).is_none())
                     .unwrap()
             );
-            // An empty Sessions tab has no enabled local actions: select navigation.
+            // Empty tabs still expose their local item navigation.
             if context == 1 {
-                assert_eq!(entries[view.help_selected].section, "Navigation");
+                assert_eq!(entries[view.help_selected].command, Command::PreviousItem);
             }
             view.help_query = section.into();
             let expected: Vec<_> = entries
                 .iter()
                 .filter(|entry| {
-                    format!("{} {} {}", entry.section, entry.label, entry.shortcut)
-                        .to_lowercase()
-                        .contains(&section.to_lowercase())
+                    format!(
+                        "{} {} {} {}",
+                        entry.group, entry.section, entry.label, entry.shortcut
+                    )
+                    .to_lowercase()
+                    .contains(&section.to_lowercase())
                 })
                 .map(|entry| entry.command)
                 .collect();
@@ -7383,6 +7406,50 @@ mod action_discovery_tests {
                     .collect::<Vec<_>>(),
                 expected
             );
+        }
+    }
+
+    #[test]
+    fn two_sections_render_and_filter_without_orphaned_dividers() {
+        let browser = Browser::new(vec![]);
+        for (width, height) in [(100, 35), (36, 20)] {
+            let mut view = View::default();
+            open_help(&browser, &mut view);
+            // Keep both groups visible together even in the narrow layout.
+            view.help_entries
+                .as_mut()
+                .unwrap()
+                .retain(|entry| matches!(entry.command, Command::Info | Command::Quit));
+            view.help_selected = 0;
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| draw_help(frame, &browser, &view))
+                .unwrap();
+            let text = lines(&terminal).join("\n");
+            assert!(text.contains("Sessions") && text.contains("Global"));
+            assert!(
+                text.lines()
+                    .any(|line| line.contains(" ───") && !line.contains("Actions & shortcuts"))
+            );
+            assert!(!text.contains("General"));
+            for (query, heading, absent) in [
+                ("Global", "Global", "Sessions"),
+                ("information", "Sessions", "Global"),
+            ] {
+                view.help_query = query.into();
+                assert_eq!(filtered_menu_entries(&browser, &view).len(), 1);
+                terminal
+                    .draw(|frame| draw_help(frame, &browser, &view))
+                    .unwrap();
+                let text = lines(&terminal).join("\n");
+                assert!(text.contains(heading));
+                assert!(!text.contains(absent));
+                assert!(
+                    !text
+                        .lines()
+                        .any(|line| line.contains(" ───") && !line.contains("Actions & shortcuts"))
+                );
+            }
         }
     }
 

@@ -426,8 +426,9 @@ incomplete. A successful refresh removes records no longer listed by that source
 Folders and Git history have their own actions inside the drawer; Sessions has
 its actions in the main workspace. The focused panel’s border shows **? Actions**
 (or **?** when narrow), opening its actions and shortcuts. Current-tab actions come
-first, with available actions above dimmed unavailable ones; navigation, terminals,
-and general actions follow. Press **/** to filter by
+first, including item navigation, with available actions above dimmed unavailable
+ones. A divider separates these from **Global** actions such as switching panels,
+terminal management, search, refresh, and quit. Press **/** to filter by
 action name, section, or shortcut; all typed terms must match. Backspace edits and
 Ctrl+U clears the filter. Arrows select and Enter runs an available action. Escape
 leaves search mode while retaining the filter; Escape again closes the menu.
