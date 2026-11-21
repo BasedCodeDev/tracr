@@ -22,6 +22,7 @@ pub struct Annotation {
     pub oid: String,
     pub root: PathBuf,
     pub label: Option<String>,
+    branch: Option<String>,
 }
 
 fn priority(status: RuntimeStatus) -> u8 {
@@ -99,6 +100,11 @@ pub fn annotations(browser: &Browser, history: &History) -> Vec<Annotation> {
             oid: oid.clone(),
             root: root.clone(),
             label,
+            branch: worktree
+                .branch
+                .as_deref()
+                .and_then(|name| name.strip_prefix("refs/heads/"))
+                .map(crate::browser::safe_text),
         });
     }
     result.sort_by(|a, b| {
@@ -216,9 +222,25 @@ impl Presentation {
         if rebuild {
             self.annotations = annotations;
             let oids: Vec<_> = self.annotations.iter().map(|a| a.oid.as_str()).collect();
+            let mut branch_colors = BTreeMap::new();
+            for annotation in &self.annotations {
+                if let (Some(branch), Some(color)) = (
+                    annotation.branch.as_deref(),
+                    crate::tui::activity_color(annotation.status),
+                ) {
+                    let rank = priority(annotation.status);
+                    let entry = branch_colors.entry(branch).or_insert((rank, color));
+                    if rank < entry.0 {
+                        *entry = (rank, color);
+                    }
+                }
+            }
             self.rows = compose_rows(&history.rows, &history.tails, &oids, |oid| {
-                self.width
-                    .map_or_else(Vec::new, |width| history.reference_lines(oid, width))
+                self.width.map_or_else(Vec::new, |width| {
+                    history.reference_lines(oid, width, |branch| {
+                        branch_colors.get(branch).map(|&(_, color)| color)
+                    })
+                })
             });
             self.positions = self
                 .rows
@@ -749,6 +771,104 @@ pub(crate) mod tests {
             annotations(&browser, &history)
                 .iter()
                 .any(|a| a.session.title == "waiting")
+        );
+    }
+
+    #[tokio::test]
+    async fn branch_labels_follow_live_activity_in_their_worktrees() {
+        use crate::git::{RefKind, RefLabel};
+        use ratatui::style::Color;
+        let (mut browser, mut history) = fixture().await;
+        let running = add_session(
+            &mut browser,
+            "running",
+            "/repo",
+            "/repo",
+            "/repo/.git",
+            RuntimeStatus::Running,
+            1,
+        );
+        let waiting = add_session(
+            &mut browser,
+            "waiting",
+            "/repo/src",
+            "/repo",
+            "/repo/.git",
+            RuntimeStatus::Waiting {
+                input: true,
+                approval: false,
+            },
+            2,
+        );
+        add_session(
+            &mut browser,
+            "feature",
+            "/worktree",
+            "/worktree",
+            "/repo/.git",
+            RuntimeStatus::Running,
+            3,
+        );
+        history.set_worktrees(browser.repositories.get(std::path::Path::new("/repo/.git")));
+        history.set_references(BTreeMap::from([(
+            "head".into(),
+            [
+                (RefKind::Local, "main"),
+                (RefKind::Local, "feature"),
+                (RefKind::Local, "unattached"),
+                (RefKind::Remote, "origin/main"),
+                (RefKind::Tag, "main"),
+            ]
+            .into_iter()
+            .map(|(kind, name)| RefLabel {
+                kind,
+                name: name.into(),
+            })
+            .collect(),
+        )]));
+        let mut view = Presentation {
+            width: Some(80),
+            ..Default::default()
+        };
+        let color = |view: &Presentation, text: &str| {
+            view.rows
+                .iter()
+                .filter_map(|row| match row {
+                    Row::References { line, .. } => Some(&line.spans),
+                    _ => None,
+                })
+                .flatten()
+                .find(|span| span.content == text)
+                .and_then(|span| span.style.fg)
+        };
+        view.sync(&browser, &history);
+        assert_eq!(color(&view, "[main]"), Some(Color::Rgb(255, 165, 0)));
+        assert_eq!(color(&view, "feature"), Some(Color::Green));
+        assert_eq!(color(&view, "◇"), Some(crate::git_render::WORKTREE_COLOR));
+        assert_eq!(
+            color(&view, "[unattached]"),
+            Some(crate::git_render::BRANCH_COLOR)
+        );
+        assert_eq!(color(&view, "[remote: origin/main]"), Some(Color::Cyan));
+        assert_eq!(color(&view, "[tag: main]"), Some(Color::Yellow));
+
+        browser.sources[0]
+            .live
+            .insert(waiting, RuntimeStatus::Unloaded);
+        view.sync(&browser, &history);
+        assert_eq!(color(&view, "[main]"), Some(Color::Green));
+        browser.sources[0]
+            .live
+            .insert(running.clone(), RuntimeStatus::Idle);
+        view.sync(&browser, &history);
+        assert_eq!(color(&view, "[main]"), Some(Color::Rgb(255, 255, 170)));
+        browser.sources[0]
+            .live
+            .insert(running, RuntimeStatus::Unloaded);
+        view.sync(&browser, &history);
+        assert_eq!(
+            color(&view, "[main]"),
+            Some(crate::git_render::BRANCH_COLOR)
         );
     }
 
