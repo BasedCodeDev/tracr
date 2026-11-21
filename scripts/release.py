@@ -117,7 +117,7 @@ def smoke(binary):
     if not result['complete'] or not result['sessions']:
         raise ValueError('release fixture inventory failed')
     run([str(binary), '--help'])
-    for helper in ('terminal_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check', 'folder_move_check', 'release_check', 'git_lifecycle_check', 'git_watch_check', 'idle_check', 'inline_check', 'scroll_check', 'focus_check', 'stash_history_check', 'worktree_create_check'):
+    for helper in ('terminal_check', 'folder_check', 'resume_check', 'edge_check', 'browse_check', 'folder_move_check', 'release_check', 'git_lifecycle_check', 'git_watch_check', 'idle_check', 'inline_check', 'scroll_check', 'focus_check', 'stash_history_check', 'worktree_create_check', 'drawer_check', 'worktree_discard_check'):
         command = [sys.executable, str(ROOT/f'tests/fixtures/app-server/{helper}.py'), str(binary)]
         if helper == 'terminal_check':
             command.append(str(ROOT/'tests/fixtures/sessions/catalog.json'))
@@ -134,6 +134,8 @@ def build(args):
     binary = ROOT/'target'/args.target/'release/tracr'
     verify_binary(binary, args.target, version())
     smoke(binary)
+    subprocess.run(cargo + ['test', '--release', '--target', args.target, '--target-dir', str(ROOT/'target'),
+                           '--test', 'worktree_report', '--test', 'move_session', *locked], cwd=ROOT, check=True)
     metadata = json.loads(run(cargo + ['metadata', '--format-version', '1', '--filter-platform', args.target, *locked], cwd=ROOT))
     text = notices(metadata) + runtime_notices(cargo)
     output.parent.mkdir(parents=True, exist_ok=True)
