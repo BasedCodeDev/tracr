@@ -400,6 +400,7 @@ pub struct View {
     pub git_navigation_loading: bool,
     pub git_navigation_error: bool,
     pub git_hidden: bool,
+    pub git_zoomed: bool,
     pub folders_hidden: bool,
     pub git_size_limited: bool,
     pub git_watch_error: Option<String>,
@@ -462,6 +463,7 @@ impl Default for View {
             git_navigation_loading: false,
             git_navigation_error: false,
             git_hidden: Default::default(),
+            git_zoomed: false,
             folders_hidden: Default::default(),
             git_size_limited: Default::default(),
             git_watch_error: Default::default(),
@@ -607,6 +609,9 @@ impl View {
             self.drawer_git = false;
         }
         self.git_focus = self.drawer_open && self.drawer_git;
+        if !self.git_focus {
+            self.git_zoomed = false;
+        }
         self.focus = if self.drawer_open { 0 } else { 1 };
         self.folders_hidden = false;
         self.git_hidden = false;
@@ -815,6 +820,11 @@ fn panel_layout(area: Rect, terminal_height: u16, view: &View, present: bool) ->
         git: None,
         graph_visible: false,
     };
+    if view.git_zoomed && view.drawer_open && view.drawer_git && present {
+        result.git = Some(area);
+        result.graph_visible = area.height >= 4 && area.width >= 12;
+        return result;
+    }
     if !view.drawer_visible() {
         result.sessions = Some(area);
         return result;
@@ -2139,6 +2149,7 @@ enum Command {
     DiscardWorktree,
     RecoverDiscard,
     GitToggle,
+    GitZoom,
     FolderToggle,
     GitReturn,
     GitUp,
@@ -2395,7 +2406,30 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 (GitEnd, "Git", "End", "Last loaded item"),
             ]);
         }
-        entries.push((GitReturn, "Navigation", "Esc", "Close drawer"));
+        entries.push((
+            GitZoom,
+            "Git",
+            "Alt+Z",
+            if view.git_zoomed {
+                "Restore Git panel"
+            } else {
+                "Full-screen Git"
+            },
+        ));
+        entries.push((
+            GitReturn,
+            "Navigation",
+            if view.git_zoomed {
+                "Esc / Backspace"
+            } else {
+                "Esc"
+            },
+            if view.git_zoomed {
+                "Restore Git panel"
+            } else {
+                "Close drawer"
+            },
+        ));
     }
     entries.push((
         ToggleDrawer,
@@ -2405,7 +2439,7 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     ));
     if view.browser_drawer_pinned() {
         for entry in &mut entries {
-            if matches!(entry.0, ToggleDrawer | GitReturn) {
+            if entry.0 == ToggleDrawer || (entry.0 == GitReturn && !view.git_zoomed) {
                 entry.3 = if view.drawer_open {
                     "Focus Sessions"
                 } else {
@@ -4297,6 +4331,15 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         }
         return Action::Continue;
     }
+    if view.git_zoomed
+        && key.modifiers == KeyModifiers::NONE
+        && matches!(key.code, KeyCode::Esc | KeyCode::Backspace)
+    {
+        if key.kind == KeyEventKind::Press {
+            return execute_command(Command::GitReturn, browser, view);
+        }
+        return Action::Continue;
+    }
     if view.drawer_open && key.code == KeyCode::Right && key.modifiers == KeyModifiers::NONE {
         if key.kind == KeyEventKind::Press {
             view.toggle_drawer();
@@ -4316,9 +4359,17 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         };
         return execute_command(command, browser, view);
     }
-    if key.code == KeyCode::Char('z') && key.modifiers == KeyModifiers::ALT && view.context() == 0 {
+    if key.code == KeyCode::Char('z')
+        && key.modifiers == KeyModifiers::ALT
+        && matches!(view.context(), 0 | 2)
+    {
         if key.kind == KeyEventKind::Press {
-            return execute_command(Command::FolderFocus, browser, view);
+            let command = if view.git_focus {
+                Command::GitZoom
+            } else {
+                Command::FolderFocus
+            };
+            return execute_command(command, browser, view);
         }
         return Action::Continue;
     }
@@ -4534,8 +4585,15 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
 
         Command::FolderToggle | Command::GitToggle => {}
+        Command::GitZoom => {
+            if view.git_focus && view.history.present() {
+                view.git_zoomed = !view.git_zoomed;
+            }
+        }
         Command::GitReturn => {
-            if view.drawer_open {
+            if view.git_zoomed {
+                view.git_zoomed = false;
+            } else if view.drawer_open {
                 view.toggle_drawer();
             }
         }
@@ -4593,7 +4651,10 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 view.info = Some(InfoModal::new(browser, session));
             }
         }
-        Command::OpenTerminals => view.terminals.borrow_mut().picker = true,
+        Command::OpenTerminals => {
+            view.git_zoomed = false;
+            view.terminals.borrow_mut().picker = true;
+        }
         Command::CloseTerminal => view
             .terminals
             .borrow_mut()
@@ -7983,6 +8044,136 @@ mod cleanup_tests {
         assert_ne!(view.search_control, 0);
         press(&mut browser, &mut view, KeyCode::BackTab);
         assert_eq!(view.search_control, 0);
+    }
+
+    #[tokio::test]
+    async fn git_zoom_preserves_navigation_and_restores_context() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View::default();
+        view.history
+            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+            .await;
+        view.toggle_drawer();
+        press(&mut browser, &mut view, KeyCode::Tab);
+        let zoom = KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT);
+        handle_key(&mut browser, &mut view, zoom);
+        assert!(view.git_zoomed);
+        assert_eq!(view.context(), 2);
+        for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+            handle_key(&mut browser, &mut view, KeyEvent { kind, ..zoom });
+            assert!(view.git_zoomed);
+        }
+        view.history.horizontal.set(10);
+        press(&mut browser, &mut view, KeyCode::Left);
+        assert!(view.git_zoomed);
+        assert!(view.history.horizontal.get() < 10);
+        press(&mut browser, &mut view, KeyCode::Char('l'));
+        assert!(view.git_zoomed);
+        assert!(matches!(
+            handle_key(
+                &mut browser,
+                &mut view,
+                KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)
+            ),
+            Action::Refresh
+        ));
+        assert!(view.git_zoomed);
+
+        press(&mut browser, &mut view, KeyCode::Char('?'));
+        assert!(view.help);
+        press(&mut browser, &mut view, KeyCode::Esc);
+        assert!(!view.help);
+        assert!(view.git_zoomed);
+        assert!(
+            menu_entries(&browser, &view)
+                .iter()
+                .any(|entry| entry.command == Command::GitReturn
+                    && entry.label == "Restore Git panel")
+        );
+        for code in [KeyCode::Esc, KeyCode::Backspace] {
+            press(&mut browser, &mut view, code);
+            assert!(!view.git_zoomed);
+            assert!(view.drawer_open);
+            assert_eq!(view.context(), 2);
+            handle_key(&mut browser, &mut view, zoom);
+        }
+        handle_key(&mut browser, &mut view, zoom);
+        assert!(!view.git_zoomed);
+
+        for code in [KeyCode::Tab, KeyCode::BackTab] {
+            handle_key(&mut browser, &mut view, zoom);
+            press(&mut browser, &mut view, code);
+            assert!(!view.git_zoomed);
+            assert_eq!(view.context(), 0);
+            press(&mut browser, &mut view, code);
+        }
+        handle_key(&mut browser, &mut view, zoom);
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::ALT),
+        );
+        assert!(view.git_zoomed);
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Up, KeyModifiers::ALT),
+        );
+        assert!(!view.git_zoomed);
+        assert_eq!(view.context(), 0);
+        press(&mut browser, &mut view, KeyCode::Tab);
+        handle_key(&mut browser, &mut view, zoom);
+        press(&mut browser, &mut view, KeyCode::Right);
+        assert!(!view.git_zoomed);
+        assert!(!view.drawer_open);
+        view.toggle_drawer();
+        assert!(!view.git_zoomed);
+        handle_key(&mut browser, &mut view, zoom);
+        view.history.tick(None, 1, false, 1).await;
+        view.normalize_focus();
+        assert!(!view.git_zoomed);
+        assert_eq!(view.context(), 0);
+    }
+
+    #[tokio::test]
+    async fn git_zoom_geometry_survives_resize_and_restores_panels() {
+        let browser = Browser::new(vec![]);
+        let mut view = View::default();
+        view.history
+            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+            .await;
+        view.toggle_drawer();
+        view.drawer_git = true;
+        view.normalize_focus();
+        for (width, height) in [(240, 80), (119, 30), (40, 10), (12, 4), (8, 3)] {
+            let area = Rect::new(0, 0, width, height - 2);
+            view.git_zoomed = false;
+            let normal = panel_layout(area, height, &view, true);
+            view.git_zoomed = true;
+            let zoomed = panel_layout(area, height, &view, true);
+            assert_eq!(zoomed.git, Some(area));
+            assert!(zoomed.folders.is_none());
+            assert!(zoomed.sessions.is_none());
+            assert_eq!(zoomed.graph_visible, width >= 12 && area.height >= 4);
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            if width >= 40 {
+                let screen: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|c| c.symbol())
+                    .collect();
+                assert!(!screen.contains("Folders"));
+            }
+            view.git_zoomed = false;
+            let restored = panel_layout(area, height, &view, true);
+            assert_eq!(restored.git, normal.git);
+            assert_eq!(restored.folders, normal.folders);
+            assert_eq!(restored.sessions, normal.sessions);
+        }
     }
 
     #[test]

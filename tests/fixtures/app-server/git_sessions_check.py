@@ -45,6 +45,33 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.expect('└─ Running Task first · codex')
         t.send(b'\x1b[1;3C')  # Alt+Right focuses Git from Sessions.
         t.expect_action('Select worktree folder')
+        # Zoom uses the same graph, dialogs, and navigation in both layouts.
+        t.send(b'\x1bz')
+        t.expect_action('Restore Git panel')
+        assert t.line(0).startswith('┏Git Worktrees')
+        assert '┏Folders' not in t.text() and '┌Folders' not in t.text()
+        t.send(b'i')
+        t.expect('Overview')
+        t.send(b'\x1b')
+        t.wait(lambda: 'Commit information' not in t.text())
+        t.expect_action('Restore Git panel')
+        for rows, cols in [(50, 180), (30, 90), (40, 119)]:
+            t.resize(rows, cols)
+            t.expect_action('Restore Git panel')
+            assert '┏Folders' not in t.text() and '┌Folders' not in t.text()
+        t.send(b'\x1b[D')  # Left remains graph scrolling.
+        t.expect_action('Restore Git panel')
+        for exit_key in [b'\x1b', b'\x7f', b'\x1bz']:
+            t.send(exit_key)
+            t.wait(lambda: not t.line(0).startswith('┏Git Worktrees'))
+            t.expect_action('Select worktree folder')
+            t.send(b'\x1bz')
+            t.expect_action('Restore Git panel')
+        t.send(b'\t')
+        t.wait(lambda: not t.line(0).startswith('┏Git Worktrees'))
+        t.expect_focus('Folders')
+        t.send(b'\t\x1bz')
+        t.expect_action('Restore Git panel')
         t.send(b'\x1b[B')  # First session beneath the commit.
         t.expect_action('Resume session')
         settled = time.monotonic() + 1
@@ -61,6 +88,15 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         assert launch['cwd'] == str(linked) and launch['foreground'], launch
         t.expect('FAKE CODING SESSION')
         assert json.loads((home/'launch.json').read_text())['pid'] == launch['pid']
+        # The running terminal stays alive behind full-screen Git.
+        t.send(b'\x1b`')
+        t.expect('Git Worktrees')
+        t.send(b'\x1bz')
+        t.expect_action('Restore Git panel')
+        assert 'FAKE CODING SESSION' not in t.text()
+        t.send(b'\x1b[C')
+        t.expect('FAKE CODING SESSION')
+        assert json.loads((home/'launch.json').read_text())['pid'] == launch['pid']
         t.send(b'x')
         t.expect('? Actions')
         t.inspect('ID: first')
@@ -73,6 +109,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         settings({'type': 'notLoaded'})
         # This fixture has one annotated session; wait for its connector regardless of status.
         t.wait(lambda: '└─ ' not in t.text())
+        t.send(b'\x1b[H')  # Select the commit after the live session disappears.
         t.expect_action('Select worktree folder')
         settings({'type': 'idle'})
         t.expect('└─ Idle Task first · codex')
