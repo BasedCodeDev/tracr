@@ -2,6 +2,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
+    buffer::Buffer,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -240,6 +241,53 @@ pub fn body(frame: &mut Frame<'_>, area: Rect, text: impl Into<String>, scroll: 
     crate::scrollbar::paragraph(frame, area, paragraph, scroll)
 }
 
+/// A fixed review body can be reused across edits to the surrounding form.
+pub(crate) struct CachedBody {
+    text: String,
+    viewport: std::cell::RefCell<Option<BodyViewport>>,
+}
+
+struct BodyViewport {
+    buffer: Buffer,
+    scroll: u16,
+    limit: u16,
+}
+
+impl CachedBody {
+    pub(crate) fn new(text: String) -> Self {
+        Self {
+            text,
+            viewport: Default::default(),
+        }
+    }
+
+    pub(crate) fn draw(&self, frame: &mut Frame<'_>, area: Rect, scroll: u16) -> u16 {
+        let local = Rect::new(0, 0, area.width, area.height);
+        let mut cached = self.viewport.borrow_mut();
+        if cached.as_ref().is_none_or(|viewport| {
+            viewport.buffer.area != local || viewport.scroll != scroll.min(viewport.limit)
+        }) {
+            let mut buffer = Buffer::empty(local);
+            let paragraph =
+                Paragraph::new(body_text(self.text.as_str())).wrap(Wrap { trim: false });
+            let limit = crate::scrollbar::paragraph_in(&mut buffer, local, paragraph, scroll);
+            *cached = Some(BodyViewport {
+                buffer,
+                limit,
+                scroll: scroll.min(limit),
+            });
+        }
+        let viewport = cached.as_ref().expect("rendered viewport");
+        let frame_buffer = frame.buffer_mut();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                frame_buffer[(area.x + x, area.y + y)].clone_from(&viewport.buffer[(x, y)]);
+            }
+        }
+        viewport.limit
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,6 +318,46 @@ mod tests {
             .unwrap();
         assert_eq!(terminal.backend().buffer()[(0, 1)].symbol(), "t");
         assert!((0..5).all(|y| terminal.backend().buffer()[(19, y)].symbol() == " "));
+    }
+
+    #[test]
+    fn cached_body_reuses_the_viewport_and_matches_uncached_scrolling() {
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let text = "Wide 界 text with a long path/somewhere and a tab\t\n\nLast line";
+        let cached = CachedBody::new(text.into());
+        let mut actual = Terminal::new(TestBackend::new(50, 10)).unwrap();
+        let mut expected = Terminal::new(TestBackend::new(50, 10)).unwrap();
+        let start = Rect::new(1, 1, 22, 2);
+        let moved = Rect::new(2, 3, 22, 2);
+        let mut previous_cells = None;
+        for (area, scroll) in [
+            (start, 0),
+            (moved, 0),
+            (moved, 2),
+            (Rect::new(1, 1, 16, 4), 2),
+        ] {
+            let mut limit = 0;
+            actual
+                .draw(|frame| limit = cached.draw(frame, area, scroll))
+                .unwrap();
+            expected
+                .draw(|frame| assert_eq!(body(frame, area, text, scroll), limit))
+                .unwrap();
+            assert_eq!(actual.backend().buffer(), expected.backend().buffer());
+            let cells = cached
+                .viewport
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .buffer
+                .content
+                .as_ptr();
+            if area == moved && scroll == 0 {
+                assert_eq!(previous_cells, Some(cells));
+            }
+            previous_cells = Some(cells);
+        }
     }
 
     #[test]

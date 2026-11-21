@@ -1,7 +1,7 @@
 use crate::{
     browser::{Browser, FolderFilter, SourceSpec, safe_text},
     folder_move::Source,
-    modal::{self, Button},
+    modal::{self, Button, CachedBody},
     tui::Action,
     worktree_discard::{self as discard, Journal, Plan},
 };
@@ -53,7 +53,7 @@ pub(crate) fn unavailable(browser: &Browser) -> Option<&'static str> {
 }
 
 enum Task {
-    Review(JoinHandle<Result<Plan, String>>),
+    Review(JoinHandle<Result<(Plan, String), String>>),
     Discard(JoinHandle<Result<PathBuf, String>>),
 }
 
@@ -61,7 +61,7 @@ pub struct Modal {
     state: PathBuf,
     sources: Vec<Source>,
     previous: Option<Journal>,
-    plan: Option<Plan>,
+    review: Option<(Plan, CachedBody)>,
     task: Option<Task>,
     error: Option<String>,
     input: String,
@@ -83,13 +83,17 @@ impl Modal {
             let sources = sources.clone();
             let state = state.clone();
             let previous = previous.clone();
-            async move { discard::preview(&state, &sources, selected, previous.as_ref()).await }
+            async move {
+                let plan = discard::preview(&state, &sources, selected, previous.as_ref()).await?;
+                let text = plan.review();
+                Ok((plan, text))
+            }
         });
         Self {
             state,
             sources,
             previous,
-            plan: None,
+            review: None,
             task: Some(Task::Review(task)),
             error: None,
             input: String::new(),
@@ -117,7 +121,7 @@ impl Modal {
         if self.task.is_some() || !self.confirmed() {
             return;
         }
-        let plan = self.plan.take().expect("confirmed plan");
+        let (plan, _) = self.review.take().expect("confirmed plan");
         let state = self.state.clone();
         let sources = self.sources.clone();
         let previous = self.previous.clone();
@@ -133,7 +137,7 @@ impl Modal {
         match self.task.take().expect("ready task") {
             Task::Review(task) => {
                 match task.await.unwrap_or_else(|e| Err(e.to_string())) {
-                    Ok(plan) => self.plan = Some(plan),
+                    Ok((plan, text)) => self.review = Some((plan, CachedBody::new(text))),
                     Err(error) => self.error = Some(error),
                 }
                 None
@@ -145,9 +149,9 @@ impl Modal {
     fn confirmed(&self) -> bool {
         self.fits.get()
             && self
-                .plan
+                .review
                 .as_ref()
-                .is_some_and(|plan| self.input == plan.branch())
+                .is_some_and(|(plan, _)| self.input == plan.branch())
     }
 
     fn buttons(&self) -> [Button<Action>; 2] {
@@ -190,7 +194,7 @@ impl Modal {
             };
             return Action::Continue;
         }
-        if self.plan.is_none() {
+        if self.review.is_none() {
             if self.error.is_some() && key.kind == KeyEventKind::Press && key.code == KeyCode::Enter
             {
                 return Action::CloseDiscard;
@@ -218,7 +222,7 @@ impl Modal {
     }
 
     pub(crate) fn paste(&mut self, value: &str) {
-        if self.plan.is_some() && self.focus == 0 && self.fits.get() {
+        if self.review.is_some() && self.focus == 0 && self.fits.get() {
             let filtered: String = value.chars().filter(|c| !c.is_control()).collect();
             self.input.insert_str(self.caret, &filtered);
             self.caret += filtered.len();
@@ -235,7 +239,7 @@ impl Modal {
             .as_ref()
             .map(Journal::progress)
             .unwrap_or_default();
-        if let Some(plan) = &self.plan {
+        if let Some((_, body)) = &self.review {
             if !fits {
                 frame.render_widget(
                     Paragraph::new("Enlarge terminal to review and confirm. Esc cancels.")
@@ -246,8 +250,7 @@ impl Modal {
             }
             let parts =
                 Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).split(regions.body);
-            self.limit
-                .set(modal::body(frame, parts[0], plan.review(), self.scroll));
+            self.limit.set(body.draw(frame, parts[0], self.scroll));
             modal::text_field(
                 frame,
                 parts[1],

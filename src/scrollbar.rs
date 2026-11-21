@@ -1,9 +1,10 @@
 //! Shared visual scrollbars. Metrics are rendered lines, never selected-item indices.
 use ratatui::{
     Frame,
+    buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{ListItem, Paragraph, Scrollbar, ScrollbarState},
+    widgets::{ListItem, Paragraph, Scrollbar, ScrollbarState, StatefulWidget, Widget},
 };
 
 /// The rightmost column of an unbordered region, alongside its scrolling body.
@@ -39,37 +40,46 @@ pub(crate) fn content_area(area: Rect, total: usize) -> Rect {
 }
 
 pub(crate) fn draw(frame: &mut Frame<'_>, track: Rect, total: usize, visible: usize, top: usize) {
+    draw_in(frame.buffer_mut(), track, total, visible, top);
+}
+
+fn draw_in(buffer: &mut Buffer, track: Rect, total: usize, visible: usize, top: usize) {
     if track.is_empty() || visible == 0 || total <= visible {
         return;
     }
     let max = total - visible;
-    frame.render_stateful_widget(
-        Scrollbar::default()
-            .begin_symbol(None)
-            .end_symbol(None)
-            .track_symbol(Some("🮇"))
-            .track_style(
-                Style::default()
-                    .fg(Color::Rgb(56, 56, 56))
-                    .remove_modifier(Modifier::BOLD),
-            )
-            .thumb_symbol("🮇")
-            .thumb_style(
-                Style::default()
-                    .fg(Color::Rgb(112, 112, 112))
-                    .remove_modifier(Modifier::BOLD),
-            ),
-        track,
-        // Ratatui expects the number of possible viewport positions, not rows.
-        &mut ScrollbarState::new(max.saturating_add(1))
-            .position(top.min(max))
-            .viewport_content_length(visible),
-    );
+    Scrollbar::default()
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_symbol(Some("🮇"))
+        .track_style(
+            Style::default()
+                .fg(Color::Rgb(56, 56, 56))
+                .remove_modifier(Modifier::BOLD),
+        )
+        .thumb_symbol("🮇")
+        .thumb_style(
+            Style::default()
+                .fg(Color::Rgb(112, 112, 112))
+                .remove_modifier(Modifier::BOLD),
+        )
+        .render(
+            track,
+            buffer,
+            // Ratatui expects the number of possible viewport positions, not rows.
+            &mut ScrollbarState::new(max.saturating_add(1))
+                .position(top.min(max))
+                .viewport_content_length(visible),
+        );
 }
 
 /// Render a wrapped or unwrapped paragraph with a private scrollbar column.
 /// Return the clamped maximum for the existing u16 keyboard scroll state.
 pub(crate) fn paragraph(frame: &mut Frame<'_>, area: Rect, text: Paragraph<'_>, top: u16) -> u16 {
+    paragraph_in(frame.buffer_mut(), area, text, top)
+}
+
+pub(crate) fn paragraph_in(buffer: &mut Buffer, area: Rect, text: Paragraph<'_>, top: u16) -> u16 {
     let full_total = text.line_count(area.width);
     let body = content_area(area, full_total);
     let total = if body.width == area.width {
@@ -81,10 +91,10 @@ pub(crate) fn paragraph(frame: &mut Frame<'_>, area: Rect, text: Paragraph<'_>, 
         .saturating_sub(usize::from(body.height))
         .min(u16::MAX as usize) as u16;
     let top = top.min(max);
-    frame.render_widget(text.scroll((top, 0)), body);
+    text.scroll((top, 0)).render(body, buffer);
     if body.width < area.width {
-        draw(
-            frame,
+        draw_in(
+            buffer,
             border_track(area, body),
             total,
             usize::from(body.height),
