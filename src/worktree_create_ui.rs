@@ -231,7 +231,7 @@ impl Modal {
             Constraint::Min(notes_height),
         ])
         .split(sections.body);
-        crate::modal::body(frame, fields[0], summary, 0);
+        crate::modal::static_body(frame, fields[0], summary);
         crate::modal::text_field(
             frame,
             fields[2],
@@ -250,7 +250,7 @@ impl Modal {
             self.focus == 1,
             self.task.is_none(),
         );
-        crate::modal::body(frame, fields[5], notes, 0);
+        crate::modal::static_body(frame, fields[5], notes);
         let status = if self.executing {
             "Creating worktree… Please wait. Cancellation is disabled."
         } else if self.task.is_some() {

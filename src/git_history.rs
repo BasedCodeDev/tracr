@@ -2581,7 +2581,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn border_counter_and_arrows_survive_resize_and_clear_at_boundaries() {
+    async fn border_counter_and_scrollbar_survive_resize_and_clear_at_boundaries() {
         use crate::tui::{View, draw};
         use ratatui::{
             Terminal,
@@ -2612,61 +2612,21 @@ mod tests {
             terminal.backend_mut().resize(width, height);
             terminal.resize(Rect::new(0, 0, width, height)).unwrap();
             view.git_focus = focused;
-            for (selected, expected) in
-                [(40, (true, true)), (0, (false, true)), (79, (true, false))]
-            {
+            for selected in [40, 0, 79] {
                 view.history.selected = selected;
                 view.history.top.set(selected.saturating_sub(2));
                 terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
                 let buffer = terminal.backend().buffer();
-                let arrows: Vec<_> = buffer
-                    .content
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, cell)| {
-                        matches!(cell.symbol(), "↑" | "↓")
+                assert!(
+                    !buffer
+                        .content
+                        .iter()
+                        .any(|cell| matches!(cell.symbol(), "↑" | "↓")
                             && cell.fg == Color::Cyan
-                            && cell.modifier.contains(Modifier::BOLD)
-                    })
-                    .collect();
-                let visible = true;
-                assert_eq!(
-                    arrows.iter().any(|(_, c)| c.symbol() == "↑"),
-                    visible && expected.0
+                            && cell.modifier.contains(Modifier::BOLD))
                 );
-                assert_eq!(
-                    arrows.iter().any(|(_, c)| c.symbol() == "↓"),
-                    visible && expected.1
-                );
-                for (index, cell) in arrows {
-                    assert_eq!(
-                        index % usize::from(width),
-                        usize::from(if width >= 120 {
-                            (width * 2 / 5).min(60) - 3
-                        } else {
-                            width - 3
-                        })
-                    );
-                    assert_eq!(cell.fg, Color::Cyan);
-                    assert!(cell.modifier.contains(Modifier::BOLD));
-                    let row = index / usize::from(width);
-                    assert_ne!(
-                        buffer.content[row * usize::from(width)
-                            + usize::from(if width >= 120 {
-                                (width * 2 / 5).min(60) - 1
-                            } else {
-                                width - 1
-                            })]
-                        .symbol(),
-                        " "
-                    );
-                }
                 let top = view.git_sessions.borrow().top;
-                let expected_counter = if top > 0 {
-                    format!(" {top} ↑ ")
-                } else {
-                    " 0 ".into()
-                };
+                let expected_counter = format!(" {top} ");
                 let expected_width = expected_counter.chars().count();
                 let right = if width >= 120 {
                     (width * 2 / 5).min(60)
@@ -2682,6 +2642,31 @@ mod tests {
                         && buffer[(right - 2, y)].modifier.contains(Modifier::BOLD)
                 });
                 assert!(counter_found, "missing counter {expected_counter:?}");
+                let title_y = (0..height)
+                    .find(|y| {
+                        let text: String = (0..right).map(|x| buffer[(x, *y)].symbol()).collect();
+                        text.contains("Git Worktrees")
+                    })
+                    .unwrap();
+                let bottom = (title_y + 1..height)
+                    .find(|y| matches!(buffer[(right - 1, *y)].symbol(), "┘" | "┛"))
+                    .unwrap();
+                let track = title_y + 2..bottom;
+                let thumb: Vec<_> = track
+                    .clone()
+                    .filter(|y| {
+                        let cell = &buffer[(right - 1, *y)];
+                        assert_eq!(cell.symbol(), "│");
+                        cell.fg == Color::Cyan
+                    })
+                    .collect();
+                assert!(!thumb.is_empty());
+                if selected == 0 {
+                    assert_eq!(thumb.first(), Some(&track.start));
+                }
+                if selected == 79 {
+                    assert_eq!(thumb.last(), Some(&(track.end - 1)));
+                }
                 assert_eq!(view.history.selected, selected);
                 assert!(view.history.following);
             }

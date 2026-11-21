@@ -219,36 +219,59 @@ pub fn edit(value: &mut String, caret: &mut usize, key: KeyEvent) -> bool {
     }
     false
 }
-pub fn body(frame: &mut Frame<'_>, area: Rect, text: impl Into<String>, scroll: u16) -> u16 {
-    let text = text
-        .into()
+fn body_text(text: impl Into<String>) -> String {
+    text.into()
         .split('\n')
         .map(crate::browser::safe_text)
         .collect::<Vec<_>>()
-        .join("\n");
-    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
-    let mut content = area;
-    if paragraph.line_count(area.width) > usize::from(area.height) && area.width > 1 {
-        content.width -= 1;
-    }
-    let max = paragraph
-        .line_count(content.width)
-        .saturating_sub(area.height as usize)
-        .min(u16::MAX as usize) as u16;
-    frame.render_widget(paragraph.scroll((scroll.min(max), 0)), content);
-    if max > 0 && area.width > 0 && area.height > 0 {
-        frame.render_widget(
-            Paragraph::new(if scroll < max { "↓" } else { "↑" })
-                .style(Style::default().fg(Color::Cyan)),
-            Rect::new(area.right() - 1, area.bottom() - 1, 1, 1),
-        );
-    }
-    max
+        .join("\n")
+}
+
+/// Fixed summaries have no navigation and must not advertise scrolling.
+pub(crate) fn static_body(frame: &mut Frame<'_>, area: Rect, text: impl Into<String>) {
+    frame.render_widget(
+        Paragraph::new(body_text(text)).wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+pub fn body(frame: &mut Frame<'_>, area: Rect, text: impl Into<String>, scroll: u16) -> u16 {
+    let paragraph = Paragraph::new(body_text(text)).wrap(Wrap { trim: false });
+    crate::scrollbar::paragraph(frame, area, paragraph, scroll)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scrolling_body_keeps_last_line_reachable_and_static_summary_has_no_bar() {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 5)).unwrap();
+        let text = (0..100)
+            .map(|i| format!("line {i} 界界"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for scroll in [0, u16::MAX] {
+            terminal
+                .draw(|frame| {
+                    body(frame, frame.area(), &text, scroll);
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(
+                buffer[(19, if scroll == 0 { 0 } else { 4 })].fg,
+                Color::Cyan
+            );
+            let rendered: String = buffer.content.iter().map(|c| c.symbol()).collect();
+            assert!(rendered.contains(if scroll == 0 { "line 0" } else { "line 99" }));
+        }
+        terminal
+            .draw(|frame| static_body(frame, frame.area(), "one\ntwo"))
+            .unwrap();
+        assert_eq!(terminal.backend().buffer()[(0, 1)].symbol(), "t");
+        assert!((0..5).all(|y| terminal.backend().buffer()[(19, y)].symbol() == " "));
+    }
+
     #[test]
     fn layouts_keep_actions_inside_and_fields_have_visible_focus() {
         for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 16), (12, 4), (1, 1)] {

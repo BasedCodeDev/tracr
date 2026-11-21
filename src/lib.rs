@@ -4,6 +4,7 @@ pub mod domain;
 pub mod providers;
 
 pub mod browser;
+mod scrollbar;
 pub mod tui;
 
 pub mod resume;

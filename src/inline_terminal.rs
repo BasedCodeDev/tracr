@@ -1128,11 +1128,15 @@ impl Manager {
                 .column_spacing(2)
                 .highlight_symbol("> ")
                 .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
-            frame.render_stateful_widget(
-                table,
-                rows_area,
-                &mut TableState::default()
-                    .with_selected(self.confirmation.is_none().then_some(self.selected)),
+            let mut state = TableState::default()
+                .with_selected(self.confirmation.is_none().then_some(self.selected));
+            frame.render_stateful_widget(table, rows_area, &mut state);
+            crate::scrollbar::draw(
+                frame,
+                crate::scrollbar::border_track(area, rows_area),
+                sessions.len(),
+                usize::from(rows_area.height),
+                state.offset(),
             );
         }
         if inner.height > 0 {

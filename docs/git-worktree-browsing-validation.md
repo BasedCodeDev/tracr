@@ -82,7 +82,7 @@ Logs: `/tmp/tracr-arrows-tests.log`, `/tmp/tracr-arrows-clippy.log`, `/tmp/tracr
 
 ## Commits above the viewport (2026-11-21)
 
-The top border shows the number of real commits strictly above the visible
+The initial counter implementation showed the number of real commits strictly above the visible
 viewport, immediately left of the upward arrow. At the beginning it shows `0`
 without an arrow. Session annotations, routing rows and stash entries do not
 contribute. The count refers to the start of displayed history, not checkout HEAD
@@ -97,8 +97,8 @@ Alternating release-mode runs of `cached_scroll_render_cost` against a 30,000-ro
 history measured median times of 155.99 ms per 1,000 frames for the original arrows
 and 158.40 ms for the counter plus scrollbar (32 warmed samples each). These are
 local TestBackend measurements, not terminal latency guarantees. Because the
-combined prototype was consistently slower, the delivered implementation retains
-the arrows, as requested. The manual ignored test remains available for future
+combined prototype was consistently slower, the initial implementation retained
+the arrows, as requested at that stage. The manual ignored test remains available for future
 comparisons; timing is not a CI threshold.
 
 Validation: 189 library tests passed (three manual tests ignored), all-target
@@ -112,3 +112,39 @@ The supplemental `git_sessions_check.py` terminal script fails while searching
 for “Select worktree folder”; the same failure was reproduced on the unmodified
 base binary. This pre-existing fixture/action mismatch is outside the counter
 change. Library session-navigation tests pass.
+
+## Shared thin scrollbars (2026-11-21)
+
+The expanded scope replaces Git's arrows with the application's shared visual
+scrollbar, retaining the exact commit counter on the top border. The track and
+thumb both use the thin `│` glyph: dark gray track, cyan thumb, no arrowheads.
+Scrollbars appear only when loaded content exceeds the viewport. Git proportions
+refer to the loaded prefix; computing them never queries total Git history.
+
+The same helper now covers folders, sessions, search results, worktree/harness/path
+pickers, Actions, the open-terminal switcher, information and commit dialogs,
+relocation previews and recovery dialogs. Tracks occupy existing borders alongside
+scrolling bodies where available. Independent unbordered bodies reserve a column
+on overflow and rewrap at the reduced width. Fixed summaries and embedded terminal
+screens do not acquire scrollbars. Keyboard navigation and terminal geometry are
+unchanged. Multiline lists use rendered-line offsets after the widget updates its
+viewport, rather than the selected item index.
+
+The revised performance requirement permits imperceptible rendering overhead.
+Alternating warmed release runs with the counter present in **both** versions
+measured 156.04 ms per 1,000 frames for counter-plus-arrows and 157.91 ms for
+counter-plus-scrollbar (32 samples each, 30,000 cached Git rows). The 95th-percentile
+batch times were 159.91 and 159.83 ms respectively. Median incremental cost was
+about 1.9 microseconds per frame. The separate `large_widget_render_cost` probe,
+including construction of 10,000 multiline list entries and a long wrapped Unicode
+paragraph, rendered both regions together in roughly 6.6–6.8 ms per frame. These
+are local TestBackend observations, not hardware-independent thresholds.
+
+Validation passed: 194 library tests, all-target Clippy with warnings denied,
+formatting and whitespace checks; terminal idle, scrollback/input isolation,
+information-dialog and worktree-creation scripts. Tests cover scrollbar endpoints,
+tiny tracks, shrinking content, Unicode wrapping, multiline offsets, folder/session
+selection, Git counter preservation and resizing. Idle scenarios emitted no Git
+commands or redraw output. The supplemental Git-session script still has the
+previously reproduced baseline failure searching for “Select worktree folder”.
+Logs and benchmark samples are in this worktree's ignored `.tmp/uniform-*` files.
