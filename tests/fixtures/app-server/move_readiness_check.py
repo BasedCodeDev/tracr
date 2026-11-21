@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-readiness-') as tmp:
     try:
         t.expect('Idle')
         assert resumes() == 0
-        t.send(b'\x1b`');t.expect('Enter Sessions');t.send(b'm');t.expect('Destination folder')
+        t.send(b'\x1b`');t.expect_focus('Folders');t.send(b'm');t.expect('Destination folder')
         t.wait(lambda:resumes()>0)
         t.expect('Close sessions still open in Codex.')
         data=json.loads(state.read_text());data['attached']=False;state.write_text(json.dumps(data))

@@ -25,9 +25,9 @@ class Terminal:
         # Most interaction fixtures exercise Sessions first. Startup coverage opts
         # out so it can verify the real initial drawer and its focus explicitly.
         if start_in_sessions:
-            self.expect('→ Sessions')
+            self.wait(lambda: self.drawer_focused())
             self.send(b'\x1b')
-            self.wait(lambda: '→ Sessions' not in self.text())
+            self.wait(lambda: not self.drawer_focused())
     def resize(self, rows, cols):
         changed = getattr(self, 'dimensions', None) != (rows, cols)
         self.dimensions = (rows, cols)
@@ -110,23 +110,32 @@ class Terminal:
                 raise RuntimeError(f'terminal process exited unexpectedly: {self.child.returncode}')
     def expect(self, text):
         self.wait(lambda: text in self.text())
+    def drawer_focused(self):
+        text = self.text()
+        return "┏Folders" in text or "┏Git Worktrees" in text or "┏Git━" in text
+    def expect_focus(self, pane):
+        self.wait(lambda: '┏' + pane in self.text() and self.output.endswith((b'\x1b[?25l', b'\x1b[?25h')))
+    def expect_action(self, label, present=True):
+        self.send(b'?/')
+        self.expect('Search:')
+        self.send(label.encode())
+        self.expect(label if present else 'No matching actions')
+        if present:
+            self.wait(lambda: self.text().count(label) >= 2)
+        self.send(b'\x1b')
+        self.wait(lambda: 'Search:' not in self.text())
+        self.send(b'\x1b')
+        self.wait(lambda: 'Actions & shortcuts' not in self.text())
     def action(self, label):
-        self.send(b'?')
-        self.expect('Actions & shortcuts')
-        self.send(b'\x1b[H')
-        for _ in range(60):
-            end = time.monotonic() + .06
-            self.wait(lambda: time.monotonic() >= end)
-            if any('> ' in self.line(row) and label in self.line(row)
-                   for row in range(self.dimensions[0])):
-                self.send(b'\r')
-                return
-            self.send(b'\x1b[B')
-        raise AssertionError('Action not found: ' + label + ': ' + self.text())
+        self.send(b'?/')
+        self.expect('Search:')
+        self.send(label.encode())
+        self.wait(lambda: self.text().count(label) >= 2)
+        self.send(b'\r')
 
     def inspect(self, expected):
         self.expect('Sessions')
-        self.wait(lambda: all(marker not in self.text() for marker in ('Loading', 'refreshing', 'Fetching metadata')) and 'i Info' in self.text())
+        self.wait(lambda: all(marker not in self.text() for marker in ('Loading', 'refreshing', 'Fetching metadata')) and '? Actions' in self.text())
         self.send(b'i')
         self.expect('Session information')
         if expected.startswith('ID: '):

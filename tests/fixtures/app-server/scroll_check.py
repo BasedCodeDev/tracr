@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-scroll-') as directory:
         t.send(b'\x1b[<65;160;10M')
         t.wait(lambda: '3 lines' not in t.text())
         t.send(b'x')
-        t.expect('Enter Open')
+        t.expect_focus('Sessions')
         t.finish()
         assert b'\x1b[?1006l' in t.output
     finally:

@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         t.send(b'\x1b`')
         t.expect('Second creation commit')
         # Folders menu and keyboard use the same action; escape before execution is inert.
-        t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, menu=True)
+        t.expect_focus('Folders');t.expect_action('Create worktree');open_worktree(t, menu=True)
         t.send(b'cancelled')
         t.send(b'\r\r')
         t.expect('>[ Create worktree ]')
@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         # Wait for refreshed ownership before opening the next operation.
         t.expect('[HEAD] [◇ from-history]')
         # Existing branch rejection retains the editable input.
-        t.expect('w Worktree');open_worktree(t, menu=True)
+        t.expect_action('Create worktree');open_worktree(t, menu=True)
         t.send(b'from-history\r\r\r')
         t.expect('That branch already exists')
         t.expect('from-history')
@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         t.resize(80, 119)
         t.send(b'\x1b`')
         t.expect('Second creation commit')
-        t.expect('Enter Sessions');t.expect('w Worktree');open_worktree(t, expected='requires Git 2.48 or newer')
+        t.expect_focus('Folders');t.expect_action('Create worktree');open_worktree(t, expected='requires Git 2.48 or newer')
         t.send(b'\x1b')
         t.wait(lambda: 'Create worktree' not in t.text())
         t.finish()

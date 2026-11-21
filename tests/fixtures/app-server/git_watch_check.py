@@ -68,7 +68,7 @@ os.execv(os.environ['WATCH_GIT'], [os.environ['WATCH_GIT'], *sys.argv[1:]])
         t.send(b'f'); t.expect('[HEAD]')
         git('checkout', '--detach', '-q'); settle(); t.expect('[HEAD]')
         git('checkout', '-q', 'main'); t.expect('[HEAD]')
-        t.send(b'\x1b`'); t.expect('Enter Open'); settle()
+        t.send(b'\x1b`'); t.expect_focus('Sessions'); settle()
         mark = len(read_calls())
         linked = root/'elsewhere'
         git('worktree', 'add', '-qb', 'watch-linked', str(linked))

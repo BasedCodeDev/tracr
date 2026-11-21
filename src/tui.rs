@@ -260,6 +260,8 @@ pub struct AreaDialogs {
     pub help_selected: usize,
     pub help_entries: Option<Vec<MenuEntry>>,
     pub help_control: usize,
+    pub help_query: String,
+    pub help_searching: bool,
     pub search_control: usize,
     pub source_control: usize,
     pub relink_back: bool,
@@ -337,6 +339,8 @@ pub struct View {
     pub help_selected: usize,
     pub help_entries: Option<Vec<MenuEntry>>,
     pub help_control: usize,
+    pub help_query: String,
+    pub help_searching: bool,
     pub search_control: usize,
     pub source_control: usize,
     pub relink_back: bool,
@@ -385,6 +389,8 @@ impl Default for View {
             help_selected: Default::default(),
             help_entries: Default::default(),
             help_control: Default::default(),
+            help_query: Default::default(),
+            help_searching: Default::default(),
             search_control: Default::default(),
             source_control: Default::default(),
             relink_back: Default::default(),
@@ -439,6 +445,11 @@ impl View {
             &mut self.hidden_dialogs.search_selected,
         );
         std::mem::swap(&mut self.help, &mut self.hidden_dialogs.help);
+        std::mem::swap(&mut self.help_query, &mut self.hidden_dialogs.help_query);
+        std::mem::swap(
+            &mut self.help_searching,
+            &mut self.hidden_dialogs.help_searching,
+        );
         std::mem::swap(
             &mut self.help_selected,
             &mut self.hidden_dialogs.help_selected,
@@ -880,95 +891,34 @@ fn relative_time(updated_at: i64, now: i64) -> String {
     unreachable!("elapsed is at least one minute")
 }
 
-fn footer_shortcuts(width: u16, browser: &Browser, view: &View) -> (String, String) {
-    let entries = menu_entries(browser, view);
-    let fit = |context: bool| {
-        let hints: Vec<_> = entries
-            .iter()
-            .filter(|e| (e.section != "General" && e.section != "Navigation") == context)
-            .filter_map(|e| e.footer)
-            .collect();
-        let full = hints.iter().map(|h| h.0).collect::<Vec<_>>().join(" · ");
-        if unicode_width::UnicodeWidthStr::width(full.as_str()) <= usize::from(width) {
-            return full;
-        }
-        let mut line = String::new();
-        for (_, short) in hints {
-            let short = if width < 15 {
-                match short {
-                    "? Help" => "?",
-                    "q Quit" => "q",
-                    _ => short,
-                }
-            } else {
-                short
-            };
-            let candidate = if line.is_empty() {
-                short.to_owned()
-            } else {
-                format!("{line} · {short}")
-            };
-            if unicode_width::UnicodeWidthStr::width(candidate.as_str()) > usize::from(width) {
-                break;
-            }
-            line = candidate;
-        }
-        line
-    };
-    let mut shared = if view.browser_drawer_pinned() {
-        if view.drawer_open {
-            "Alt+` / Esc Focus Sessions · → Sessions · Tab Panels".to_owned()
-        } else {
-            "Alt+` Focus drawer".to_owned()
-        }
-    } else if view.drawer_open {
-        "Alt+` / Esc Close drawer · → Sessions · Tab Panels".to_owned()
-    } else if width >= 80 {
-        "Alt+` opens the Tracr drawer — key below Esc; no Shift needed".to_owned()
+// Hints occupy existing chrome, never a content row. Git leaves its scroll marker free.
+fn draw_action_hint(frame: &mut Frame<'_>, area: Rect, terminal: bool, git: bool) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let reserve = if git && area.width > 5 { 4 } else { 0 };
+    let available = area.width.saturating_sub(2 + reserve);
+    let full = if terminal {
+        " Ctrl+B Browser "
     } else {
-        "Alt+` Drawer (below Esc)".to_owned()
+        " ? Actions "
     };
-    if view.drawer_open && view.terminals.borrow().active.is_some() {
-        shared = "Alt+` / Esc Close · → Sessions · Ctrl+B Background".into();
-    }
-    if view.recovery_available {
-        if unicode_width::UnicodeWidthStr::width(shared.as_str()) + 12 > usize::from(width) {
-            shared = "Alt+` Drawer".into();
-        }
-        shared.push_str(" · u Recover");
-    }
-    if unicode_width::UnicodeWidthStr::width(shared.as_str()) + 18 <= usize::from(width) {
-        shared.push_str(" · ? Help · q Quit");
-    }
-    (shared, fit(true))
-}
-
-fn draw_footer(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    shared: &str,
-    context: &str,
-    message: &str,
-    separate_message: bool,
-) {
-    use ratatui::layout::Alignment;
-    let row = |offset| Rect::new(area.x, area.y + offset, area.width, 1);
-    let shared_width =
-        unicode_width::UnicodeWidthStr::width(shared).min(area.width as usize) as u16;
-    let controls = Rect::new(area.right() - shared_width, area.y, shared_width, 1);
-    frame.render_widget(Paragraph::new(shared).alignment(Alignment::Right), controls);
-    frame.render_widget(Paragraph::new(context).alignment(Alignment::Right), row(1));
-    let feedback = if separate_message {
-        row(2)
+    let short = if terminal { "Ctrl+B" } else { "?" };
+    let hint = if available >= full.len() as u16 {
+        full
     } else {
-        Rect::new(
-            area.x,
-            area.y,
-            area.width.saturating_sub(shared_width + 2),
-            1,
-        )
+        short
     };
-    frame.render_widget(Paragraph::new(message), feedback);
+    let width = (hint.len() as u16).min(area.width.saturating_sub(reserve));
+    let x = if available >= hint.len() as u16 {
+        area.right() - 1 - reserve - width
+    } else {
+        area.x
+    };
+    frame.render_widget(
+        Paragraph::new(hint).style(Style::default().fg(Color::Cyan)),
+        Rect::new(x, area.bottom() - 1, width, 1),
+    );
 }
 
 fn is_unlinked(browser: &Browser, session: &crate::domain::SessionSummary) -> bool {
@@ -1012,23 +962,7 @@ fn session_metadata(
     Line::from(spans)
 }
 
-fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String, String, u16) {
-    if view.terminal_focused() && view.terminals.borrow().active.is_some() {
-        return (
-            "Alt+` Drawer · Ctrl+B Background".into(),
-            browser.focus_root.as_ref().map_or_else(
-                || "Keyboard input goes to the terminal".into(),
-                |root| {
-                    format!(
-                        "Keyboard input goes to the terminal · Focused: {} · Alt+Z in Folders zooms out",
-                        safe_text(&root.display().to_string())
-                    )
-                },
-            ),
-            view.message.clone().unwrap_or_default(),
-            2,
-        );
-    }
+fn browser_footer(_area: Rect, browser: &Browser, view: &View) -> (String, u16) {
     let mut issues: Vec<_> = browser
         .diagnostics()
         .into_iter()
@@ -1098,13 +1032,8 @@ fn browser_footer(area: Rect, browser: &Browser, view: &View) -> (String, String
     } else {
         message
     };
-    let (first, second) = footer_shortcuts(area.width, browser, view);
-    let separate_message = !message.is_empty()
-        && unicode_width::UnicodeWidthStr::width(message.as_str())
-            + unicode_width::UnicodeWidthStr::width(first.as_str())
-            + 2
-            > usize::from(area.width);
-    (first, second, message, if separate_message { 3 } else { 2 })
+    let height = u16::from(!message.is_empty());
+    (message, height)
 }
 
 fn selected_git_session(browser: &Browser, view: &View) -> Option<crate::git_sessions::Annotation> {
@@ -1244,8 +1173,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         frame.render_widget(Paragraph::new("tracr: enlarge terminal"), area);
         return;
     }
-    let (first, second, message, footer_height) = browser_footer(area, browser, view);
-    let separate_message = footer_height == 3;
+    let (message, footer_height) = browser_footer(area, browser, view);
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(footer_height)])
@@ -1382,14 +1310,22 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     if let Some(area) = panels.sessions {
         draw_pane(frame, area, 1, browser, view);
     }
-    draw_footer(
-        frame,
-        layout[1],
-        &first,
-        &second,
-        &message,
-        separate_message,
-    );
+    let focused_area = match view.context() {
+        0 => panels.folders,
+        2 => panels.git,
+        _ => panels.sessions,
+    };
+    if let Some(hint_area) = focused_area {
+        draw_action_hint(
+            frame,
+            hint_area,
+            view.terminal_focused() && view.terminals.borrow().active.is_some(),
+            view.context() == 2 && expanded,
+        );
+    }
+    if footer_height > 0 {
+        frame.render_widget(Paragraph::new(message), layout[1]);
+    }
     if let Some(picker) = &view.worktree_picker {
         let popup = Rect::new(
             area.x + 1,
@@ -1885,15 +1821,22 @@ fn available_when_folders_hidden(command: Command) -> bool {
 pub struct MenuEntry {
     command: Command,
     section: &'static str,
+    group: &'static str,
     shortcut: &'static str,
     pub label: &'static str,
-    footer: Option<(&'static str, &'static str)>,
 }
 fn open_help(browser: &Browser, view: &mut View) {
     view.help = false;
-    view.help_entries = Some(menu_entries(browser, view));
+    let entries = menu_entries(browser, view);
+    view.help_selected = entries
+        .iter()
+        .position(|entry| unavailable(entry.command, browser, view).is_none())
+        .unwrap_or(0);
+    view.help_entries = Some(entries);
     view.help = true;
     view.help_control = 0;
+    view.help_query.clear();
+    view.help_searching = false;
 }
 fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     // Keep action identities stable while a menu is open. Availability is still
@@ -1905,20 +1848,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     }
     use Command::*;
     let mut entries = vec![
-        (
-            Help,
-            "General",
-            "?",
-            "Help / actions",
-            Some(("? Help", "? Help")),
-        ),
-        (
-            Quit,
-            "General",
-            "q / Ctrl-C",
-            "Quit tracr",
-            Some(("q Quit", "q Quit")),
-        ),
+        (Help, "General", "?", "Help / actions"),
+        (Quit, "General", "q / Ctrl-C", "Quit tracr"),
         (
             Search,
             "General",
@@ -1928,15 +1859,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             } else {
                 "Search all sessions"
             },
-            Some(("/ Search", "/ Search")),
         ),
-        (
-            Refresh,
-            "General",
-            "r",
-            "Refresh sessions",
-            Some(("r Refresh", "r Refresh")),
-        ),
+        (Refresh, "General", "r", "Refresh sessions"),
         (
             Archives,
             "General",
@@ -1946,59 +1870,36 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             } else {
                 "Show archived sessions"
             },
-            Some(("a Archives", "a Archives")),
         ),
-        (
-            Recover,
-            "General",
-            "u",
-            "Inspect/recover relocation",
-            Some(("u Recover", "u Recover")),
-        ),
-        (
-            CyclePane,
-            "Navigation",
-            "Tab",
-            "Next drawer panel",
-            Some(("Tab Next pane", "Tab Next pane")),
-        ),
+        (Recover, "General", "u", "Inspect/recover relocation"),
+        (CyclePane, "Navigation", "Tab", "Next drawer panel"),
         (
             CyclePaneBack,
             "Navigation",
             "Shift-Tab",
             "Previous drawer panel",
-            Some(("Shift-Tab Previous pane", "Shift-Tab Previous pane")),
         ),
         (
             PreviousPane,
             "Navigation",
             "← / Esc / Backspace",
             "Select Folders",
-            None,
         ),
         (
             EnterFolder,
             "Folders",
             "Enter",
             "Open location / session (drawer stays open)",
-            Some(("Enter Sessions", "Enter Sessions")),
         ),
         (
             PreviousItem,
             "Navigation",
             "↑ / k",
             "Previous item / scroll up",
-            None,
         ),
-        (
-            NextItem,
-            "Navigation",
-            "↓ / j",
-            "Next item / scroll down",
-            None,
-        ),
-        (FirstItem, "Navigation", "PageUp", "First item", None),
-        (LastItem, "Navigation", "PageDown", "Last item", None),
+        (NextItem, "Navigation", "↓ / j", "Next item / scroll down"),
+        (FirstItem, "Navigation", "PageUp", "First item"),
+        (LastItem, "Navigation", "PageDown", "Last item"),
     ];
     entries.retain(|entry| {
         (entry.0 != Recover || view.recovery_available)
@@ -2016,103 +1917,37 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             } else {
                 "Collapse Folders pane"
             },
-            Some(if view.folders_hidden {
-                ("b Expand", "b Expand")
-            } else {
-                ("b Collapse", "b Collapse")
-            }),
         ));
         entries.extend([
-            (
-                Create,
-                "Folders",
-                "n",
-                "Create new session",
-                Some(("n New session", "n New")),
-            ),
+            (Create, "Folders", "n", "Create new session"),
             (
                 FolderLeft,
                 "Folders",
                 "← / h",
                 "Collapse folder / select parent",
-                None,
             ),
-            (
-                FolderRight,
-                "Folders",
-                "l",
-                "Expand folder",
-                Some(("l Expand", "l Expand")),
-            ),
-            (
-                MoveFolder,
-                "Folders",
-                "m",
-                "Move folder",
-                Some(("m Move folder", "m Move")),
-            ),
+            (FolderRight, "Folders", "l", "Expand folder"),
+            (MoveFolder, "Folders", "m", "Move folder"),
         ]);
     } else {
         entries.push(if can_create(browser) && browser.visible().is_empty() {
-            (
-                Create,
-                "Sessions",
-                "Enter / n",
-                "Create new session",
-                Some(("Enter/n New session", "Enter/n New")),
-            )
+            (Create, "Sessions", "Enter / n", "Create new session")
         } else {
-            (
-                Resume,
-                "Sessions",
-                "Enter",
-                "Open session",
-                Some(("Enter Open", "Enter Open")),
-            )
+            (Resume, "Sessions", "Enter", "Open session")
         });
         if !browser.visible().is_empty() || !can_create(browser) {
-            entries.push((
-                Create,
-                "Sessions",
-                "n",
-                "Create new session",
-                Some(("n New session", "n New")),
-            ));
+            entries.push((Create, "Sessions", "n", "Create new session"));
         }
         entries.extend([
-            (
-                Info,
-                "Sessions",
-                "i",
-                "Session information",
-                Some(("i Info", "i Info")),
-            ),
-            (
-                Relink,
-                "Sessions",
-                "m",
-                "Move session",
-                Some(("m Move", "m Move")),
-            ),
+            (Info, "Sessions", "i", "Session information"),
+            (Relink, "Sessions", "m", "Move session"),
         ]);
     }
     if view.context() == 0 && selected_checkout(browser).is_some() {
-        entries.push((
-            Info,
-            "Folders",
-            "i",
-            "Worktree information",
-            Some(("i Info", "i Info")),
-        ));
+        entries.push((Info, "Folders", "i", "Worktree information"));
     }
     if view.context() == 0 {
-        entries.push((
-            CreateWorktree,
-            "Folders",
-            "w",
-            "Create worktree",
-            Some(("w Worktree", "w Worktree")),
-        ));
+        entries.push((CreateWorktree, "Folders", "w", "Create worktree"));
     }
     if view.context() == 2 {
         entries
@@ -2126,20 +1961,9 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             } else {
                 "Collapse Git history"
             },
-            Some(if view.git_hidden {
-                ("b Expand", "b Expand")
-            } else {
-                ("b Collapse", "b Collapse")
-            }),
         ));
         if !view.git_hidden && !view.git_size_limited {
-            entries.push((
-                CommitInfo,
-                "Git",
-                "i",
-                "Commit information",
-                Some(("i Commit info", "i Info")),
-            ));
+            entries.push((CommitInfo, "Git", "i", "Commit information"));
             entries.push((
                 GitSelectWorktree,
                 "Git",
@@ -2156,55 +1980,29 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 } else {
                     "Select worktree folder"
                 },
-                Some(if selected_git_session(browser, view).is_some() {
-                    ("Enter Resume", "Enter Resume")
-                } else if view
-                    .history
-                    .rows
-                    .get(view.history.selected)
-                    .is_some_and(|row| row.stash.is_some())
-                {
-                    ("Enter Stash", "Enter Stash")
-                } else {
-                    ("Enter Folder", "Enter Folder")
-                }),
             ));
             entries.push((
                 CreateWorktree,
                 "Git",
                 "w",
                 "Create worktree from selected commit",
-                Some(("w Worktree", "w Worktree")),
             ));
             entries.extend([
-                (
-                    GitUp,
-                    "Git",
-                    "↑ / k",
-                    "Previous commit/session",
-                    Some(("↑/↓ Scroll", "↑/↓ Scroll")),
-                ),
-                (GitDown, "Git", "↓ / j", "Next commit/session", None),
-                (
-                    GitLeft,
-                    "Git",
-                    "← / h",
-                    "Scroll left",
-                    Some(("h/l Scroll", "h/l Scroll")),
-                ),
-                (GitRight, "Git", "l", "Scroll right", None),
-                (GitHome, "Git", "PageUp / Home", "First loaded item", None),
-                (GitEnd, "Git", "PageDown / End", "Last loaded item", None),
+                (GitUp, "Git", "↑ / k", "Previous commit/session"),
+                (GitDown, "Git", "↓ / j", "Next commit/session"),
+                (GitLeft, "Git", "← / h", "Scroll left"),
+                (GitRight, "Git", "l", "Scroll right"),
+                (GitHome, "Git", "PageUp / Home", "First loaded item"),
+                (GitEnd, "Git", "PageDown / End", "Last loaded item"),
             ]);
         }
-        entries.push((GitReturn, "Navigation", "Esc", "Close drawer", None));
+        entries.push((GitReturn, "Navigation", "Esc", "Close drawer"));
     }
     entries.push((
         ToggleDrawer,
         "Navigation",
         "Alt+` / Alt+~",
         "Toggle Tracr drawer",
-        None,
     ));
     if view.browser_drawer_pinned() {
         for entry in &mut entries {
@@ -2226,7 +2024,6 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 "Terminals",
                 "Ctrl+B",
                 "Background session",
-                Some(("Ctrl+B Background session", "Ctrl+B Background")),
             ),
         );
     }
@@ -2240,25 +2037,17 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             } else {
                 "Focus session and close drawer"
             },
-            None,
         ));
     }
     if !view.drawer_open && view.terminals.borrow().active.is_some() {
         entries.retain(|entry| !matches!(entry.0, CyclePane | CyclePaneBack));
     } else if view.drawer_open && view.history.present() {
-        entries.push((
-            PaneUp,
-            "Navigation",
-            "Alt+Up / Alt+Left",
-            "Focus Folders",
-            None,
-        ));
+        entries.push((PaneUp, "Navigation", "Alt+Up / Alt+Left", "Focus Folders"));
         entries.push((
             PaneDown,
             "Navigation",
             "Alt+Down / Alt+Right",
             "Focus Git Worktrees",
-            None,
         ));
     }
     entries
@@ -2269,14 +2058,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         .any(|spec| matches!(spec, crate::browser::SourceSpec::Codex { .. }))
         && (view.context() == 1 || !view.terminals.borrow().is_empty())
     {
-        entries.push((
-            OpenTerminals,
-            "Terminals",
-            "g",
-            "Open terminals",
-            Some(("g Terminals", "g Terminals")),
-        ));
-        entries.push((CloseTerminal, "Terminals", "x", "Close terminal", None));
+        entries.push((OpenTerminals, "Terminals", "g", "Open terminals"));
+        entries.push((CloseTerminal, "Terminals", "x", "Close terminal"));
     }
     if view.context() == 0 {
         let index = entries
@@ -2294,23 +2077,51 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 } else {
                     "Zoom into selected folder"
                 },
-                Some(("Alt+Z Zoom", "Alt+Z Zoom")),
             ),
         );
     }
     if view.context() == 0 && view.folders_hidden {
         entries.retain(|entry| available_when_folders_hidden(entry.0));
     }
-    entries
+    let tab_section = match view.context() {
+        0 => "Folders",
+        1 => "Sessions",
+        _ => "Git",
+    };
+    let mut entries: Vec<_> = entries
         .into_iter()
-        .map(|(command, section, shortcut, label, footer)| MenuEntry {
+        .map(|(command, section, shortcut, label)| MenuEntry {
             command,
             section,
+            group: if section == tab_section
+                || matches!(command, PreviousItem | NextItem | FirstItem | LastItem)
+            {
+                tab_section
+            } else {
+                "Global"
+            },
             shortcut,
             label,
-            footer,
         })
-        .collect()
+        .collect();
+    // Capture a stable order on opening; live availability must not move selection.
+    entries.sort_by_key(|entry| {
+        if entry.group == tab_section {
+            (
+                0,
+                unavailable(entry.command, browser, view).is_some(),
+                usize::from(entry.section == "Navigation"),
+            )
+        } else {
+            let rank = match entry.section {
+                "Navigation" => 1,
+                "Terminals" => 2,
+                _ => 3,
+            };
+            (1, false, rank)
+        }
+    });
+    entries
 }
 
 fn selected_commit(browser: &Browser, view: &View) -> Option<(std::path::PathBuf, String)> {
@@ -2438,40 +2249,95 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
         _ => None,
     }
 }
+fn filtered_menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
+    let query = view.help_query.to_lowercase();
+    menu_entries(browser, view)
+        .into_iter()
+        .filter(|entry| {
+            let text = format!(
+                "{} {} {} {}",
+                entry.group, entry.section, entry.label, entry.shortcut
+            )
+            .to_lowercase();
+            query.split_whitespace().all(|term| text.contains(term))
+        })
+        .collect()
+}
+
 fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     let inner = crate::modal::shell(frame, "Actions & shortcuts", 80, 28);
-    if inner.width < 26 || inner.height < 6 {
+    if inner.width < 26 || inner.height < 7 {
         frame.render_widget(
             Paragraph::new("Enlarge terminal. Esc closes.").wrap(Wrap { trim: false }),
             inner,
         );
         return;
     }
-    let regions = crate::modal::regions(inner);
+    let search_area = Rect::new(inner.x, inner.y, inner.width, 1);
+    let query = format!(
+        "{}{}",
+        if view.help_searching {
+            "Search: "
+        } else {
+            "/ Filter: "
+        },
+        view.help_query
+    );
+    // Keep the end of a long query visible while editing.
+    let overflow =
+        unicode_width::UnicodeWidthStr::width(query.as_str()).saturating_sub(inner.width as usize);
+    frame.render_widget(
+        Paragraph::new(query)
+            .scroll((0, overflow.min(u16::MAX as usize) as u16))
+            .style(Style::default().fg(if view.help_searching {
+                Color::Cyan
+            } else {
+                Color::DarkGray
+            })),
+        search_area,
+    );
+    let regions = crate::modal::regions(Rect::new(
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        inner.height - 1,
+    ));
     let sections = [regions.body, regions.status, regions.hints];
-    let entries = menu_entries(browser, view);
-    let selected = view.help_selected.min(entries.len() - 1);
+    let entries = filtered_menu_entries(browser, view);
+    let selected = view.help_selected.min(entries.len().saturating_sub(1));
     modal_actions(
         frame,
         regions.actions,
         "Close",
         "Run action",
         view.help_control,
-        unavailable(entries[selected].command, browser, view).is_none(),
+        entries
+            .get(selected)
+            .is_some_and(|entry| unavailable(entry.command, browser, view).is_none()),
         true,
     );
     let mut items = Vec::new();
+    if entries.is_empty() {
+        items.push(ListItem::new("No matching actions"));
+    }
     let mut last_section = "";
     let mut selected_row = 0;
     for (i, entry) in entries.iter().enumerate() {
-        if entry.section != last_section {
+        if entry.group != last_section {
+            if !last_section.is_empty() {
+                items.push(ListItem::new(""));
+                items.push(ListItem::new(Line::styled(
+                    "─".repeat(usize::from(sections[0].width.saturating_sub(3))),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
             items.push(ListItem::new(Line::styled(
-                entry.section,
+                entry.group,
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )));
-            last_section = entry.section;
+            last_section = entry.group;
         }
         if i == selected {
             selected_row = items.len();
@@ -2482,7 +2348,7 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         } else {
             Style::default()
         };
-        let lines = if sections[0].width >= 52 {
+        let lines = if sections[0].width >= 68 {
             vec![Line::from(vec![
                 Span::styled(
                     format!("{:<22}", entry.shortcut),
@@ -2522,7 +2388,8 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         sections[0].width.saturating_sub(u16::from(scrolling)),
         sections[0].height,
     );
-    let mut state = ListState::default().with_selected(Some(selected_row));
+    let mut state =
+        ListState::default().with_selected((!entries.is_empty()).then_some(selected_row));
     frame.render_stateful_widget(
         List::new(items)
             .highlight_symbol("> ")
@@ -2540,7 +2407,10 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 .viewport_content_length(usize::from(body.height)),
         );
     }
-    if let Some(reason) = unavailable(entries[selected].command, browser, view) {
+    if let Some(reason) = entries
+        .get(selected)
+        .and_then(|entry| unavailable(entry.command, browser, view))
+    {
         frame.render_widget(
             Paragraph::new(reason).wrap(Wrap { trim: false }),
             sections[1],
@@ -2548,11 +2418,17 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     }
     frame.render_widget(
         Paragraph::new(if inner.width >= 43 {
-            "↑/↓ select · Enter activate · Esc close"
+            if view.help_searching {
+                "↑/↓ select · Enter run · Esc stop search"
+            } else {
+                "/ filter · ↑/↓ select · Enter run · Esc close"
+            }
+        } else if view.help_searching {
+            "Esc stop search · ↑↓ · Enter run"
         } else if inner.width >= 32 {
-            "Esc close · ↑↓ select · Enter run"
+            "/ filter · Esc close · Enter run"
         } else {
-            "Esc close · ↑↓ · Enter run"
+            "/ filter · Esc close"
         }),
         sections[2],
     );
@@ -3732,11 +3608,46 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         return Action::Continue;
     }
     if view.help {
-        let entries = menu_entries(browser, view);
-        view.help_selected = view.help_selected.min(entries.len() - 1);
+        let entries = filtered_menu_entries(browser, view);
+        view.help_selected = view.help_selected.min(entries.len().saturating_sub(1));
+        let selected_command = entries.get(view.help_selected).map(|entry| entry.command);
         let action_enabled =
-            unavailable(entries[view.help_selected].command, browser, view).is_none();
+            selected_command.is_some_and(|command| unavailable(command, browser, view).is_none());
+        if view.help_searching {
+            let edited = match key.code {
+                KeyCode::Esc => {
+                    view.help_searching = false;
+                    return Action::Continue;
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    view.help_query.clear();
+                    true
+                }
+                KeyCode::Backspace => {
+                    view.help_query.pop();
+                    true
+                }
+                KeyCode::Char(c)
+                    if !key.modifiers.intersects(
+                        KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                    ) =>
+                {
+                    view.help_query.push(c);
+                    true
+                }
+                _ => false,
+            };
+            if edited {
+                view.help_selected = 0;
+                view.help_control = 0;
+                return Action::Continue;
+            }
+        }
         match key.code {
+            KeyCode::Char('/') if !view.help_searching => {
+                view.help_searching = true;
+                view.help_control = 0;
+            }
             KeyCode::Tab | KeyCode::BackTab => crate::modal::cycle(
                 &mut view.help_control,
                 &[true, true, action_enabled],
@@ -3748,13 +3659,14 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
                 view.help_selected = view.help_selected.saturating_sub(1)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                view.help_selected = (view.help_selected + 1).min(entries.len() - 1)
+                view.help_selected = (view.help_selected + 1).min(entries.len().saturating_sub(1))
             }
-            KeyCode::PageUp | KeyCode::Home => view.help_selected = 0,
-            KeyCode::PageDown | KeyCode::End => view.help_selected = entries.len() - 1,
+            KeyCode::PageUp => view.help_selected = 0,
+            KeyCode::PageDown => view.help_selected = entries.len().saturating_sub(1),
+            KeyCode::Home => view.help_selected = 0,
+            KeyCode::End => view.help_selected = entries.len().saturating_sub(1),
             KeyCode::Enter | KeyCode::Char(' ') if key.kind != KeyEventKind::Repeat => {
-                let command = entries[view.help_selected].command;
-                if unavailable(command, browser, view).is_none() {
+                if let Some(command) = selected_command.filter(|_| action_enabled) {
                     view.help = false;
                     return execute_command(command, browser, view);
                 }
@@ -3878,10 +3790,7 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
             KeyCode::Char('x') if view.focus == 1 => Command::CloseTerminal,
             KeyCode::Char('q') => Command::Quit,
             KeyCode::Char('r') => Command::Refresh,
-            KeyCode::Char('?') => {
-                view.help_selected = 0;
-                Command::Help
-            }
+            KeyCode::Char('?') => Command::Help,
             _ if view.git_hidden || view.git_size_limited || view.folder_navigation.pending() => {
                 return Action::Continue;
             }
@@ -3902,10 +3811,6 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
     let command = match key.code {
         KeyCode::Char('?') => {
             open_help(browser, view);
-            view.help_selected = menu_entries(browser, view)
-                .iter()
-                .position(|entry| unavailable(entry.command, browser, view).is_none())
-                .unwrap_or(0);
             return Action::Continue;
         }
         KeyCode::Char('g') => Command::OpenTerminals,
@@ -4503,7 +4408,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let size = terminal.size()?;
             let area = Rect::new(0, 0, size.width, size.height);
             view.layout_mode.set(LayoutMode::for_size(size.width, size.height));
-            let (_, _, _, footer_height) = browser_footer(area, &browser, &view);
+            let (_, footer_height) = browser_footer(area, &browser, &view);
             let content_height = size.height.saturating_sub(footer_height);
             let panels = panel_layout(Rect::new(0, 0, size.width, content_height), size.height, &view, target.is_some());
             view.git_size_limited = panels.git.is_none_or(|area| area.height < 4 || area.width < 12);
@@ -4702,8 +4607,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             });
             let size = terminal.size()?;
             view.help_page_size =
-                usize::from(size.height.saturating_sub(2).min(22).saturating_sub(7))
-                    / if size.width < 58 { 2 } else { 1 };
+                usize::from(size.height.saturating_sub(2).min(22).saturating_sub(8))
+                    / if size.width < 74 { 2 } else { 1 };
             view.folder_rows_snapshot = Some(std::rc::Rc::new(browser.folder_rows()));
             terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame, &browser); })?;
             guard.mouse_capture(view.terminals.borrow().active.is_some())?;
@@ -5339,11 +5244,6 @@ mod cleanup_tests {
                 .unwrap();
             assert_eq!(entry.shortcut, "n");
             assert_eq!(entry.label, "Create new session");
-            assert!(
-                footer_shortcuts(240, &browser, &view)
-                    .1
-                    .contains("n New session")
-            );
             assert_eq!(
                 handle_key(
                     &mut browser,
@@ -5912,11 +5812,6 @@ mod cleanup_tests {
         );
         assert!(view.git_focus);
         assert!(view.worktree_picker.is_none());
-        assert!(
-            footer_shortcuts(120, &browser, &view)
-                .1
-                .contains("Enter Stash")
-        );
     }
 
     #[tokio::test]
@@ -6098,11 +5993,6 @@ mod cleanup_tests {
             assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
             assert!(browser.expanded.contains(std::path::Path::new("/project")));
             assert_eq!(view.focus, 0);
-            assert!(
-                footer_shortcuts(240, &browser, &view)
-                    .1
-                    .contains("l Expand")
-            );
             press(&mut browser, &mut view, right);
             assert_eq!(browser.folder, FolderFilter::Path("/project".into()));
             assert_eq!(browser.selected, selected);
@@ -6117,11 +6007,6 @@ mod cleanup_tests {
             browser
                 .expanded
                 .remove(std::path::Path::new("/project/child/leaf"));
-            assert!(
-                footer_shortcuts(240, &browser, &view)
-                    .1
-                    .contains("l Expand")
-            );
             press(&mut browser, &mut view, right);
             assert!(
                 browser
@@ -6263,12 +6148,6 @@ mod cleanup_tests {
                 menu_entries(&browser, &view)
                     .iter()
                     .any(|entry| entry.command == Command::CreateWorktree),
-                available
-            );
-            assert_eq!(
-                footer_shortcuts(240, &browser, &view)
-                    .1
-                    .contains("w Worktree"),
                 available
             );
             if !available {
@@ -6442,7 +6321,6 @@ mod cleanup_tests {
                     .iter()
                     .any(|e| e.command == Command::BackgroundTerminal)
             );
-            assert!(footer_shortcuts(80, &browser, &view).0.contains("Ctrl+B"));
             view.editing = true;
             handle_key(&mut browser, &mut view, key);
             assert_eq!(view.terminals.borrow().active, Some(1));
@@ -6861,7 +6739,7 @@ mod cleanup_tests {
                 .map(|c| c.symbol())
                 .collect();
             if width >= 80 {
-                assert!(text.contains("Alt+`"));
+                assert!(text.contains("? Actions"));
             }
             assert!(!text.contains("Git Worktrees"));
         }
@@ -7355,7 +7233,7 @@ mod idle_tests {
             message: Some("Session returned".into()),
             ..View::default()
         };
-        let (_, _, message, _) = browser_footer(Rect::new(0, 0, 100, 30), &browser, &view);
+        let (message, _) = browser_footer(Rect::new(0, 0, 100, 30), &browser, &view);
         assert!(message.contains("Git auto-update unavailable — r to refresh"));
         assert!(message.contains("native notifications unavailable"));
         assert!(message.contains("Session returned"));
@@ -7444,5 +7322,350 @@ mod empty_sessions_tests {
         for (width, height) in [(20, 12), (8, 4), (1, 1)] {
             render(&browser, width, height);
         }
+    }
+}
+
+#[cfg(test)]
+mod action_discovery_tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+
+    fn press(browser: &mut Browser, view: &mut View, code: KeyCode) -> Action {
+        handle_key(browser, view, KeyEvent::new(code, KeyModifiers::NONE))
+    }
+    fn type_query(browser: &mut Browser, view: &mut View, query: &str) {
+        press(browser, view, KeyCode::Char('/'));
+        for c in query.chars() {
+            press(browser, view, KeyCode::Char(c));
+        }
+    }
+    fn lines(terminal: &Terminal<TestBackend>) -> Vec<String> {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn current_tab_actions_lead_shared_sections_and_select_first_available() {
+        let browser = Browser::new(vec![]);
+        for (context, section) in [(0, "Folders"), (1, "Sessions"), (2, "Git")] {
+            let mut view = View {
+                drawer_open: context != 1,
+                drawer_git: context == 2,
+                git_focus: context == 2,
+                focus: if context == 1 { 1 } else { 0 },
+                ..View::default()
+            };
+            open_help(&browser, &mut view);
+            let entries = menu_entries(&browser, &view);
+            assert_eq!(entries[0].group, section);
+            let ranks: Vec<_> = entries
+                .iter()
+                .map(|entry| match entry.group {
+                    name if name == section => {
+                        usize::from(unavailable(entry.command, &browser, &view).is_some())
+                    }
+                    "Global" => 2,
+                    other => panic!("Unexpected section: {other}"),
+                })
+                .collect();
+            assert!(ranks.windows(2).all(|pair| pair[0] <= pair[1]));
+            assert_eq!(
+                view.help_selected,
+                entries
+                    .iter()
+                    .position(|entry| unavailable(entry.command, &browser, &view).is_none())
+                    .unwrap()
+            );
+            // Empty tabs still expose their local item navigation.
+            if context == 1 {
+                assert_eq!(entries[view.help_selected].command, Command::PreviousItem);
+            }
+            view.help_query = section.into();
+            let expected: Vec<_> = entries
+                .iter()
+                .filter(|entry| {
+                    format!(
+                        "{} {} {} {}",
+                        entry.group, entry.section, entry.label, entry.shortcut
+                    )
+                    .to_lowercase()
+                    .contains(&section.to_lowercase())
+                })
+                .map(|entry| entry.command)
+                .collect();
+            assert_eq!(
+                filtered_menu_entries(&browser, &view)
+                    .iter()
+                    .map(|entry| entry.command)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn two_sections_render_and_filter_without_orphaned_dividers() {
+        let browser = Browser::new(vec![]);
+        for (width, height) in [(100, 35), (36, 20)] {
+            let mut view = View::default();
+            open_help(&browser, &mut view);
+            // Keep both groups visible together even in the narrow layout.
+            view.help_entries
+                .as_mut()
+                .unwrap()
+                .retain(|entry| matches!(entry.command, Command::Info | Command::Quit));
+            view.help_selected = 0;
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| draw_help(frame, &browser, &view))
+                .unwrap();
+            let text = lines(&terminal).join("\n");
+            assert!(text.contains("Sessions") && text.contains("Global"));
+            assert!(
+                text.lines()
+                    .any(|line| line.contains(" ───") && !line.contains("Actions & shortcuts"))
+            );
+            assert!(!text.contains("General"));
+            for (query, heading, absent) in [
+                ("Global", "Global", "Sessions"),
+                ("information", "Sessions", "Global"),
+            ] {
+                view.help_query = query.into();
+                assert_eq!(filtered_menu_entries(&browser, &view).len(), 1);
+                terminal
+                    .draw(|frame| draw_help(frame, &browser, &view))
+                    .unwrap();
+                let text = lines(&terminal).join("\n");
+                assert!(text.contains(heading));
+                assert!(!text.contains(absent));
+                assert!(
+                    !text
+                        .lines()
+                        .any(|line| line.contains(" ───") && !line.contains("Actions & shortcuts"))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn availability_changes_do_not_reorder_open_menu() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View::default();
+        view.toggle_drawer();
+        open_help(&browser, &mut view);
+        let entries = menu_entries(&browser, &view);
+        view.help_selected = entries
+            .iter()
+            .position(|entry| entry.command == Command::FolderFocus)
+            .unwrap();
+        assert!(unavailable(Command::FolderFocus, &browser, &view).is_some());
+        browser.focus_root = Some("/synthetic".into());
+        assert!(unavailable(Command::FolderFocus, &browser, &view).is_none());
+        let updated = menu_entries(&browser, &view);
+        assert_eq!(
+            updated
+                .iter()
+                .map(|entry| entry.command)
+                .collect::<Vec<_>>(),
+            entries
+                .iter()
+                .map(|entry| entry.command)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(updated[view.help_selected].command, Command::FolderFocus);
+        open_help(&browser, &mut view);
+        let reopened = menu_entries(&browser, &view);
+        assert!(
+            reopened
+                .iter()
+                .position(|entry| entry.command == Command::FolderFocus)
+                .unwrap()
+                < view
+                    .help_entries
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .position(|entry| entry.command == Command::Create)
+                    .unwrap()
+        );
+    }
+
+    #[test]
+    fn searching_matches_terms_shortcuts_and_executes_original_action() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View::default();
+        open_help(&browser, &mut view);
+        type_query(&mut browser, &mut view, "GENERAL ARCHIVED");
+        let entries = filtered_menu_entries(&browser, &view);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, Command::Archives);
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert!(!view.help);
+        assert!(browser.include_archived);
+        open_help(&browser, &mut view);
+        assert!(view.help_query.is_empty());
+        assert!(!view.help_searching);
+        assert!(
+            unavailable(
+                menu_entries(&browser, &view)[view.help_selected].command,
+                &browser,
+                &view,
+            )
+            .is_none()
+        );
+        view.help = false;
+        view.toggle_drawer();
+        open_help(&browser, &mut view);
+        type_query(&mut browser, &mut view, "Shift-Tab");
+        assert_eq!(
+            filtered_menu_entries(&browser, &view)[0].command,
+            Command::CyclePaneBack
+        );
+        press(&mut browser, &mut view, KeyCode::Backspace);
+        assert_eq!(view.help_query, "Shift-Ta");
+        press(&mut browser, &mut view, KeyCode::Esc);
+        assert!(view.help && !view.help_searching);
+        assert_eq!(view.help_query, "Shift-Ta");
+        press(&mut browser, &mut view, KeyCode::Esc);
+        assert!(!view.help);
+    }
+
+    #[test]
+    fn empty_results_and_disabled_actions_cannot_run() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View::default();
+        open_help(&browser, &mut view);
+        type_query(&mut browser, &mut view, "zzzzjk?");
+        assert_eq!(view.help_query, "zzzzjk?");
+        for code in [
+            KeyCode::Down,
+            KeyCode::End,
+            KeyCode::PageDown,
+            KeyCode::Enter,
+        ] {
+            assert_eq!(press(&mut browser, &mut view, code), Action::Continue);
+            assert!(view.help);
+        }
+        let mut terminal = Terminal::new(TestBackend::new(80, 30)).unwrap();
+        terminal
+            .draw(|frame| draw_help(frame, &browser, &view))
+            .unwrap();
+        assert!(lines(&terminal).join("\n").contains("No matching actions"));
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        );
+        assert!(view.help_query.is_empty());
+        for c in "create new".chars() {
+            press(&mut browser, &mut view, KeyCode::Char(c));
+        }
+        let entries = filtered_menu_entries(&browser, &view);
+        assert_eq!(entries.len(), 1);
+        assert!(unavailable(entries[0].command, &browser, &view).is_some());
+        press(&mut browser, &mut view, KeyCode::Enter);
+        assert!(view.help);
+        // Refreshing underlying state cannot change the identity of filtered entries.
+        browser.include_archived = true;
+        assert_eq!(
+            filtered_menu_entries(&browser, &view)[0].command,
+            entries[0].command
+        );
+    }
+
+    #[tokio::test]
+    async fn hints_follow_focus_without_footer_rows_and_status_is_conditional() {
+        let browser = Browser::new(vec![]);
+        let mut view = View::default();
+        view.history
+            .tick(Some("/synthetic/repo".into()), 0, false, 1)
+            .await;
+        for (width, height) in [(160, 40), (100, 60), (80, 24), (12, 4)] {
+            for focus in 0..3 {
+                view.drawer_open = focus != 1;
+                view.drawer_git = focus == 2;
+                view.normalize_focus();
+                // History can supply its own notice; assert the clean state separately below.
+                let (_, footer) = browser_footer(Rect::new(0, 0, width, height), &browser, &view);
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+                let panels =
+                    panel_layout(Rect::new(0, 0, width, height - footer), height, &view, true);
+                let area = match focus {
+                    0 => panels.folders,
+                    1 => panels.sessions,
+                    _ => panels.git,
+                }
+                .unwrap();
+                let rows = lines(&terminal);
+                assert!(rows[usize::from(area.bottom() - 1)].contains('?'));
+                assert_eq!(
+                    rows.iter()
+                        .map(|line| line.matches('?').count())
+                        .sum::<usize>(),
+                    1
+                );
+            }
+        }
+        let mut clean = View::default();
+        let area = Rect::new(0, 0, 80, 24);
+        assert_eq!(browser_footer(area, &browser, &clean).1, 0);
+        clean.message = Some("Refreshed".into());
+        assert_eq!(
+            browser_footer(area, &browser, &clean),
+            ("Refreshed".into(), 1)
+        );
+        clean.message = None;
+        assert_eq!(browser_footer(area, &browser, &clean).1, 0);
+    }
+
+    #[test]
+    fn drawer_switch_preserves_each_action_menu_filter() {
+        let browser = Browser::new(vec![]);
+        let mut view = View::default();
+        open_help(&browser, &mut view);
+        view.help_query = "session".into();
+        view.help_searching = true;
+        view.toggle_drawer();
+        assert!(!view.help);
+        open_help(&browser, &mut view);
+        view.help_query = "folder".into();
+        view.toggle_drawer();
+        assert!(view.help && view.help_searching);
+        assert_eq!(view.help_query, "session");
+        view.toggle_drawer();
+        assert!(view.help && !view.help_searching);
+        assert_eq!(view.help_query, "folder");
+    }
+
+    #[test]
+    fn border_hints_fit_rails_and_leave_git_markers_intact() {
+        for (width, height) in [(1, 20), (40, 1), (8, 4), (30, 10)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| draw_action_hint(frame, frame.area(), false, false))
+                .unwrap();
+            assert!(lines(&terminal).last().unwrap().contains('?'));
+        }
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_widget(Paragraph::new(" ↓ "), Rect::new(36, 9, 3, 1));
+                draw_action_hint(frame, frame.area(), false, true);
+            })
+            .unwrap();
+        let rows = lines(&terminal);
+        assert!(rows[9].contains("? Actions"));
+        assert_eq!(terminal.backend().buffer()[(37, 9)].symbol(), "↓");
+        terminal
+            .draw(|frame| draw_action_hint(frame, frame.area(), true, false))
+            .unwrap();
+        assert!(lines(&terminal)[9].contains("Ctrl+B Browser"));
     }
 }

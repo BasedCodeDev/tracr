@@ -863,7 +863,7 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
                 .iter()
                 .map(|cell| cell.symbol())
                 .collect();
-            assert!(text.contains("Zoom"), "{width}x{height}");
+            assert!(text.contains("archived sessions"), "{width}x{height}");
             assert!(text.contains("Esc close"));
             view.help_selected = 0;
             terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
@@ -874,7 +874,7 @@ async fn action_menu_scrolls_selection_into_view_and_handles_small_layouts() {
                 .iter()
                 .map(|cell| cell.symbol())
                 .collect();
-            assert!(text.contains("Help / actions"));
+            assert!(text.contains("Open location / session"));
         }
     }
 }
@@ -951,17 +951,8 @@ async fn unlinked_rows_use_explicit_undimmed_labels_and_footer_preserves_primary
                         .map(|col| buffer[(col, row)].symbol())
                         .collect::<String>()
                 };
-                let footer = (21..24).map(line).collect::<Vec<_>>().join("\n");
-                let upper = (21..24).find(|&row| line(row).contains("Alt+`")).unwrap();
-                assert!(line(upper + 1).contains("Enter Open"), "{width}: {footer}");
-                assert!(line(upper + 1).ends_with(if width >= 36 {
-                    "m Move"
-                } else if width >= 24 {
-                    "n New"
-                } else {
-                    "Enter Open"
-                }));
-                assert!(footer.contains("Test message"));
+                assert!(line(22).contains('?'));
+                assert!(line(23).contains("Test message"));
                 let mut labels = 0;
                 for row in 1..21 {
                     for col in 0..width.saturating_sub(7) {
@@ -1086,80 +1077,47 @@ async fn information_modal_is_requested_pinned_scrollable_and_blocks_browser_act
 }
 
 #[tokio::test]
-async fn footer_and_menu_follow_focus_with_stable_shared_controls() {
+async fn border_hint_and_searchable_menu_follow_focus() {
     use ratatui::{Terminal, backend::TestBackend};
     use tracr::tui::{View, draw};
     let browser = loaded().await;
     for width in [12, 24, 36, 80, 140, 240] {
-        let mut shared = None;
         for focus in [0, 1] {
             let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
             let mut view = View {
                 focus,
                 ..View::default()
             };
-            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-            let line = |row| {
-                (0..width)
-                    .map(|col| terminal.backend().buffer()[(col, row)].symbol())
-                    .collect::<String>()
-            };
-            let global = line(28);
-            if let Some(previous) = &shared {
-                assert_eq!(previous, &global);
-            }
-            shared = Some(global);
-            let context = line(29);
             if focus == 0 {
-                assert!(
-                    !context.contains("Relink")
-                        && !context.contains("Info")
-                        && !context.contains("Resume")
-                );
-                if width >= 80 {
-                    assert!(context.contains("m Move"));
-                    assert!(context.contains("n New"));
-                }
-            } else {
-                assert!(!context.contains("Move folder") && !context.contains("Toggle"));
-                if width >= 80 {
-                    assert!(
-                        context.contains("i Info")
-                            && context.contains("m Move")
-                            && context.contains("n New")
-                    );
-                }
+                view.drawer_open = true;
             }
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            let bottom: String = (0..width)
+                .map(|col| terminal.backend().buffer()[(col, 29)].symbol())
+                .collect();
+            assert_eq!(bottom.matches('?').count(), 1);
+            assert!(!bottom.contains("Quit") && !bottom.contains("Move"));
             if width >= 80 {
                 view.help = true;
-                view.help_selected = if focus == 0 {
-                    if width >= 160 { 15 } else { 16 }
-                } else {
-                    10
-                };
+                view.help_query = "Move".into();
                 terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
-                let text = terminal
+                let text: String = terminal
                     .backend()
                     .buffer()
                     .content
                     .iter()
                     .map(|cell| cell.symbol())
-                    .collect::<String>();
-                if focus == 0 {
-                    assert!(text.contains("Move folder"));
-                    assert!(
-                        !text.contains("Move session")
-                            && !text.contains("Open session full-screen")
-                            && !text.contains("Session information")
-                    );
+                    .collect();
+                assert!(text.contains(if focus == 0 {
+                    "Move folder"
                 } else {
-                    assert!(text.contains("Move session"));
-                    assert!(
-                        !text.contains("Move folder")
-                            && !text.contains("Expand / collapse folder")
-                            && text.contains("Create new session")
-                    );
-                }
+                    "Move session"
+                }));
+                assert!(!text.contains(if focus == 0 {
+                    "Move session"
+                } else {
+                    "Move folder"
+                }));
             }
         }
     }
@@ -1264,10 +1222,9 @@ async fn idle_color_is_shared_by_sessions_search_info_and_folder_ancestors() {
 }
 
 #[tokio::test]
-async fn footer_shares_feedback_only_when_display_width_leaves_a_gap() {
+async fn status_uses_one_row_only_when_needed_without_displacing_hint() {
     use ratatui::{Terminal, backend::TestBackend};
     use tracr::tui::{View, draw};
-    use unicode_width::UnicodeWidthStr;
     let browser = loaded().await;
     for width in [36, 140, 240] {
         for focus in [0, 1] {
@@ -1276,40 +1233,26 @@ async fn footer_shares_feedback_only_when_display_width_leaves_a_gap() {
                 focus,
                 ..View::default()
             };
-            terminal.draw(|f| draw(f, &browser, &view)).unwrap();
-            let line = |terminal: &Terminal<TestBackend>, row| {
-                (0..width)
-                    .map(|col| terminal.backend().buffer()[(col, row)].symbol())
-                    .collect::<String>()
-            };
-            let shared = line(&terminal, 28).trim().to_owned();
-            let context = line(&terminal, 29).trim().to_owned();
-            let room = usize::from(width).saturating_sub(shared.width() + 2);
-            let fitting = format!("{}{}", "界".repeat(room / 2), "x".repeat(room % 2));
-            for (message, separate) in [
-                (fitting.clone(), false),
-                (format!("{fitting}x"), true),
-                ("Long diagnostic ".repeat(30), true),
-                (String::new(), false),
+            for message in [
+                "界".repeat(width as usize),
+                "Long diagnostic ".repeat(30),
+                String::new(),
             ] {
                 view.message = Some(message.clone());
-                terminal.draw(|f| draw(f, &browser, &view)).unwrap();
-                let top = if separate { 27 } else { 28 };
-                let shared_start = width - shared.width() as u16;
-                let buffer = terminal.backend().buffer();
-                assert_eq!(buffer[(shared_start, top)].symbol(), "A");
-                assert!(line(&terminal, top).ends_with(&shared));
-                assert!(line(&terminal, top + 1).ends_with(&context));
-                if !message.is_empty() {
-                    let feedback_row = if separate { 29 } else { 28 };
-                    assert_eq!(
-                        buffer[(0, feedback_row)].symbol(),
-                        &message.chars().next().unwrap().to_string()
-                    );
+                if focus == 0 && !view.drawer_open {
+                    view.drawer_open = true;
                 }
-                if !separate && !message.is_empty() {
-                    assert_eq!(buffer[(shared_start - 1, top)].symbol(), " ");
-                    assert_eq!(buffer[(shared_start - 2, top)].symbol(), " ");
+                terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+                let hint_row = if message.is_empty() { 29 } else { 28 };
+                let line: String = (0..width)
+                    .map(|col| terminal.backend().buffer()[(col, hint_row)].symbol())
+                    .collect();
+                assert_eq!(line.matches('?').count(), 1);
+                if let Some(first) = message.chars().next() {
+                    assert_eq!(
+                        terminal.backend().buffer()[(0, 29)].symbol(),
+                        first.to_string()
+                    );
                 }
             }
         }

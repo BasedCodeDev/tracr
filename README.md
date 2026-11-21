@@ -424,13 +424,22 @@ visibility affects folder counts and search.
 Refresh retains old results while new pages load; failed sources remain visibly
 incomplete. A successful refresh removes records no longer listed by that source.
 Folders and Git history have their own actions inside the drawer; Sessions has
-its actions in the main workspace. Only the focused panel is highlighted. Git
-provides commit navigation and horizontal scrolling. The footer and `?` menu
-follow the active area: folder expansion and moving belong to Folders; resume,
-Info, and relinking belong to Sessions. The first footer row keeps the drawer
-shortcut visible, with Help, Quit, and recovery shortcuts when space permits.
-The second row shows contextual actions. Long feedback moves to a separate row.
-The full action set remains available in `?`.
+its actions in the main workspace. The focused panel’s border shows **? Actions**
+(or **?** when narrow), opening its actions and shortcuts. Current-tab actions come
+first, including item navigation, with available actions above dimmed unavailable
+ones. A divider separates these from **Global** actions such as switching panels,
+terminal management, search, refresh, and quit. Press **/** to filter by
+action name, section, or shortcut; all typed terms must match. Backspace edits and
+Ctrl+U clears the filter. Arrows select and Enter runs an available action. Escape
+leaves search mode while retaining the filter; Escape again closes the menu.
+Outside search, j/k, paging, Home/End, and ? also work. Unavailable actions explain
+why they cannot run. Each opening starts unfiltered, and the drawer preserves its
+own search state when you switch areas.
+
+Normal browsing reserves no shortcut footer rows. Feedback, diagnostics, and
+focused-folder status use one row when needed. Full-screen coding retains the drawer
+reminder. Open the drawer’s action menu to find **Background session (Ctrl+B)**.
+The drawer shortcut and navigation behavior are unchanged.
 
 Press **i** in Sessions, or
 choose **Session information** in the action menu, to open a centered information

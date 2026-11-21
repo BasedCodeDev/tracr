@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-dirty-') as directory:
         (project / 'new.txt').write_text('untracked\n')
         terminal.expect('[main *]')
         terminal.expect('project *')
-        terminal.expect('Enter Sessions')
+        terminal.expect_focus('Folders')
         terminal.send(b'i')
         terminal.expect('Worktree information')
         terminal.expect('0 staged, 0 modified, 1 untracked')

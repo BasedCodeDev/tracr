@@ -75,7 +75,7 @@ os.execv(os.environ['PROBE_GIT'], [os.environ['PROBE_GIT'], *sys.argv[1:]])
                 term.expect('[HEAD]')
             if case == 'hidden':
                 term.send(b'\x1b`')
-                term.expect('Enter Open')
+                term.expect_focus('Sessions')
             pause(3)
             start_calls = len(calls())
             before = cpu()
