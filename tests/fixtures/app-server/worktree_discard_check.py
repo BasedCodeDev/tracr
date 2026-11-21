@@ -501,9 +501,11 @@ def check_fake(root, binary):
         t.resize(9, 30)
         t.expect('Enlarge terminal')
         t.send(b'\x1b')
+        t.wait(lambda: 'Enlarge terminal' not in t.text())
         assert worktree.exists() and not json.loads(store.read_text())['deleted']
         assert (bare / 'HEAD').is_file() and (nested / '.git').is_dir()
         t.resize(40, 120)
+        t.expect_focus('Folders')
 
         t.send(b'\x1b[3~')
         t.expect('Type the branch name')
