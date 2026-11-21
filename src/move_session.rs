@@ -220,16 +220,6 @@ async fn live(
     session: &SessionSummary,
     target: &Path,
 ) -> Result<(), String> {
-    let output = tokio::process::Command::new(binary)
-        .arg("--version")
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !output.status.success()
-        || String::from_utf8_lossy(&output.stdout).trim() != "codex-cli 0.170.0"
-    {
-        return Err("Live relocation is verified only for Codex 0.170.0.".into());
-    }
     if session.archived {
         return Err("Archived sessions cannot be moved live.".into());
     }
@@ -239,7 +229,7 @@ async fn live(
     }
     loaded(binary, source, session).await?;
     let mut client = OperationalClient::connect(binary, source.clone()).await?;
-    client.validate_server(&source.home, "0.170.0")?;
+    client.validate_server_home(&source.home)?;
     // Override-free resume attaches to the existing runtime; it starts no model turn.
     let before = settings(&mut client, &request.id).await?;
     let old = session.cwd.as_deref().ok_or("Session has no directory")?;
@@ -295,7 +285,8 @@ async fn live(
             "thread/settings/update",
             json!({"threadId":request.id,"cwd":target}),
         )
-        .await?;
+        .await
+        .map_err(|error| format!("Live directory update failed: {error}"))?;
     for _ in 0..50 {
         let after = settings(&mut client, &request.id).await?;
         if after["thread"]["id"] != request.id

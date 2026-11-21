@@ -1,3 +1,6 @@
+#[path = "support/codex_version.rs"]
+mod codex_version;
+
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use tracr::{
@@ -35,6 +38,7 @@ async fn fixture(
     std::fs::write(root.path().join("native.json"), state.to_string()).unwrap();
     let binary =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/app-server/release_fake.py");
+    let binary = codex_version::wrapper(root.path(), &binary, "codex-cli 0.171.0");
     let provider = CodexProvider::connect(&binary, source.clone())
         .await
         .unwrap();
@@ -48,6 +52,7 @@ async fn fixture(
     let preview = relocation::preview(&binary, &source, &session, target)
         .await
         .unwrap();
+    codex_version::set(&binary, "codex-cli 99.0.0");
     (root, binary, source, preview)
 }
 

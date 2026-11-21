@@ -225,19 +225,8 @@ impl LiveClient {
 /// Separate connection used only by confirmed relocation operations.
 pub(crate) struct OperationalClient(LiveClient);
 impl OperationalClient {
-    pub(crate) fn validate_server(&self, home: &Path, version: &str) -> Result<(), String> {
+    pub(crate) fn validate_server_home(&self, home: &Path) -> Result<(), String> {
         let init = &self.0.initialization;
-        let agent = init["userAgent"].as_str().unwrap_or_default();
-        let reported_version = agent
-            .split_whitespace()
-            .next()
-            .and_then(|s| s.rsplit_once('/'))
-            .map(|(_, version)| version);
-        if reported_version != Some(version) {
-            return Err(format!(
-                "Shared Codex daemon must be version {version}; restart the client after upgrading Codex."
-            ));
-        }
         let server_home = init["codexHome"]
             .as_str()
             .ok_or("Shared daemon did not report its Codex home")?;

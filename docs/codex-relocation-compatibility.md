@@ -2,8 +2,10 @@
 
 ## Supported behavior
 
-Production relinking supports Codex 0.167.2 and 0.169.0 with legacy and paginated
-history. It moves a session's directory association; it does not rewrite history,
+Production relinking uses native API validation with legacy and paginated
+history. Codex version numbers are diagnostic only, including across preview,
+execution and recovery. Failed version queries are recorded as `unknown`.
+Relinking moves a session's directory association; it does not rewrite history,
 move project files, update associated project roots, or maintain a tracr-only path
 map. Original directories may exist or be missing. Destinations must exist and be
 accessible; inaccessible/unknown source paths and equivalent destinations fail.
@@ -15,15 +17,17 @@ built-in `:workspace` or `:read-only`, with exactly one runtime root matching cw
 Workspace configurations must have canonical sandbox flags, no extra writable
 roots and no network access; read-only must remain read-only with network disabled.
 Custom/full-access profiles, unknown policy forms and multi-root workspaces remain
-unsupported. New Codex versions require new compatibility evidence.
+unsupported. Native acceptance tests provide regression evidence without gating
+new Codex releases. API failures and state mismatches use the existing rejection
+and recovery flow.
 
-## Live CLI relocation (0.170.0)
+## Live CLI relocation
 
-`tracr move-session ID DESTINATION --live [--from OLD]` has a separate compatibility
-boundary from exclusive-writer/TUI relocation. The binary and owning daemon must
-both report 0.170.0, and the daemon's canonical Codex home must match the selected
-source. The exact ID must resolve uniquely through a complete source inventory.
-The session must already be loaded, unarchived, and use a single local environment.
+`tracr move-session ID DESTINATION --live [--from OLD]` uses the shared Codex daemon.
+Tracr validates the API responses at runtime. The daemon's reported Codex home
+must resolve to the selected source. The exact ID must resolve uniquely through a
+complete source inventory. The session must already be loaded, unarchived, and use
+a single local environment.
 Supported profile/root restrictions above still apply.
 
 An operational proxy attaches using override-free `thread/resume` with
@@ -45,13 +49,13 @@ branch-closing skills should relocate as their final step and use explicit paths
 for remaining work. Project-root/client sidebar changes are not part of this API.
 
 `check_codex_live_move.py` verifies 12 combinations of legacy/paginated history,
-legacy/read-only/workspace permissions, and attached idle/active sessions against
-real 0.170.0 with a local scripted model. It checks history/settings preservation,
+legacy/read-only/workspace permissions, and attached idle/active sessions with a
+local scripted model. The matrix has passed on Codex 0.170.0 and 0.171.0. It checks history/settings preservation,
 continued active status, expected-source rejection, dry runs, repeat invocations,
 owner readback and persisted directory/roots after daemon restart. CLI protocol
-fault tests cover daemon-version mismatch, unloaded/multi-root sessions, lost
-update acknowledgement and concurrent settings changes. No real user session is
-moved by these tests.
+fault tests cover absent or differing version information, daemon home mismatches,
+unloaded/multi-root sessions, API failures, and concurrent settings changes.
+The tests move only disposable sessions.
 
 ## Native mechanism and invariants
 
@@ -136,8 +140,8 @@ python3 scripts/probe_codex_relocation.py --codex /absolute/path/to/codex \
 
 Use `--help` for focused scenarios. The original relocation research probe includes
 negative controls/default-listing strategies; its failure is not proof that the
-production database-listing sequence fails. A successful research process is not
-production compatibility approval. Retention is documented in
+production database-listing sequence fails. A successful research process does not
+replace production runtime validation. Retention is documented in
 [validation](validation.md#temporary-files-and-evidence).
 
 Rust integration tests cover relocation, folder moves and release. Opt-in native

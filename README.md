@@ -621,8 +621,9 @@ that has changed directories, while allowing retries already at the destination.
 The CLI does not merge branches, delete worktrees, move files, or change BasedGit
 instructions. The destination is a checkout directory, not a branch name.
 
-`--live` supports attached idle **and active** sessions on the shared Codex
-0.170.0 daemon. It updates native settings without interrupting the turn,
+`--live` supports attached idle **and active** sessions on a shared Codex
+daemon. Tracr validates the daemon and native responses at runtime. It updates
+native settings without interrupting the turn,
 releasing the owner, or launching another model turn. History, identity, archive
 state, model and supported permission settings are preserved. Tracr verifies the
 runtime directory/root, native read, and database listing before reporting
@@ -682,8 +683,9 @@ hidden directories and loads expanded folders in the background.
 Review the resolved destination and confirm. On success, tracr opens that folder
 and highlights the same session. It does not start a model turn or launch a chat.
 
-Supported versions are initially Codex 0.167.2 and 0.169.0, with legacy and paginated
-histories. Close the session in other Codex clients first, even if it is idle.
+Relinking uses runtime API validation, with legacy and paginated histories. Codex
+version numbers are diagnostic only; updates do not require compatibility approval.
+Close the session in other Codex clients first, even if it is idle.
 Native writer exclusion prevents changing a session owned elsewhere. Archived
 sessions are temporarily unarchived and restored. The built-in `:workspace` and
 `:read-only` profiles are supported, along with ordinary legacy read-only and trusted
