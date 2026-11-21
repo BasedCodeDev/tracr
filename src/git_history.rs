@@ -529,12 +529,24 @@ impl History {
     }
 
     pub(crate) fn reference_lines(&self, oid: &str, width: usize) -> Vec<Line<'static>> {
+        use crate::git::RefKind;
+
+        let Some(labels) = self.references.get(oid) else {
+            return Vec::new();
+        };
+        let mut labels: Vec<_> = labels.iter().collect();
+        labels.sort_by_key(|label| match (&label.kind, label.name.as_str()) {
+            (RefKind::Local, "main") => 0,
+            (RefKind::Local, "master") => 1,
+            _ => 2,
+        });
+
         // Leave room to display wide graphemes when the graph itself needs horizontal scrolling.
         let capacity = width.saturating_sub(self.graph_width + 2).max(2);
         let mut lines = Vec::new();
         let mut line = Line::default();
         let mut used = 0;
-        for label in self.references.get(oid).into_iter().flatten() {
+        for label in labels {
             let label = self.reference_label(label);
             let width = label.width();
             if used > 0 && used + 1 + width > capacity {
@@ -2293,6 +2305,50 @@ mod tests {
         assert_eq!(refs(&h).width(), clean_width + 2);
         h.set_status(None, &statuses);
         assert_eq!(refs(&h).width(), clean_width);
+    }
+
+    #[test]
+    fn reference_wrapping_lists_local_main_and_master_first() {
+        use crate::git::{RefKind, RefLabel};
+        let mut h = History::default();
+        let labels: Vec<_> = [
+            (RefKind::Local, "alpha"),
+            (RefKind::Local, "master"),
+            (RefKind::Local, "main"),
+            (RefKind::Local, "zeta"),
+            (RefKind::Remote, "origin/main"),
+            (RefKind::Tag, "main"),
+        ]
+        .into_iter()
+        .map(|(kind, name)| RefLabel {
+            kind,
+            name: name.into(),
+        })
+        .collect();
+        h.set_references(std::collections::BTreeMap::from([
+            ("both".into(), labels.clone()),
+            (
+                "master-only".into(),
+                [&labels[0], &labels[1]].into_iter().cloned().collect(),
+            ),
+        ]));
+        let lines = |oid| {
+            h.reference_lines(oid, 17)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            lines("both"),
+            [
+                "[main] [master]",
+                "[alpha] [zeta]",
+                "[remote: origin",
+                "/main]",
+                "[tag: main]"
+            ]
+        );
+        assert_eq!(lines("master-only"), ["[master]", "[alpha]"]);
     }
 
     #[test]
