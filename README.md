@@ -92,6 +92,21 @@ Reload waits for interactive Codex sessions and running file/session operations
 to finish. Temporary UI state resets; the existing saved-folder behavior applies.
 Quitting tracr exits the watcher, and commands such as `list --json` run once.
 
+To investigate an intermittent loading delay, create a directory and set
+`TRACR_STARTUP_TRACE_DIR` for the launch you normally use:
+
+```sh
+mkdir -p ~/.cache/tracr/startup-traces
+TRACR_STARTUP_TRACE_DIR="$HOME/.cache/tracr/startup-traces" tracr
+```
+
+Each launch writes a private `tracr-startup-*.jsonl` file as it runs. Compare
+`ui_first_session_frame` and `ui_discovery_complete_frame` between a fast and
+slow launch. The trace times Codex initialization, database and reconciled
+listing, the UI, and Git separately. A stage with a start and no matching end
+(same `span` number) is still in progress if Tracr is running. Times are in
+microseconds. The trace contains no session content, IDs, or folder paths.
+
 Use `./dev.sh --once [arguments...]` for the original build-and-run
 workflow without Python or watching. Runner options must precede application arguments; `--` ends runner option
 parsing and the remaining arguments are passed unchanged to tracr. Non-terminal

@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::task::JoinHandle;
+use tokio::{sync::oneshot, task::JoinHandle};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Counts {
@@ -74,28 +74,22 @@ pub async fn read(path: &Path) -> Status {
 }
 
 #[derive(Default)]
-pub struct Monitor {
+struct WatchSet {
     watcher: Option<RecommendedWatcher>,
-    events: Arc<Mutex<BTreeSet<PathBuf>>>,
-    roots: BTreeSet<PathBuf>,
-    watched: BTreeSet<PathBuf>,
-    fallback: Option<Instant>,
-    pending: BTreeMap<PathBuf, Instant>,
-    tasks: BTreeMap<PathBuf, JoinHandle<Status>>,
-    generation: Option<u64>,
+    paths: BTreeSet<PathBuf>,
 }
-impl Monitor {
-    pub fn sync(&mut self, browser: &mut crate::browser::Browser) {
-        let roots: BTreeSet<_> = browser
-            .repositories
-            .values()
-            .flat_map(|r| &r.worktrees)
-            .filter(|w| !w.bare)
-            .map(|w| w.path.clone())
-            .collect();
-        let now = Instant::now();
-        if self.watcher.is_none() && !roots.is_empty() {
-            let events = self.events.clone();
+
+impl WatchSet {
+    fn reconcile(
+        &mut self,
+        desired: &BTreeSet<PathBuf>,
+        events: Arc<Mutex<BTreeSet<PathBuf>>>,
+    ) -> bool {
+        if desired.is_empty() {
+            *self = Self::default();
+            return false;
+        }
+        if self.watcher.is_none() {
             self.watcher =
                 notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
                     let mut pending = events.lock().unwrap();
@@ -113,12 +107,51 @@ impl Monitor {
                         Err(_) => {
                             pending.insert(PathBuf::new());
                         }
-
                         _ => {}
                     }
                 })
                 .ok();
         }
+        let Some(watcher) = &mut self.watcher else {
+            return false;
+        };
+        for path in self.paths.difference(desired) {
+            let _ = watcher.unwatch(path);
+        }
+        self.paths.retain(|path| desired.contains(path));
+        let mut added = false;
+        for path in desired.difference(&self.paths).cloned().collect::<Vec<_>>() {
+            if watcher.watch(&path, RecursiveMode::Recursive).is_ok() {
+                self.paths.insert(path);
+                added = true;
+            }
+        }
+        added
+    }
+}
+
+#[derive(Default)]
+pub struct Monitor {
+    watches: WatchSet,
+    watch_update: Option<oneshot::Receiver<(WatchSet, bool)>>,
+    watch_target: BTreeSet<PathBuf>,
+    events: Arc<Mutex<BTreeSet<PathBuf>>>,
+    roots: BTreeSet<PathBuf>,
+    fallback: Option<Instant>,
+    pending: BTreeMap<PathBuf, Instant>,
+    tasks: BTreeMap<PathBuf, JoinHandle<Status>>,
+    generation: Option<u64>,
+}
+impl Monitor {
+    pub fn sync(&mut self, browser: &mut crate::browser::Browser) {
+        let roots: BTreeSet<_> = browser
+            .repositories
+            .values()
+            .flat_map(|r| &r.worktrees)
+            .filter(|w| !w.bare)
+            .map(|w| w.path.clone())
+            .collect();
+        let now = Instant::now();
         for root in self.roots.difference(&roots) {
             if let Some(task) = self.tasks.remove(root) {
                 task.abort();
@@ -133,32 +166,52 @@ impl Monitor {
             .cloned()
             .chain(browser.repositories.keys().cloned())
             .collect();
-        for path in self.watched.difference(&desired) {
-            if let Some(w) = self.watcher.as_mut() {
-                let _ = w.unwatch(path);
+        if let Some(result) = self.watch_update.as_mut().map(oneshot::Receiver::try_recv) {
+            match result {
+                Ok((watches, added)) => {
+                    self.watch_update = None;
+                    self.watches = watches;
+                    if added {
+                        // A change between the first status read and subscription may have been missed.
+                        self.pending
+                            .extend(roots.iter().map(|root| (root.clone(), now)));
+                    }
+                }
+                Err(oneshot::error::TryRecvError::Closed) => self.watch_update = None,
+                Err(oneshot::error::TryRecvError::Empty) => {}
             }
         }
-        self.watched.retain(|p| desired.contains(p));
-        for path in desired
-            .difference(&self.watched)
-            .cloned()
-            .collect::<Vec<_>>()
-        {
-            if self
-                .watcher
-                .as_mut()
-                .is_some_and(|w| w.watch(&path, RecursiveMode::Recursive).is_ok())
-            {
-                self.watched.insert(path);
-            } else {
-                self.fallback.get_or_insert(now + Duration::from_secs(5));
-            }
+        if self.watch_update.is_none() && self.watches.paths == desired {
+            self.fallback = None;
         }
-        if self.fallback.is_some_and(|due| now >= due) {
+        let retry_due = self.fallback.is_some_and(|due| now >= due);
+        if retry_due {
             for root in &roots {
                 self.pending.entry(root.clone()).or_insert(now);
             }
             self.fallback = Some(now + Duration::from_secs(5));
+        }
+        if self.watch_update.is_none()
+            && self.watches.paths != desired
+            && (self.watch_target != desired || self.fallback.is_none() || retry_due)
+        {
+            self.watch_target = desired.clone();
+            self.fallback.get_or_insert(now + Duration::from_secs(5));
+            let mut watches = std::mem::take(&mut self.watches);
+            let events = self.events.clone();
+            let (tx, rx) = oneshot::channel();
+            // notify waits for recursive directory registration to finish. Keep
+            // that wait off both the UI and the async runtime's shutdown path.
+            if std::thread::Builder::new()
+                .name("tracr-worktree-watches".into())
+                .spawn(move || {
+                    let added = watches.reconcile(&desired, events);
+                    let _ = tx.send((watches, added));
+                })
+                .is_ok()
+            {
+                self.watch_update = Some(rx);
+            }
         }
         if self.generation != Some(browser.git_generation) {
             self.generation = Some(browser.git_generation);
@@ -241,9 +294,11 @@ impl Monitor {
         changed
     }
     pub async fn shutdown(&mut self) {
-        self.watcher = None;
+        self.watch_update = None;
+        self.watches = WatchSet::default();
+        self.watch_target.clear();
+        self.fallback = None;
         self.roots.clear();
-        self.watched.clear();
         self.events.lock().unwrap().clear();
         self.pending.clear();
         for (_, task) in std::mem::take(&mut self.tasks) {
@@ -327,6 +382,8 @@ mod tests {
             ],
         );
         let repository = crate::git::discover(&main).await.unwrap();
+        let watch_target =
+            BTreeSet::from([main.clone(), linked.clone(), repository.common_dir.clone()]);
         let mut browser = crate::browser::Browser::new(vec![]);
         browser
             .repositories
@@ -350,8 +407,16 @@ mod tests {
             .await
             .expect("status did not refresh");
         }
+        // Hold subscription completion across the first status read and edit.
+        let (subscribed, registering) = oneshot::channel();
+        monitor.watch_update = Some(registering);
+        monitor.watch_target = watch_target.clone();
         expect(&mut monitor, &mut browser, &linked, Counts::default()).await;
         std::fs::write(linked.join("tracked"), "edited").unwrap();
+        let mut watches = WatchSet::default();
+        let added = watches.reconcile(&watch_target, monitor.events.clone());
+        assert!(added);
+        assert!(subscribed.send((watches, added)).is_ok());
         expect(
             &mut monitor,
             &mut browser,

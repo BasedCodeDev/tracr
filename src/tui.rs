@@ -426,6 +426,8 @@ pub struct View {
     pub relink_scroll_limit: std::cell::Cell<u16>,
     pub folder_page_size: std::cell::Cell<usize>,
     pub session_page_size: std::cell::Cell<usize>,
+    #[doc(hidden)]
+    pub session_rows_drawn: std::cell::Cell<bool>,
     pub source_page_size: std::cell::Cell<usize>,
     pub help_page: std::cell::RefCell<ListPage>,
     pub search_page: std::cell::RefCell<ListPage>,
@@ -493,6 +495,7 @@ impl Default for View {
             relink_scroll_limit: Default::default(),
             folder_page_size: Default::default(),
             session_page_size: Default::default(),
+            session_rows_drawn: Default::default(),
             source_page_size: Default::default(),
             help_page: Default::default(),
             search_page: Default::default(),
@@ -3600,8 +3603,10 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 .with_selected(sessions.iter().position(|s| Some(&s.key) == selected));
             let block = pane_block(&scope, view.context() == 1)
                 .padding(ratatui::widgets::Padding::new(0, right_padding, 1, 0));
-            view.session_page_size
-                .set(usize::from(block.inner(area).height) / 3);
+            let inner = block.inner(area);
+            view.session_rows_drawn
+                .set(inner.height > 0 && inner.width > 0);
+            view.session_page_size.set(usize::from(inner.height) / 3);
             frame.render_stateful_widget(
                 List::new(items)
                     .block(block)
@@ -5063,7 +5068,28 @@ fn save_folder(browser: &mut Browser, folder: Option<&std::path::Path>, view: &m
     }
 }
 
-pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>> {
+fn track_startup_wait(
+    trace: &crate::startup_trace::Trace,
+    span: &mut Option<crate::startup_trace::Span>,
+    stage: &'static str,
+    pending: bool,
+) {
+    if pending {
+        span.get_or_insert_with(|| trace.span(stage));
+    } else if let Some(span) = span.take() {
+        span.finish("ok", None);
+    }
+}
+
+pub async fn run(browser: Browser) -> Result<(), Box<dyn std::error::Error>> {
+    run_with_startup_trace(browser, Default::default()).await
+}
+
+#[doc(hidden)]
+pub async fn run_with_startup_trace(
+    mut browser: Browser,
+    mut trace: crate::startup_trace::Trace,
+) -> Result<(), Box<dyn std::error::Error>> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("interactive browsing requires a terminal; use 'tracr list'".into());
     }
@@ -5071,6 +5097,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         active: false,
         mouse: false,
     };
+    let terminal_setup = trace.span("ui_terminal_setup");
     guard.activate()?;
     let mut input_reader = crate::terminal_input::Reader::default();
     let mut outer_focused = true;
@@ -5081,9 +5108,11 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         previous(info);
     }));
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    terminal_setup.finish("ok", None);
     let mut content_search = crate::search::Search::default();
     let mut discovery = Discovery::new();
     discovery.enable_live();
+    discovery.trace_startup(trace.clone());
     browser.invalidate_git();
     discovery.refresh(&mut browser);
     let mut view = View {
@@ -5129,6 +5158,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         .as_ref()
         .and_then(|p| p.parent())
         .map(|p| p.to_path_buf());
+    let recovery = trace.span("ui_recovery_check");
     if let Some((count, folder)) = refresh_recovery(relocation_state.as_deref(), &mut view) {
         if folder {
             view.message = Some("Unfinished folder move. Press u to inspect/recover.".into());
@@ -5138,6 +5168,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             ));
         }
     }
+    recovery.finish("ok", None);
     if let Some(state) = &relocation_state {
         match crate::worktree_discard::pending(state) {
             Ok(Some(journal)) => {
@@ -5165,6 +5196,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     idle.wake();
     let mut modal_deadline = std::time::Instant::now();
     let mut folder_checks_dirty = true;
+    let (mut first_frame, mut first_rows, mut discovery_frame) = (false, false, false);
+    let (mut git_discovery_wait, mut git_preview_wait) = (None, None);
     let outcome: Result<(), Box<dyn std::error::Error>> = async {
         loop {
             // A snapshot must never survive discovery, scope, or tree changes.
@@ -5206,10 +5239,21 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             for _ in 0..100 {
                 match discovery.rx.try_recv() {
                     Ok(update) => {
+                        let timing = trace.enabled().then(|| {
+                            let (stage, source, count) = update.trace_details();
+                            let span = match source {
+                                Some(source) => trace.for_source(source).span(stage),
+                                None => trace.span(stage),
+                            };
+                            (span, count)
+                        });
                         if browser.update_changes(&update) {
                             let paths_changed = matches!(&update, crate::browser::Update::Page { .. } | crate::browser::Update::Finished { .. });
                             candidates_dirty |= paths_changed; folder_checks_dirty |= paths_changed;
                             browser.apply(update); idle.wake();
+                            if let Some((span, count)) = timing { span.finish("ok", count); }
+                        } else if let Some((span, count)) = timing {
+                            span.finish("unchanged", count);
                         }
                     }
                     Err(_) => break,
@@ -5222,7 +5266,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 }
                 idle.wake();
             }
+            let status_tick = trace.span("ui_worktree_status_poll");
             if status_monitor.tick(&mut browser).await { idle.wake(); }
+            status_tick.finish("ok", None);
             let now = std::time::Instant::now();
             let active_folder = view.terminals.borrow().active_folder();
             if terminal_folder != active_folder {
@@ -5234,6 +5280,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 crate::git_discovery::Outcome::Repository { repository, .. } => Some(repository.common_dir.clone()),
                 _ => None,
             });
+            let watch_poll = trace.span("ui_git_watch_poll");
             terminal_git_watch.context(terminal_repository.filter(|id| git_watch.repository() != Some(id)), browser.git_generation, terminal_folder.is_some());
             for watcher in [&mut git_watch, &mut terminal_git_watch] {
                 if let Some(change) = watcher.poll(now, git_discovery.pending() || view.history.loading()) {
@@ -5247,6 +5294,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
             }
+            watch_poll.finish("ok", None);
             if view.git_watch_error != git_watch.error { view.git_watch_error = git_watch.error.clone(); idle.wake(); }
             let copy_ready = view.error_dialog.as_ref().is_some_and(|dialog| dialog.copy_task.as_ref().is_some_and(|task| task.is_finished())) || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.as_ref().is_some_and(|task| task.is_finished()));
             let picker_ready = view.relink.as_ref().is_some_and(|modal| modal.picker.as_ref().is_some_and(|picker| picker.needs_tick()));
@@ -5269,6 +5317,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 || signals.terminate.load(std::sync::atomic::Ordering::Relaxed) || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed);
             if idle.ready(now, activity) {
             if !defer_git {
+            let git_poll = trace.span("ui_git_discovery_poll");
             git_discovery.generation(browser.git_generation);
             let context_changed = candidate_context.as_ref().is_none_or(|(generation, folder, expanded, archived)| *generation != browser.git_generation || folder != &browser.folder || expanded != &browser.expanded || *archived != browser.include_archived);
             if candidates_dirty || context_changed {
@@ -5283,8 +5332,14 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 candidates_dirty = false;
             }
             let updates = git_discovery.poll().await;
+            let git_update_count = updates.len();
             candidates_dirty |= !updates.is_empty();
             git_discovery.apply_batch(&mut browser, updates);
+            git_poll.finish("ok", Some(git_update_count));
+            if trace.enabled() {
+                track_startup_wait(&trace, &mut git_discovery_wait, "git_discovery_wait", git_discovery.pending());
+            }
+            let git_preview = trace.span("ui_git_preview_poll");
             let context = selected_git_context(&browser);
             let pending_context = match &browser.folder {
                 FolderFilter::Path(path) => browser.ownership.get(path).is_none_or(|record| record.outcome.is_none() && record.previous.is_none()),
@@ -5334,6 +5389,10 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 }
             }
             view.folder_navigation.finish();
+            git_preview.finish("ok", None);
+            if trace.enabled() {
+                track_startup_wait(&trace, &mut git_preview_wait, "git_preview_wait", view.history.loading() || git_preview_pending(&browser, &view));
+            }
             }
             // Finish the bounded operation and archive restoration before exiting.
             if (signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
@@ -5491,7 +5550,12 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 if !modal.busy && modal.preview.is_none(){if let Some(picker)=modal.picker.as_mut(){picker.tick(&mut modal.input);}}
             }
             if let Some(modal)=view.folder_move.as_mut(){ modal.monitor(&browser); }
-            if folder_checks_dirty || browser.loading() { discovery.check_folders(&browser); folder_checks_dirty = false; }
+            if folder_checks_dirty || browser.loading() {
+                let checks = trace.span("ui_schedule_folder_checks");
+                discovery.check_folders(&browser);
+                folder_checks_dirty = false;
+                checks.finish("ok", None);
+            }
             if pending.iter().all(Option::is_none) && relink_task.iter().all(Option::is_none) {
                 discovery.detail(&browser);
             }
@@ -5543,9 +5607,33 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             sync_terminal_view(&browser, &view);
             sync_git_details(&browser, &mut view);
             if let Some(info) = view.git_details.as_mut() { info.tick().await; }
+            let frame_timing = trace.span("ui_draw_frame");
             let size = terminal.size()?;
             view.folder_rows_snapshot = Some(std::rc::Rc::new(browser.folder_rows()));
+            view.session_rows_drawn.set(false);
             terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame, &browser); })?;
+            frame_timing.finish("ok", None);
+            if trace.enabled() {
+                if !first_frame {
+                    trace.mark("ui_first_frame", None);
+                    first_frame = true;
+                }
+                if !first_rows && view.session_rows_drawn.get() {
+                    trace.mark("ui_first_session_frame", None);
+                    first_rows = true;
+                }
+                if !discovery_frame && !browser.loading() {
+                    let incomplete = browser.diagnostics().iter().filter(|source| !source.complete).count();
+                    trace.mark("ui_discovery_complete_frame", Some(incomplete));
+                    discovery_frame = true;
+                }
+                if discovery_frame && git_discovery_wait.is_none() && git_preview_wait.is_none()
+                    && !candidates_dirty && !git_discovery.needs_poll() && !view.history.needs_poll()
+                {
+                    trace.finish();
+                    trace = Default::default();
+                }
+            }
             guard.mouse_capture(view.terminals.borrow().active.is_some() || view.session_preview.borrow().terminals.visible)?;
             idle.deadline = next_age_update(&browser, &view, size.height)
                 .into_iter().chain(view.drawer_reminder.get().deadline).min();

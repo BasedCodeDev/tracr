@@ -120,6 +120,9 @@ with (home / 'requests.jsonl').open('a', buffering=1) as log:
         if 'id' not in request:
             continue
         if method == 'initialize':
+            if settings.get('startup_gates'):
+                while not (home / 'release-initialize').exists():
+                    time.sleep(.01)
             result = {'userAgent': 'fake'}
         elif method == 'thread/list':
             if settings.get('exit'):
@@ -135,10 +138,15 @@ with (home / 'requests.jsonl').open('a', buffering=1) as log:
             assert 'cwd' not in params and 'projectId' not in params and 'sectionId' not in params
             archived = params['archived']
             cursor = params.get('cursor')
+            if settings.get('startup_gates') and not params['useStateDbOnly'] and not archived and not cursor:
+                while not (home / 'release-reconciliation').exists():
+                    time.sleep(.01)
             suffix = 'archive' if archived else ('second' if cursor else 'first')
             item = dict(id=suffix, name='Task '+suffix, preview='', cwd=str(home / 'listed'),
                         createdAt=100, updatedAt=200, source='exec', gitInfo={'branch':'main'})
             result = {'data':[item], 'nextCursor':None if archived or cursor else 'page-2'}
+            if settings.get('startup_gates') and not params['useStateDbOnly'] and not archived and not cursor:
+                result['data'].append(dict(item, id='reconciled-only'))
             if (home / 'created.json').exists() and not archived and not cursor:
                 result['data'].insert(0, dict(item, id='created', name='New session', cwd=json.loads((home / 'created.json').read_text())['cwd'], updatedAt=300))
             if settings.get('guardians'):

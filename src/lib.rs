@@ -5,6 +5,8 @@ pub mod providers;
 
 pub mod browser;
 mod scrollbar;
+#[doc(hidden)]
+pub mod startup_trace;
 pub mod tui;
 
 pub mod resume;
