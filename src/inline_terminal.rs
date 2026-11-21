@@ -248,6 +248,13 @@ impl Manager {
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
+    pub(crate) fn has_worktree_terminal(&self, root: &std::path::Path) -> bool {
+        self.sessions.iter().any(|session| {
+            session.folder.starts_with(root)
+                || std::fs::canonicalize(&session.folder).is_ok_and(|path| path.starts_with(root))
+        })
+    }
+
     pub fn owns(&self, key: &SessionKey) -> bool {
         self.sessions.iter().any(|s| s.key.as_ref() == Some(key))
     }

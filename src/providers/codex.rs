@@ -18,7 +18,7 @@ use tokio::{
     time::timeout,
 };
 
-const SOURCE_KINDS: &[&str] = &[
+pub(crate) const SOURCE_KINDS: &[&str] = &[
     "cli",
     "vscode",
     "exec",
@@ -200,6 +200,28 @@ impl Rpc {
         }
         result
     }
+    /// An exact native not-found response is positive readback after hard deletion.
+    pub(crate) async fn thread_is_absent(&mut self, id: &str) -> Result<bool, ProviderError> {
+        let result = timeout(
+            DEADLINE,
+            self.exchange("thread/read", json!({"threadId":id,"includeTurns":false})),
+        )
+        .await
+        .map_err(|_| ProviderError::Unavailable("Deletion readback timed out".into()))?;
+        match result {
+            Ok(_) => Ok(false),
+            Err(ProviderError::Unavailable(raw))
+                if serde_json::from_str::<Value>(&raw).is_ok_and(|packet| {
+                    packet["code"].as_i64() == Some(-32600)
+                        && packet["message"].as_str() == Some(&format!("thread not loaded: {id}"))
+                }) =>
+            {
+                Ok(true)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) async fn close(&mut self) {
         self.input.take();
         if timeout(Duration::from_secs(2), self.child.wait())

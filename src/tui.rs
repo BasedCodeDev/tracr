@@ -434,6 +434,10 @@ pub struct View {
     pub relink: Option<RelinkModal>,
     pub folder_move: Option<crate::folder_move_ui::Modal>,
     pub worktree_create: Option<crate::worktree_create_ui::Modal>,
+    #[doc(hidden)]
+    pub discard: Option<crate::worktree_discard_ui::Modal>,
+    #[doc(hidden)]
+    pub discard_recovery_available: bool,
     pub recovery_index: usize,
     pub recovery_available: bool,
     pub error_dialog: Option<crate::error_dialog::ErrorDialog>,
@@ -492,6 +496,8 @@ impl Default for View {
             relink: Default::default(),
             folder_move: Default::default(),
             worktree_create: Default::default(),
+            discard: None,
+            discard_recovery_available: false,
             recovery_index: Default::default(),
             recovery_available: Default::default(),
             error_dialog: Default::default(),
@@ -625,6 +631,7 @@ impl View {
             || self.error_dialog.is_some()
             || self.worktree_create.is_some()
             || self.folder_move.is_some()
+            || self.discard.is_some()
             || self.relink.is_some()
             || self.info.is_some()
             || self.commit_info.is_some()
@@ -1413,6 +1420,10 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         dialog.draw(frame);
         return;
     }
+    if let Some(modal) = &view.discard {
+        modal.draw(frame);
+        return;
+    }
     if let Some(modal) = &view.worktree_create {
         modal.draw(frame);
         return;
@@ -2125,6 +2136,8 @@ enum Command {
     OpenTerminals,
     CloseTerminal,
     CreateWorktree,
+    DiscardWorktree,
+    RecoverDiscard,
     GitToggle,
     FolderToggle,
     GitReturn,
@@ -2323,6 +2336,15 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     }
     if view.context() == 0 {
         entries.push((CreateWorktree, "Folders", "w", "Create worktree"));
+        if crate::worktree_discard_ui::selected(browser).is_some()
+            && !view.discard_recovery_available
+            && crate::worktree_discard_ui::unavailable(browser).is_none()
+        {
+            entries.push((DiscardWorktree, "Folders", "d", "Discard worktree…"));
+        }
+    }
+    if view.discard_recovery_available && view.context() != 2 {
+        entries.push((RecoverDiscard, "Folders", "D", "Review unfinished discard"));
     }
     if view.context() == 2 {
         entries
@@ -3711,7 +3733,7 @@ impl InfoModal {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Action {
     CopyErrorReport,
     CopyInformation,
@@ -3719,6 +3741,10 @@ pub enum Action {
     Continue,
     OpenRelink,
     OpenFolderMove,
+    OpenDiscard,
+    RecoverDiscard,
+    ApplyDiscard,
+    CloseDiscard,
     PreviewFolderMove,
     ApplyFolderMove,
     CloseFolderMove,
@@ -3857,6 +3883,9 @@ fn drawer_shortcut(key: KeyEvent) -> bool {
 }
 
 pub fn handle_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Action {
+    if let Some(discard) = &mut view.discard {
+        return discard.key(key);
+    }
     if drawer_shortcut(key) {
         if key.kind == KeyEventKind::Press {
             let mut reminder = view.drawer_reminder.get();
@@ -4337,6 +4366,8 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         KeyCode::Char('b') if view.focus == 0 => Command::FolderToggle,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
         KeyCode::Char('w') if view.focus == 0 => Command::CreateWorktree,
+        KeyCode::Char('d') if view.focus == 0 => Command::DiscardWorktree,
+        KeyCode::Char('D') if view.discard_recovery_available => Command::RecoverDiscard,
         KeyCode::Char('u') => Command::Recover,
         KeyCode::Char('a') => Command::Archives,
         KeyCode::Char('l') if view.focus == 0 => Command::FolderRight,
@@ -4470,6 +4501,12 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 Err(message) => view.message = Some(message),
             }
         }
+        Command::DiscardWorktree => {
+            if crate::worktree_discard_ui::selected(browser).is_some() {
+                return Action::OpenDiscard;
+            }
+        }
+        Command::RecoverDiscard => return Action::RecoverDiscard,
         Command::CreateWorktree => {
             if worktree_unavailable(browser, view).is_some() {
                 return Action::Continue;
@@ -4813,6 +4850,19 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             ));
         }
     }
+    if let Some(state) = &relocation_state {
+        match crate::worktree_discard::pending(state) {
+            Ok(Some(journal)) => {
+                view.discard_recovery_available = true;
+                view.message = Some(format!(
+                    "Unfinished discard. Press D to review. {}",
+                    journal.progress()
+                ));
+            }
+            Ok(None) => {}
+            Err(error) => view.message = Some(format!("Cannot inspect discard journal: {error}")),
+        }
+    }
     let mut relocated: Option<crate::relocation::Preview> = None;
     let mut last_folder = browser.initial_folder.clone();
     let mut git_discovery = crate::git_discovery::Controller::default();
@@ -4915,7 +4965,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 || view.hidden_dialogs.info.as_ref().is_some_and(|i| i.dialog.copy_task.is_some());
             let hidden_tick = hidden_busy && now >= modal_deadline;
             if hidden_tick { modal_deadline = now + Duration::from_millis(100); }
-            let activity = view.folder_navigation.ready(now, input_waiting) || hidden_tick || view.commit_info.as_ref().is_some_and(|info| info.ready()) || reload_requested || view.worktree_create.as_ref().is_some_and(|modal| modal.ready()) || resized || (!defer_git && (candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll())) || copy_ready || picker_ready || modal_timer
+            let activity = view.discard.as_ref().is_some_and(|modal| modal.ready()) || view.folder_navigation.ready(now, input_waiting) || hidden_tick || view.commit_info.as_ref().is_some_and(|info| info.ready()) || reload_requested || view.worktree_create.as_ref().is_some_and(|modal| modal.ready()) || resized || (!defer_git && (candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll())) || copy_ready || picker_ready || modal_timer
                 || pending[usize::from(view.dialog_area)].as_ref().is_some_and(|p| p.task.is_finished())
                 || relink_task[usize::from(view.dialog_area)].as_ref().is_some_and(|task| task.is_finished()) || folder_task[usize::from(view.dialog_area)].as_ref().is_some_and(|task| task.is_finished())
                 || !relink_rx[usize::from(view.dialog_area)].is_empty() || !folder_rx[usize::from(view.dialog_area)].is_empty()
@@ -4990,15 +5040,52 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             }
             // Finish the bounded operation and archive restoration before exiting.
             if (signals.terminate.load(std::sync::atomic::Ordering::Relaxed)
-                || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed)) && relink_task.iter().all(Option::is_none) && folder_task.iter().all(Option::is_none) && !view.worktree_create.as_ref().is_some_and(|modal| modal.executing) && !view.hidden_dialogs.worktree_create.as_ref().is_some_and(|modal| modal.executing) {
+                || signals.interrupt.load(std::sync::atomic::Ordering::Relaxed)) && relink_task.iter().all(Option::is_none) && folder_task.iter().all(Option::is_none) && !view.discard.as_ref().is_some_and(|modal| modal.executing()) && !view.worktree_create.as_ref().is_some_and(|modal| modal.executing) && !view.hidden_dialogs.worktree_create.as_ref().is_some_and(|modal| modal.executing) {
                 break;
             }
             // Reload is distinct from termination: never interrupt interactive Codex.
             // Background terminals and mutations must also settle first.
             if reload_requested && view.terminals.borrow().is_empty() && relink_task.iter().all(Option::is_none) && folder_task.iter().all(Option::is_none)
+                && !view.discard.as_ref().is_some_and(|modal| modal.executing())
                 && !view.worktree_create.as_ref().is_some_and(|modal| modal.executing) && !view.hidden_dialogs.worktree_create.as_ref().is_some_and(|modal| modal.executing) {
                 reloading = true;
                 break;
+            }
+            if let Some(modal) = view.discard.as_mut().filter(|modal| modal.ready()) {
+                while input_reader.poll(Duration::ZERO)? { let _ = input_reader.read()?; }
+                if let Some(result) = modal.tick().await {
+                    view.discard = None;
+                    let pending = relocation_state.as_deref().map(crate::worktree_discard::pending).transpose();
+                    let progress = match pending {
+                        Ok(Some(Some(journal))) => {
+                            view.discard_recovery_available = true;
+                            format!("{} Press D to review remaining cleanup.", journal.progress())
+                        }
+                        Ok(_) => {
+                            view.discard_recovery_available = false;
+                            String::new()
+                        }
+                        Err(error) => format!("Cannot read discard progress: {error}"),
+                    };
+                    match result {
+                        Ok(main) => {
+                            if browser.focus_root.is_some() { browser.focus_root = Some(main.clone()); }
+                            browser.open_folder(main);
+                            view.focus = 0;
+                            view.git_focus = false;
+                            view.message = Some("Worktree, local branch, and conversations discarded.".into());
+                        }
+                        Err(error) => {
+                            view.error_dialog = Some(crate::error_dialog::ErrorDialog::new(
+                                "Discard stopped", "Review the reported state before retrying.", format!("{error}\n{progress}"),
+                            ));
+                        }
+                    }
+                    browser.invalidate_git();
+                    view.history.request_refresh();
+                    candidates_dirty = true;
+                    discovery.refresh(&mut browser);
+                }
             }
             let visible_area = view.drawer_open;
             // Hidden forms continue polling; their results stay with their owner.
@@ -5165,7 +5252,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 .into_iter().chain(view.drawer_reminder.get().deadline).min();
             }
             let busy = view.session_preview.borrow().active() || terminal_copy.is_some() || !view.terminals.borrow().is_empty() || browser.loading() || git_discovery.pending() || view.history.loading() || pending.iter().any(Option::is_some) || relink_task.iter().any(Option::is_some) || folder_task.iter().any(Option::is_some)
-                || view.relink.is_some() || view.folder_move.is_some() || view.worktree_create.is_some()
+                || view.relink.is_some() || view.folder_move.is_some() || view.worktree_create.is_some() || view.discard.is_some()
                 || view.error_dialog.as_ref().is_some_and(|dialog| dialog.copy_task.is_some())
                 || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.is_some());
             let mut wait = Duration::from_millis(if busy { 40 } else { 250 });
@@ -5222,6 +5309,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     continue;
                 }
                 let mutation_running = relink_task.iter().any(Option::is_some) || folder_task.iter().any(Option::is_some)
+                    || view.discard.as_ref().is_some_and(|m| m.executing())
                     || view.worktree_create.as_ref().is_some_and(|m| m.executing)
                     || view.hidden_dialogs.worktree_create.as_ref().is_some_and(|m| m.executing);
                 let previous_terminal = view.terminals.borrow().active;
@@ -5253,6 +5341,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     Err(error) => { view.message = Some(error.to_string()); continue; }
                 }
                 if let Event::Paste(text)=&incoming {
+                    if let Some(modal)=view.discard.as_mut(){modal.paste(text);}
                     if let Some(modal)=view.worktree_create.as_mut(){modal.paste(text);}
                     if let Some(modal)=view.folder_move.as_mut(){modal.paste(text);}
                     if let Some(modal)=view.relink.as_mut(){if !modal.busy && modal.preview.is_none(){if let Some(picker)=modal.picker.as_mut(){picker.paste(&mut modal.input,text);}}}
@@ -5274,6 +5363,34 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                         }
                     }
                     match action {
+                        Action::OpenDiscard | Action::RecoverDiscard => {
+                            if let Some(reason) = crate::worktree_discard_ui::unavailable(&browser) {
+                                view.message = Some(reason.into());
+                                continue;
+                            }
+                            let Some(state) = relocation_state.clone() else { continue };
+                            let journal = match crate::worktree_discard::pending(&state) {
+                                Ok(journal) => journal,
+                                Err(error) => { view.message = Some(error); continue; }
+                            };
+                            view.discard_recovery_available = journal.is_some();
+                            let selected = crate::worktree_discard_ui::selected(&browser);
+                            if matches!(action, Action::OpenDiscard) && journal.is_some() {
+                                view.message = Some("Press D to review the unfinished discard first.".into());
+                                continue;
+                            }
+                            let Some(root) = journal.as_ref().map(|journal| journal.root()).or(selected) else { continue };
+                            if view.terminals.borrow().has_worktree_terminal(root) {
+                                view.message = Some("Close Tracr terminals in this worktree before discarding.".into());
+                                continue;
+                            }
+                            let sources = crate::folder_move_ui::sources(&browser);
+                            view.discard = Some(crate::worktree_discard_ui::Modal::new(state, sources, selected.map(ToOwned::to_owned), journal));
+                        }
+                        Action::CloseDiscard => view.discard = None,
+                        Action::ApplyDiscard => {
+                            if let Some(modal) = view.discard.as_mut() { modal.start(); }
+                        }
                         Action::OpenFolderMove=>{
                             if let Some(reason)=crate::folder_move_ui::unavailable(&browser){view.message=Some(reason);continue;}
                             if let FolderFilter::Path(path)=&browser.folder {
