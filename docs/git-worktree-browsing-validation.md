@@ -79,3 +79,100 @@ The history borders now show bold cyan arrows at the right edge: `↑` for off-s
 Validation passed: all 15 history-controller/rendering tests, all-target Clippy with warnings denied, formatting and whitespace checks, and the native Git lifecycle, watcher and four-scenario idle PTY helpers. Added assertions cover boundary transitions, empty/initial loading, unknown exhaustion, retained errors, connector-only tails, middle/older-HEAD views, long Unicode titles, focused/unfocused styling, widths 140/100/40, resizing and clearing markers. Cached snapshot construction and selected commit remain unchanged by rendering indicators. Idle views issued no commands or redraw output.
 
 Logs: `/tmp/tracr-arrows-tests.log`, `/tmp/tracr-arrows-clippy.log`, `/tmp/tracr-arrows-lifecycle.log`, `/tmp/tracr-arrows-watch.log`, `/tmp/tracr-arrows-idle.log`.
+
+## Commits above the viewport (2026-11-21)
+
+The initial counter implementation showed the number of real commits strictly above the visible
+viewport, immediately left of the upward arrow. At the beginning it shows `0`
+without an arrow. Session annotations, routing rows and stash entries do not
+contribute. The count refers to the start of displayed history, not checkout HEAD
+or the number of navigation keystrokes. Empty history has no counter.
+
+Composed commit positions are cached with the presentation and counted with a
+binary search after viewport clamping. Rendering adds no Git reads or history
+expansion. The title reserves the counter's width and preserves border corners.
+
+A one-column visual scrollbar was prototyped using only cached row counts.
+Alternating release-mode runs of `cached_scroll_render_cost` against a 30,000-row
+history measured median times of 155.99 ms per 1,000 frames for the original arrows
+and 158.40 ms for the counter plus scrollbar (32 warmed samples each). These are
+local TestBackend measurements, not terminal latency guarantees. Because the
+combined prototype was consistently slower, the initial implementation retained
+the arrows, as requested at that stage. The manual ignored test remains available for future
+comparisons; timing is not a CI threshold.
+
+Validation: 189 library tests passed (three manual tests ignored), all-target
+Clippy with warnings denied, formatting and whitespace checks passed. The four
+terminal idle scenarios issued no Git commands or redraw output. Test scratch
+directories were confined to `.tmp/`, with `GIT_CEILING_DIRECTORIES` preventing
+negative-discovery fixtures from inheriting this checkout and the stale inherited
+`TRACR_DEV_CONTROL` removed from terminal-test environments.
+
+The supplemental `git_sessions_check.py` terminal script fails while searching
+for “Select worktree folder”; the same failure was reproduced on the unmodified
+base binary. This pre-existing fixture/action mismatch is outside the counter
+change. Library session-navigation tests pass.
+
+## Shared thin scrollbars (2026-11-21)
+
+The expanded scope adds the application's shared visual scrollbar to Git,
+retaining its border arrows and exact commit counter on the top border. The
+track and thumb use the same quarter-cell `🮇` glyph, colored `#383838` and
+`#707070` respectively, without bold styling.
+Scrollbars appear only when loaded content exceeds the viewport. Git proportions
+refer to the loaded prefix; computing them never queries total Git history.
+
+The same helper now covers folders, sessions, search results, worktree/harness/path
+pickers, Actions, the open-terminal switcher, information and commit dialogs,
+relocation previews and recovery dialogs. Tracks occupy the column immediately inside the right border alongside
+scrolling bodies where available, preserving the frame and reserving text space. Independent unbordered bodies reserve a column
+on overflow and rewrap at the reduced width. Fixed summaries and embedded terminal
+screens do not acquire scrollbars. Keyboard navigation and terminal geometry are
+unchanged. Multiline lists use rendered-line offsets after the widget updates its
+viewport, rather than the selected item index.
+
+The revised performance requirement permits imperceptible rendering overhead.
+Alternating warmed release runs with the counter present in **both** versions
+measured 156.04 ms per 1,000 frames for counter-plus-arrows and 157.91 ms for
+counter-plus-scrollbar (32 samples each, 30,000 cached Git rows). The 95th-percentile
+batch times were 159.91 and 159.83 ms respectively. Median incremental cost was
+about 1.9 microseconds per frame. The separate `large_widget_render_cost` probe,
+including construction of 10,000 multiline list entries and a long wrapped Unicode
+paragraph, rendered both regions together in roughly 6.6–6.8 ms per frame. These
+are local TestBackend observations, not hardware-independent thresholds.
+
+Validation passed: 194 library tests, all-target Clippy with warnings denied,
+formatting and whitespace checks; terminal idle, scrollback/input isolation,
+information-dialog and worktree-creation scripts. Tests cover scrollbar endpoints,
+tiny tracks, shrinking content, Unicode wrapping, multiline offsets, folder/session
+selection, Git counter preservation and resizing. Idle scenarios emitted no Git
+commands or redraw output. The supplemental Git-session script still has the
+previously reproduced baseline failure searching for “Select worktree folder”.
+Logs and benchmark samples are in this worktree's ignored `.tmp/uniform-*` files.
+
+### Scrollbar visibility correction
+
+The thumb now uses a solid half-cell `▐`, so it differs visibly from the thin `│`
+track even when foreground colors are difficult to distinguish. Its terminal-column
+allocation is unchanged. Git also retains its upper/lower border arrows alongside
+the scrollbar, with the commit counter immediately left of the upper arrow.
+The lower arrow still indicates unconfirmed/unloaded history at the loaded edge.
+
+The scrollbar is positioned one column left of the outer right border. Bordered
+lists reserve or reuse right padding so long text cannot extend beneath the track;
+Git and folder horizontal clipping use the reduced content width. Unbordered
+scrolling bodies retain their existing reserved scrollbar column. All 194 library
+tests, Clippy, formatting and the build passed after this placement correction.
+
+### Fine graphite styling
+
+Design A uses three seamlessly aligned quarter-cell rectangles (`🮇`): graphite
+`#383838` above and below, and a slightly brighter `#707070` thumb. The shared
+renderer uses explicit RGB grays and removes bold styling. Placement, proportions,
+Git arrows/counter and reserved content space are unchanged. Rendering tests assert
+the exact glyph, both gray colors and absence of bold, including viewport endpoints.
+
+The graphite segments use U+1FB87 RIGHT ONE QUARTER BLOCK (`🮇`). This moves the
+unused portion of the reserved cell to the text side without changing text width,
+scrollbar proportions or the surrounding border. The glyph's single-column width
+is asserted by the rendering test.

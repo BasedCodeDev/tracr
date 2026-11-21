@@ -143,12 +143,12 @@ impl Dialog {
                 .saturating_sub(if inner.width < 60 { 8 } else { 4 }),
         );
         let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
-        let max = paragraph
-            .line_count(body.width)
-            .saturating_sub(usize::from(body.height))
-            .min(u16::MAX as usize) as u16;
-        self.max_scroll.set(max);
-        frame.render_widget(paragraph.scroll((self.scroll.min(max), 0)), body);
+        self.max_scroll.set(crate::scrollbar::paragraph(
+            frame,
+            body,
+            paragraph,
+            self.scroll,
+        ));
         let mut buttons = if matches!(self.reason, Reason::StillLoaded) {
             vec!["Cancel", "Retry"]
         } else {

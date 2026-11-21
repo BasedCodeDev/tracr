@@ -9,6 +9,17 @@ sizes describe the outer frame; padding shrinks on small terminals. `regions`
 reserves a scrollable body, two-line status area, action row, and keyboard hints.
 Use a local layout inside the body for summaries, fields, trees, or tables.
 
+Scrollable regions use `crate::scrollbar`: a right-aligned quarter-cell `🮇` track in graphite (`#383838`)
+with an identically aligned `🮇` thumb in brighter gray (`#707070`), without bold styling, shown only on overflow. `modal::body` handles this for
+paragraphs; use `modal::static_body` for fixed summaries without scroll controls.
+For lists, read the final widget offset after rendering and convert item offsets
+to rendered lines (including multiline entries and section headers). Place the
+track immediately inside the right border alongside the scrolling body, excluding
+fixed controls. Reserve that column in list padding and content-width calculations
+(or reuse existing padding); keep the outer frame intact.
+Unbordered bodies reserve a column only on overflow and must rewrap at that width.
+Do not add timers, I/O or total-history queries to calculate scrollbar metrics.
+
 ```rust,ignore
 let inner = modal::shell(frame, "Example", 80, 24);
 let regions = modal::regions(inner);

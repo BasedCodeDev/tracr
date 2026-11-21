@@ -122,22 +122,40 @@ impl Information {
         let parts = Layout::vertical([Constraint::Length(title_height + 1), Constraint::Min(1)])
             .split(inner);
         frame.render_widget(title, parts[0]);
-        let mut lines = self.lines(parts[1].width as usize, inner.width + 2 < 50);
-        // Extremely long titles remain available in full in the scrolling content.
-        if wrap(&self.title, inner.width as usize).len() > 3 {
-            let mut full = wrap(&self.title, inner.width as usize)
-                .into_iter()
-                .map(Line::from)
-                .collect::<Vec<_>>();
-            full.push(Line::default());
-            full.append(&mut lines);
-            lines = full;
+        let build_lines = |width: usize| {
+            let mut lines = self.lines(width, inner.width + 2 < 50);
+            // Extremely long titles remain available in full in the scrolling content.
+            if wrap(&self.title, width).len() > 3 {
+                let mut full = wrap(&self.title, width)
+                    .into_iter()
+                    .map(Line::from)
+                    .collect::<Vec<_>>();
+                full.push(Line::default());
+                full.append(&mut lines);
+                lines = full;
+            }
+            lines
+        };
+        let mut lines = build_lines(usize::from(parts[1].width));
+        let body = crate::scrollbar::content_area(parts[1], lines.len());
+        if body.width < parts[1].width {
+            lines = build_lines(usize::from(body.width));
         }
+        let total = lines.len();
         let max = lines
             .len()
             .saturating_sub(parts[1].height as usize)
             .min(u16::MAX as usize) as u16;
-        frame.render_widget(Paragraph::new(lines).scroll((scroll.min(max), 0)), parts[1]);
+        frame.render_widget(Paragraph::new(lines).scroll((scroll.min(max), 0)), body);
+        if body.width < parts[1].width {
+            crate::scrollbar::draw(
+                frame,
+                crate::scrollbar::border_track(parts[1], body),
+                total,
+                usize::from(body.height),
+                usize::from(scroll.min(max)),
+            );
+        }
         max
     }
 }

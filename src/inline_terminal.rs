@@ -1044,7 +1044,12 @@ impl Manager {
             .borders(Borders::ALL)
             .border_type(BorderType::Thick)
             .border_style(Style::default().fg(Color::Cyan))
-            .padding(Padding::new(padding_x, padding_x, padding_y, padding_y))
+            .padding(Padding::new(
+                padding_x,
+                padding_x.max(1),
+                padding_y,
+                padding_y,
+            ))
             .title(match self.confirmation {
                 Some(Confirmation::Quit) => {
                     format!(" Close terminals and quit ({}) ", sessions.len())
@@ -1128,11 +1133,15 @@ impl Manager {
                 .column_spacing(2)
                 .highlight_symbol("> ")
                 .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
-            frame.render_stateful_widget(
-                table,
-                rows_area,
-                &mut TableState::default()
-                    .with_selected(self.confirmation.is_none().then_some(self.selected)),
+            let mut state = TableState::default()
+                .with_selected(self.confirmation.is_none().then_some(self.selected));
+            frame.render_stateful_widget(table, rows_area, &mut state);
+            crate::scrollbar::draw(
+                frame,
+                crate::scrollbar::inside_border_track(area, rows_area),
+                sessions.len(),
+                usize::from(rows_area.height),
+                state.offset(),
             );
         }
         if inner.height > 0 {
@@ -2166,12 +2175,11 @@ time.sleep(60)
                 assert!(highlighted.iter().all(|cell| cell.fg == Color::Reset));
                 assert!(highlighted.iter().any(|cell| cell.symbol() == ">"));
                 assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
-                assert!(
-                    buffer.content.iter().all(|cell| matches!(
-                        cell.fg,
-                        Color::Reset | Color::Cyan | Color::DarkGray
-                    ))
-                );
+                assert!(buffer.content.iter().all(|cell| if cell.symbol() == "🮇" {
+                    matches!(cell.fg, Color::Rgb(56, 56, 56) | Color::Rgb(112, 112, 112))
+                } else {
+                    matches!(cell.fg, Color::Reset | Color::Cyan | Color::DarkGray)
+                }));
                 assert!(
                     buffer
                         .content

@@ -477,40 +477,56 @@ impl Dialog {
             })
             .collect::<Vec<_>>();
         frame.render_widget(Paragraph::new(Line::from(tabs)), areas[2]);
-        let lines = if let Some(details) = &self.details {
-            details.lines(self.tab, width)
-        } else {
-            let mut lines = vec![];
-            append(
-                &mut lines,
-                self.error
-                    .as_deref()
-                    .unwrap_or("Reading commit metadata and file changes…"),
-                width,
-                Style::default().fg(if self.error.is_some() {
-                    Color::Yellow
-                } else {
-                    Color::Gray
-                }),
-            );
-            if self.error.is_some() {
-                lines.push(Line::default());
+        let build_lines = |width: usize| {
+            if let Some(details) = &self.details {
+                details.lines(self.tab, width)
+            } else {
+                let mut lines = vec![];
                 append(
                     &mut lines,
-                    "Close and press i to try again.",
+                    self.error
+                        .as_deref()
+                        .unwrap_or("Reading commit metadata and file changes…"),
                     width,
-                    Style::default(),
+                    Style::default().fg(if self.error.is_some() {
+                        Color::Yellow
+                    } else {
+                        Color::Gray
+                    }),
                 );
+                if self.error.is_some() {
+                    lines.push(Line::default());
+                    append(
+                        &mut lines,
+                        "Close and press i to try again.",
+                        width,
+                        Style::default(),
+                    );
+                }
+                lines
             }
-            lines
         };
+        let mut lines = build_lines(width);
+        let body = crate::scrollbar::content_area(areas[3], lines.len());
+        if body.width < areas[3].width {
+            lines = build_lines(usize::from(body.width));
+        }
         let total = lines.len();
         let max = total
             .saturating_sub(usize::from(areas[3].height))
             .min(u16::MAX as usize) as u16;
         self.dialog.scroll_limit.set(max);
         let scroll = self.dialog.scroll.min(max);
-        frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), areas[3]);
+        frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), body);
+        if body.width < areas[3].width {
+            crate::scrollbar::draw(
+                frame,
+                crate::scrollbar::border_track(areas[3], body),
+                total,
+                usize::from(body.height),
+                usize::from(scroll),
+            );
+        }
         let status = self.dialog.copy_status.clone().unwrap_or_else(|| {
             if max > 0 {
                 format!(
