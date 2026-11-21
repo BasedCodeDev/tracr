@@ -238,7 +238,8 @@ fn commit_sections(
     }
 
     let mut groups = Vec::new();
-    let mut compact = Vec::new();
+    let mut references = Vec::new();
+    let mut other_refs = Vec::new();
     for label in labels {
         let local = (label.kind == RefKind::Local).then_some(label.name.as_str());
         let color = local
@@ -246,7 +247,11 @@ fn commit_sections(
             .map(|&(_, color)| color);
         let line = history.reference_label(label, color);
         let Some(sessions) = local.and_then(|name| attached.remove(name)) else {
-            compact.push(line);
+            if local.is_some() {
+                references.extend(history.wrap_reference_labels(width, [line]));
+            } else {
+                other_refs.push(line);
+            }
             continue;
         };
         groups.push(CommitSection::Branch {
@@ -254,11 +259,10 @@ fn commit_sections(
             sessions,
         });
     }
+    references.extend(history.wrap_reference_labels(width, other_refs));
     let mut sections = Vec::new();
-    if !compact.is_empty() {
-        sections.push(CommitSection::References(
-            history.wrap_reference_labels(width, compact),
-        ));
+    if !references.is_empty() {
+        sections.push(CommitSection::References(references));
     }
     sections.extend(groups);
     if !unmatched.is_empty() {

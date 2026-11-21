@@ -6148,6 +6148,7 @@ mod cleanup_tests {
             "head".into(),
             [
                 (RefKind::Local, "feature"),
+                (RefKind::Local, "docs"),
                 (RefKind::Local, "release"),
                 (RefKind::Local, "master"),
                 (RefKind::Local, "main"),
@@ -6183,9 +6184,12 @@ mod cleanup_tests {
             );
             lines.iter().position(|line| line.contains(needle)).unwrap()
         };
-        let compact = row("[master] [release] [tag: v1]");
+        let master = row("[master]");
+        assert_eq!(row("[docs]"), master + 1);
+        assert_eq!(row("[release]"), master + 2);
+        assert_eq!(row("[tag: v1]"), master + 3);
         let main = row("[main]");
-        assert_eq!(main, compact + 1);
+        assert_eq!(main, master + 4);
         assert_eq!(row("Main session"), main + 1);
         assert!(lines[main + 1].contains("└─"));
         let feature = row("[feature]");
