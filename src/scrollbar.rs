@@ -47,13 +47,13 @@ pub(crate) fn draw(frame: &mut Frame<'_>, track: Rect, total: usize, visible: us
         Scrollbar::default()
             .begin_symbol(None)
             .end_symbol(None)
-            .track_symbol(Some("▎"))
+            .track_symbol(Some("🮇"))
             .track_style(
                 Style::default()
                     .fg(Color::Rgb(56, 56, 56))
                     .remove_modifier(Modifier::BOLD),
             )
-            .thumb_symbol("▎")
+            .thumb_symbol("🮇")
             .thumb_style(
                 Style::default()
                     .fg(Color::Rgb(112, 112, 112))
@@ -167,6 +167,8 @@ mod tests {
 
     #[test]
     fn thumb_reaches_both_ends_and_disappears_when_content_shrinks() {
+        // U+1FB87 fills the right quarter of one cell, leaving the gap by the text.
+        assert_eq!(unicode_width::UnicodeWidthStr::width("🮇"), 1);
         let mut terminal = Terminal::new(TestBackend::new(8, 8)).unwrap();
         for height in [1, 2, 6] {
             let track = Rect::new(6, 1, 1, height);
@@ -188,7 +190,7 @@ mod tests {
                     assert!(!thumb.is_empty());
                     for y in 1..1 + height {
                         let cell = &buffer[(6, y)];
-                        assert_eq!(cell.symbol(), "▎");
+                        assert_eq!(cell.symbol(), "🮇");
                         assert!(matches!(
                             cell.fg,
                             Color::Rgb(56, 56, 56) | Color::Rgb(112, 112, 112)
@@ -196,7 +198,7 @@ mod tests {
                         assert!(!cell.modifier.contains(Modifier::BOLD));
                     }
                     for y in &thumb {
-                        assert_eq!(buffer[(6, *y)].symbol(), "▎");
+                        assert_eq!(buffer[(6, *y)].symbol(), "🮇");
                     }
                     if top == 0 {
                         assert_eq!(thumb[0], 1);

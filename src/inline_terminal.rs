@@ -2175,7 +2175,7 @@ time.sleep(60)
                 assert!(highlighted.iter().all(|cell| cell.fg == Color::Reset));
                 assert!(highlighted.iter().any(|cell| cell.symbol() == ">"));
                 assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
-                assert!(buffer.content.iter().all(|cell| if cell.symbol() == "▎" {
+                assert!(buffer.content.iter().all(|cell| if cell.symbol() == "🮇" {
                     matches!(cell.fg, Color::Rgb(56, 56, 56) | Color::Rgb(112, 112, 112))
                 } else {
                     matches!(cell.fg, Color::Reset | Color::Cyan | Color::DarkGray)

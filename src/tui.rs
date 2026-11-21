@@ -7589,7 +7589,7 @@ mod cleanup_tests {
                 .collect();
             assert!(!thumb.is_empty());
             for y in 2..11 {
-                assert_eq!(buffer[(78, y)].symbol(), "▎");
+                assert_eq!(buffer[(78, y)].symbol(), "🮇");
             }
             if index == 0 {
                 assert_eq!(thumb.first(), Some(&2));

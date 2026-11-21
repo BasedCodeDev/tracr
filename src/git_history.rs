@@ -2661,9 +2661,9 @@ mod tests {
                     .clone()
                     .filter(|y| {
                         let cell = &buffer[(right - 2, *y)];
-                        assert_eq!(cell.symbol(), "▎");
+                        assert_eq!(cell.symbol(), "🮇");
                         if cell.fg == Color::Rgb(112, 112, 112) {
-                            assert_eq!(cell.symbol(), "▎");
+                            assert_eq!(cell.symbol(), "🮇");
                         }
                         cell.fg == Color::Rgb(112, 112, 112)
                     })
