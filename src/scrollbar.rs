@@ -6,12 +6,23 @@ use ratatui::{
     widgets::{ListItem, Paragraph, Scrollbar, ScrollbarState},
 };
 
-/// A border's right edge, restricted to the independently scrolling body.
+/// The rightmost column of an unbordered region, alongside its scrolling body.
 pub(crate) fn border_track(border: Rect, body: Rect) -> Rect {
     Rect::new(
         border.right().saturating_sub(1),
         body.y,
         u16::from(border.width > 0),
+        body.height,
+    )
+}
+
+/// Keep the outer frame intact. Callers reserve this interior column in their
+/// list padding (or reuse existing padding) so the track cannot cover text.
+pub(crate) fn inside_border_track(border: Rect, body: Rect) -> Rect {
+    Rect::new(
+        border.right().saturating_sub(2),
+        body.y,
+        u16::from(border.width >= 3),
         body.height,
     )
 }

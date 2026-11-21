@@ -14,7 +14,9 @@ with a solid half-cell cyan `▐` thumb, shown only on overflow. `modal::body` h
 paragraphs; use `modal::static_body` for fixed summaries without scroll controls.
 For lists, read the final widget offset after rendering and convert item offsets
 to rendered lines (including multiline entries and section headers). Place the
-track on the right border alongside the scrolling body, excluding fixed controls.
+track immediately inside the right border alongside the scrolling body, excluding
+fixed controls. Reserve that column in list padding and content-width calculations
+(or reuse existing padding); keep the outer frame intact.
 Unbordered bodies reserve a column only on overflow and must rewrap at that width.
 Do not add timers, I/O or total-history queries to calculate scrollbar metrics.
 

@@ -2660,7 +2660,7 @@ mod tests {
                 let thumb: Vec<_> = track
                     .clone()
                     .filter(|y| {
-                        let cell = &buffer[(right - 1, *y)];
+                        let cell = &buffer[(right - 2, *y)];
                         assert!(matches!(cell.symbol(), "│" | "▐"));
                         if cell.fg == Color::Cyan {
                             assert_eq!(cell.symbol(), "▐");
@@ -2668,6 +2668,12 @@ mod tests {
                         cell.fg == Color::Cyan
                     })
                     .collect();
+                for y in track.clone() {
+                    assert_eq!(
+                        buffer[(right - 1, y)].symbol(),
+                        if focused { "┃" } else { "│" }
+                    );
+                }
                 assert!(!thumb.is_empty());
                 if selected == 0 {
                     assert_eq!(thumb.first(), Some(&track.start));

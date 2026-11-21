@@ -1044,7 +1044,12 @@ impl Manager {
             .borders(Borders::ALL)
             .border_type(BorderType::Thick)
             .border_style(Style::default().fg(Color::Cyan))
-            .padding(Padding::new(padding_x, padding_x, padding_y, padding_y))
+            .padding(Padding::new(
+                padding_x,
+                padding_x.max(1),
+                padding_y,
+                padding_y,
+            ))
             .title(match self.confirmation {
                 Some(Confirmation::Quit) => {
                     format!(" Close terminals and quit ({}) ", sessions.len())
@@ -1133,7 +1138,7 @@ impl Manager {
             frame.render_stateful_widget(table, rows_area, &mut state);
             crate::scrollbar::draw(
                 frame,
-                crate::scrollbar::border_track(area, rows_area),
+                crate::scrollbar::inside_border_track(area, rows_area),
                 sessions.len(),
                 usize::from(rows_area.height),
                 state.offset(),

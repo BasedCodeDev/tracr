@@ -123,8 +123,8 @@ refer to the loaded prefix; computing them never queries total Git history.
 
 The same helper now covers folders, sessions, search results, worktree/harness/path
 pickers, Actions, the open-terminal switcher, information and commit dialogs,
-relocation previews and recovery dialogs. Tracks occupy existing borders alongside
-scrolling bodies where available. Independent unbordered bodies reserve a column
+relocation previews and recovery dialogs. Tracks occupy the column immediately inside the right border alongside
+scrolling bodies where available, preserving the frame and reserving text space. Independent unbordered bodies reserve a column
 on overflow and rewrap at the reduced width. Fixed summaries and embedded terminal
 screens do not acquire scrollbars. Keyboard navigation and terminal geometry are
 unchanged. Multiline lists use rendered-line offsets after the widget updates its
@@ -156,3 +156,9 @@ track even when foreground colors are difficult to distinguish. Its terminal-col
 allocation is unchanged. Git also retains its upper/lower border arrows alongside
 the scrollbar, with the commit counter immediately left of the upper arrow.
 The lower arrow still indicates unconfirmed/unloaded history at the loaded edge.
+
+The scrollbar is positioned one column left of the outer right border. Bordered
+lists reserve or reuse right padding so long text cannot extend beneath the track;
+Git and folder horizontal clipping use the reduced content width. Unbordered
+scrolling bodies retain their existing reserved scrollbar column. All 194 library
+tests, Clippy, formatting and the build passed after this placement correction.

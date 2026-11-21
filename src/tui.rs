@@ -1379,10 +1379,18 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         } else if expanded {
             use crate::git_sessions::Row;
             let mut presentation = view.git_sessions.borrow_mut();
-            let width = usize::from(git_area.width.saturating_sub(4));
+            let height = usize::from(git_area.height.saturating_sub(3));
+            let mut width = usize::from(git_area.width.saturating_sub(4));
             presentation.width = Some(width);
             presentation.sync(browser, &view.history);
-            let range = presentation.range(usize::from(git_area.height.saturating_sub(3)));
+            let mut range = presentation.range(height);
+            let scrolling = presentation.rows.len() > range.len();
+            if scrolling && width > 0 {
+                width -= 1;
+                presentation.width = Some(width);
+                presentation.sync(browser, &view.history);
+                range = presentation.range(height);
+            }
             let commits_above = presentation.commits_above(range.start);
             let selected = presentation.cursor().saturating_sub(range.start);
             // Use all loaded rows, so scrolling does not shift the columns.
@@ -1471,12 +1479,15 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 .collect();
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(git_history_block(
-                        git_area,
-                        view.git_focus,
-                        commits_above,
-                        range.start > 0,
-                    ))
+                    .block(
+                        git_history_block(git_area, view.git_focus, commits_above, range.start > 0)
+                            .padding(ratatui::widgets::Padding::new(
+                                0,
+                                u16::from(scrolling),
+                                1,
+                                0,
+                            )),
+                    )
                     .highlight_symbol("> ")
                     .highlight_style(selection_style(view.context() == 2)),
                 git_area,
@@ -1487,7 +1498,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             }
             scrollbar::draw(
                 frame,
-                scrollbar::border_track(git_area, pane_block("", false).inner(git_area)),
+                scrollbar::inside_border_track(git_area, pane_block("", false).inner(git_area)),
                 presentation.rows.len(),
                 range.len(),
                 range.start,
@@ -1562,10 +1573,10 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         let mut state = ListState::default().with_selected(Some(picker.selected));
         frame.render_stateful_widget(
             List::new(items)
-                .block(block(
-                    "Choose worktree — ↑/↓ · Enter selects · Esc cancels",
-                    true,
-                ))
+                .block(
+                    block("Choose worktree — ↑/↓ · Enter selects · Esc cancels", true)
+                        .padding(ratatui::widgets::Padding::right(1)),
+                )
                 .highlight_symbol("> ")
                 .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
             popup,
@@ -1574,7 +1585,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         let body = block("", true).inner(popup);
         scrollbar::draw(
             frame,
-            scrollbar::border_track(popup, body),
+            scrollbar::inside_border_track(popup, body),
             lines.total(),
             usize::from(body.height),
             lines.top(state.offset()),
@@ -1863,7 +1874,7 @@ pub(crate) fn render_picker(
                     if row.main { " (main)" } else { "" },
                     row.branch.as_deref().unwrap_or("Detached HEAD")
                 );
-                let width = usize::from(tree_area.width.saturating_sub(4));
+                let width = usize::from(tree_area.width.saturating_sub(5));
                 let mut lines: Vec<_> = crate::info_content::wrap(&label, width)
                     .into_iter()
                     .map(Line::from)
@@ -1928,7 +1939,7 @@ pub(crate) fn render_picker(
     let lines = scrollbar::ListLines::new(&items);
     frame.render_stateful_widget(
         List::new(items)
-            .block(block(title, picker.focus == 1))
+            .block(block(title, picker.focus == 1).padding(ratatui::widgets::Padding::right(1)))
             .highlight_symbol("> ")
             .highlight_style(selection_style(picker.focus == 1)),
         tree_area,
@@ -1937,7 +1948,7 @@ pub(crate) fn render_picker(
     let body = block("", false).inner(tree_area);
     scrollbar::draw(
         frame,
-        scrollbar::border_track(tree_area, body),
+        scrollbar::inside_border_track(tree_area, body),
         lines.total(),
         usize::from(body.height),
         lines.top(state.offset()),
@@ -2930,7 +2941,11 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     );
     scrollbar::draw(
         frame,
-        scrollbar::border_track(sections[3], body),
+        if sections[3].height >= 4 {
+            scrollbar::inside_border_track(sections[3], body)
+        } else {
+            scrollbar::border_track(sections[3], body)
+        },
         lines.total(),
         usize::from(body.height),
         lines.top(state.offset()),
@@ -3064,8 +3079,9 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             let folders = view.folder_rows(browser);
             let selected = folders.iter().position(|row| row.filter == browser.folder);
             let labels = folder_tree_labels(&folders);
-            // Borders and the fixed selection marker occupy four columns.
-            let width = usize::from(area.width.saturating_sub(4));
+            // Reserve an interior scrollbar column when the folder list overflows.
+            let scrolling = folders.len() > usize::from(pane_block("", false).inner(area).height);
+            let width = usize::from(area.width.saturating_sub(4 + u16::from(scrolling)));
             let offset = selected
                 .map(|index| {
                     unicode_width::UnicodeWidthStr::width(labels[index].as_str())
@@ -3088,7 +3104,9 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             // Folder rows occupy one line each. Keep the selection centered,
             // clamping at the ends so the viewport stays filled.
             let title = folder_title(browser, area.width.saturating_sub(2));
-            let block = pane_block(&title, view.context() == 0);
+            let block = pane_block(&title, view.context() == 0).padding(
+                ratatui::widgets::Padding::new(0, u16::from(scrolling), 1, 0),
+            );
             let visible_rows = usize::from(block.inner(area).height);
             let top = selected
                 .filter(|_| visible_rows > 0)
@@ -3111,7 +3129,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             );
             scrollbar::draw(
                 frame,
-                scrollbar::border_track(area, pane_block("", false).inner(area)),
+                scrollbar::inside_border_track(area, pane_block("", false).inner(area)),
                 folders.len(),
                 visible_rows,
                 state.offset(),
@@ -3133,7 +3151,9 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             }
             let sessions = browser.visible();
             // Preserve eight columns for essential status labels in tiny panes.
-            let right_padding = area.width.saturating_sub(12).min(2);
+            let right_padding = area.width.saturating_sub(12).min(2).max(u16::from(
+                sessions.len() * 3 > usize::from(pane_block("", false).inner(area).height),
+            ));
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -3179,7 +3199,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             );
             scrollbar::draw(
                 frame,
-                scrollbar::border_track(area, pane_block("", false).inner(area)),
+                scrollbar::inside_border_track(area, pane_block("", false).inner(area)),
                 sessions.len() * 3,
                 usize::from(pane_block("", false).inner(area).height),
                 state.offset() * 3,
@@ -7565,11 +7585,11 @@ mod cleanup_tests {
                 .unwrap();
             let buffer = terminal.backend().buffer();
             let thumb: Vec<_> = (2..11)
-                .filter(|y| buffer[(79, *y)].fg == Color::Cyan)
+                .filter(|y| buffer[(78, *y)].fg == Color::Cyan)
                 .collect();
             assert!(!thumb.is_empty());
             for y in 2..11 {
-                assert!(matches!(buffer[(79, y)].symbol(), "│" | "▐"));
+                assert!(matches!(buffer[(78, y)].symbol(), "│" | "▐"));
             }
             if index == 0 {
                 assert_eq!(thumb.first(), Some(&2));
@@ -7630,7 +7650,7 @@ mod cleanup_tests {
             let first: String = (0..160).map(|x| buffer[(x, 2)].symbol()).collect();
             assert!(first.contains(&rows[top].label), "{first}");
             let thumb: Vec<_> = (2..8)
-                .filter(|y| buffer[(159, *y)].fg == Color::Cyan)
+                .filter(|y| buffer[(158, *y)].fg == Color::Cyan)
                 .collect();
             assert!(!thumb.is_empty());
             if selected == 0 {
