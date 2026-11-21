@@ -156,24 +156,23 @@ pub fn pending(state: &Path) -> Result<Vec<Journal>, String> {
     result.sort_by(|a, b| a.preview.key.cmp(&b.preview.key));
     Ok(result)
 }
-pub(crate) async fn version(binary: &Path) -> Result<String, String> {
+/// Best-effort diagnostic metadata, never a compatibility gate.
+pub(crate) async fn version(binary: &Path) -> String {
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         tokio::process::Command::new(binary)
             .arg("--version")
+            .kill_on_drop(true)
             .output(),
     )
-    .await
-    .map_err(err)?
-    .map_err(err)?;
-    let v = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if !output.status.success() || !matches!(v.as_str(), "codex-cli 0.167.2" | "codex-cli 0.169.0")
-    {
-        return Err(format!(
-            "Relinking is not verified for {v}. Supported: 0.167.2, 0.169.0."
-        ));
+    .await;
+    if let Ok(Ok(output)) = output {
+        let v = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if output.status.success() && !v.is_empty() {
+            return v;
+        }
     }
-    Ok(v)
+    "unknown".into()
 }
 pub(crate) async fn listed(rpc: &mut Rpc, id: &str) -> Result<(Value, bool), String> {
     for archived in [false, true] {
@@ -298,7 +297,7 @@ pub async fn preview(
     if classify_folder(Some(&target)) != FolderStatus::Available {
         return Err("Destination is unavailable".into());
     }
-    let version = version(binary).await?;
+    let version = version(binary).await;
     let mut rpc = Rpc::start(binary, &source.home).await.map_err(err)?;
     let result = async {
         let (thread, archived) = listed(&mut rpc, &session.key.native_id).await?;
@@ -438,9 +437,6 @@ async fn execute_inner(
     }
     if p.key.provider.0 != "codex" || p.key.source_id != source.id {
         return Err("Journal source is not configured".into());
-    }
-    if version(binary).await? != p.version {
-        return Err("Codex version changed; review the operation again".into());
     }
     if classify_folder(Some(&p.target)) != FolderStatus::Available {
         return Err("Destination disappeared or became inaccessible".into());

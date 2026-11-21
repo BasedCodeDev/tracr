@@ -91,8 +91,7 @@ async fn validate(
             "Terminal recovery requires an unarchived session from the approved source.".into(),
         );
     }
-    if r::version(binary).await? != p.version
-        || std::fs::canonicalize(&p.target).ok().as_ref() != Some(&p.target)
+    if std::fs::canonicalize(&p.target).ok().as_ref() != Some(&p.target)
         || !p.target.is_dir()
         || !matches!(
             crate::domain::classify_folder(Some(&p.old)),

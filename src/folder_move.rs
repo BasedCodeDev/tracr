@@ -277,7 +277,7 @@ pub async fn preview(
     let mut entries = vec![];
     let mut blockers = vec![];
     for source in &sources {
-        let version = r::version(&source.binary).await?;
+        let version = r::version(&source.binary).await;
         // Live telemetry is advisory; native writer acquisition remains authoritative.
         let live = match crate::providers::codex_live::LiveClient::connect(
             &source.binary,
@@ -538,16 +538,6 @@ async fn execute_inner(
         };
         if identity(path)? != entry.directory {
             return Err(format!("Session directory changed: {}", path.display()));
-        }
-    }
-    for source in sources {
-        let version = r::version(&source.binary).await?;
-        if j.plan
-            .entries
-            .iter()
-            .any(|e| e.session.key.source_id == source.id && e.session.version != version)
-        {
-            return Err("Codex version changed since preview.".into());
         }
     }
     save(state, &j)?;

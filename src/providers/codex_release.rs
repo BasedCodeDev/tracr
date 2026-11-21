@@ -12,7 +12,6 @@ struct ReleaseContext {
     recovery_target: Option<std::path::PathBuf>,
     archived: bool,
     created_at: i64,
-    version: String,
     fingerprint: Value,
     profile: crate::relocation_profile::Profile,
 }
@@ -47,7 +46,6 @@ pub(crate) async fn release_idle(
             recovery_target: None,
             archived,
             created_at: session.created_at,
-            version: r::version(binary).await?,
             fingerprint: r::fingerprint(&thread),
             profile: r::recorded_profile(source, &detail).await?,
         };
@@ -109,7 +107,6 @@ pub async fn release(
                 recovery_target: recovery.then(|| preview.target.clone()),
                 archived: preview.archived,
                 created_at: preview.created_at,
-                version: preview.version.clone(),
                 fingerprint: preview.fingerprint.clone(),
                 profile: preview.profile,
             },
@@ -162,9 +159,6 @@ async fn release_inner(
     let id = &p.key.native_id;
     if !loaded(&mut client, id).await? {
         return Ok(ReleaseOutcome::AlreadyUnloaded);
-    }
-    if r::version(binary).await? != p.version {
-        return Err("Codex version changed".into());
     }
     let live = client
         .call("thread/read", json!({"threadId":id,"includeTurns":false}))

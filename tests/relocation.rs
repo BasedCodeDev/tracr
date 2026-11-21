@@ -1,3 +1,6 @@
+#[path = "support/codex_version.rs"]
+mod codex_version;
+
 use std::path::Path;
 use tracr::{
     config::SourceConfig,
@@ -601,5 +604,54 @@ async fn original_reappearing_is_allowed_but_changed_session_is_rejected() {
                 "{outcome:?}"
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn versions_are_diagnostic_and_api_failures_remain_recoverable() {
+    for version in [
+        "codex-cli 0.171.0",
+        "codex-cli 99.0.0",
+        "fail",
+        "",
+        "timeout",
+    ] {
+        let (root, delegate, source, session) = fake_profile_fixture(Some(":workspace")).await;
+        let binary = codex_version::wrapper(root.path(), &delegate, version);
+        let p = relocation::preview(&binary, &source, &session, root.path().join("new"))
+            .await
+            .unwrap();
+        assert_eq!(
+            p.version,
+            if ["fail", "", "timeout"].contains(&version) {
+                "unknown"
+            } else {
+                version
+            }
+        );
+        codex_version::set(&binary, "codex-cli 100.0.0");
+        let native = source.home.join("native.json");
+        let mut data: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&native).unwrap()).unwrap();
+        data["reject_update"] = true.into();
+        std::fs::write(&native, data.to_string()).unwrap();
+        let state = root.path().join("state");
+        let failed = relocation::execute(&binary, &source, &state, p.clone(), false).await;
+        match failed {
+            relocation::Outcome::Unresolved(failure) => {
+                assert!(failure.detail.contains("injected update failure"))
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(relocation::pending(&state).unwrap().len(), 1);
+        data["reject_update"] = false.into();
+        std::fs::write(&native, data.to_string()).unwrap();
+        codex_version::set(&binary, "fail");
+        let outcome = relocation::execute(&binary, &source, &state, p, true).await;
+        assert!(
+            matches!(outcome, relocation::Outcome::Verified(_)),
+            "{outcome:?}"
+        );
+        assert!(relocation::pending(&state).unwrap().is_empty());
     }
 }

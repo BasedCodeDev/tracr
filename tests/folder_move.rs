@@ -1,3 +1,6 @@
+#[path = "support/codex_version.rs"]
+mod codex_version;
+
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -43,16 +46,30 @@ async fn moves_descendants_across_sources_preserves_files_archives_and_recovers(
     fs::create_dir_all(old.join("sub")).unwrap();
     fs::write(old.join(".hidden"), "content").unwrap();
     std::os::unix::fs::symlink("/external", old.join("link")).unwrap();
-    let sources = vec![
+    let mut sources = vec![
         source(root.path(), 0, &old, false),
         source(root.path(), 1, &old.join("sub"), true),
     ];
+    for (i, source) in sources.iter_mut().enumerate() {
+        source.binary = codex_version::wrapper(
+            &source.home,
+            &source.binary,
+            if i == 0 {
+                "codex-cli 0.171.0"
+            } else {
+                "codex-cli 99.0.0"
+            },
+        );
+    }
     let target = root.path().join("new");
     let state = root.path().join("state");
     let plan = folder_move::preview(sources.clone(), old.clone(), target.clone(), &state)
         .await
         .unwrap();
     assert_eq!(plan.entries.len(), 2);
+    for source in &sources {
+        codex_version::set(&source.binary, "codex-cli 100.0.0");
+    }
     let result = execute(plan, &state, false).await;
     assert!(matches!(result, Outcome::Complete(_)), "{result:?}");
     assert!(!old.exists());
@@ -74,6 +91,9 @@ async fn moves_descendants_across_sources_preserves_files_archives_and_recovers(
     let mut j: folder_move::Journal = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     j.phase = "verifying".into();
     fs::write(&path, serde_json::to_vec(&j).unwrap()).unwrap();
+    for source in &sources {
+        codex_version::set(&source.binary, "fail");
+    }
     let result = execute(j.plan, &state, true).await;
     assert!(matches!(result, Outcome::Complete(_)), "{result:?}");
     assert!(folder_move::pending(&state).unwrap().is_none());

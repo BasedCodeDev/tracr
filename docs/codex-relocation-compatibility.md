@@ -2,8 +2,10 @@
 
 ## Supported behavior
 
-Production relinking supports Codex 0.167.2 and 0.169.0 with legacy and paginated
-history. It moves a session's directory association; it does not rewrite history,
+Production relinking uses native API validation with legacy and paginated
+history. Codex version numbers are diagnostic only, including across preview,
+execution and recovery. Failed version queries are recorded as `unknown`.
+Relinking moves a session's directory association; it does not rewrite history,
 move project files, update associated project roots, or maintain a tracr-only path
 map. Original directories may exist or be missing. Destinations must exist and be
 accessible; inaccessible/unknown source paths and equivalent destinations fail.
@@ -15,7 +17,9 @@ built-in `:workspace` or `:read-only`, with exactly one runtime root matching cw
 Workspace configurations must have canonical sandbox flags, no extra writable
 roots and no network access; read-only must remain read-only with network disabled.
 Custom/full-access profiles, unknown policy forms and multi-root workspaces remain
-unsupported. New Codex versions require new compatibility evidence.
+unsupported. Native acceptance tests provide regression evidence without gating
+new Codex releases. API failures and state mismatches use the existing rejection
+and recovery flow.
 
 ## Live CLI relocation (0.170.0)
 
@@ -136,8 +140,8 @@ python3 scripts/probe_codex_relocation.py --codex /absolute/path/to/codex \
 
 Use `--help` for focused scenarios. The original relocation research probe includes
 negative controls/default-listing strategies; its failure is not proof that the
-production database-listing sequence fails. A successful research process is not
-production compatibility approval. Retention is documented in
+production database-listing sequence fails. A successful research process does not
+replace production runtime validation. Retention is documented in
 [validation](validation.md#temporary-files-and-evidence).
 
 Rust integration tests cover relocation, folder moves and release. Opt-in native
