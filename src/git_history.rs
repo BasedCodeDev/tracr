@@ -1651,6 +1651,7 @@ mod tests {
             ..View::default()
         };
         let mut browser = crate::browser::Browser::new(vec![]);
+        crate::tui::select_git_fixture(&mut browser, "/repo");
         tick(&mut view.history).await;
         let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
         let text = |terminal: &Terminal<TestBackend>| -> String {
@@ -2361,7 +2362,8 @@ mod tests {
             history: History::with_backend(Arc::new(Controlled(tx))),
             ..View::default()
         };
-        let browser = crate::browser::Browser::new(vec![]);
+        let mut browser = crate::browser::Browser::new(vec![]);
+        crate::tui::select_git_fixture(&mut browser, "/repo");
         tick(&mut view.history).await;
         rx.recv().await.unwrap().1.send(Ok(rows(80))).unwrap();
         finish(&mut view.history).await;
