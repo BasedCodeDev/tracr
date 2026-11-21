@@ -31,6 +31,10 @@ class AcceptanceTests(unittest.TestCase):
         self.assertFalse(live.history_visible(expected[0], expected))
         self.assertTrue(live.history_visible('Remember the project. The project is here.', expected))
         self.assertFalse(live.history_visible('anything', []))
+        self.assertTrue(live.history_visible('Project /scratch/_name_/file.txt.',
+                                           ['Project `/scratch/_name_/file.txt`.']))
+        self.assertFalse(live.history_visible('Project /scratch/name/file.txt.',
+                                            ['Project `/scratch/_name_/file.txt`.']))
 
     def test_cleanup_waits_for_async_shutdown_but_still_rejects_survivors(self):
         import types
@@ -168,6 +172,7 @@ class SimulatedFlowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)/'case'
             home.mkdir()
+            (home/'codex').mkdir()
             executable = Path(temp)/'codex'
             executable.write_bytes(b'fake executable fingerprint')
             cwd = str(home/'old')

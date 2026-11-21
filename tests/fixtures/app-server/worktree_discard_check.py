@@ -334,9 +334,12 @@ def check_fake(root, binary):
                 incident['chats'][side[0]].update(change)
             store.write_text(json.dumps(incident))
             t.send(b'\x1b[3~')
-            t.expect(expected)
+            # Error paths wrap at different points across checkout locations.
+            def dialog_text():
+                return ' '.join(t.text().replace('│', ' ').split())
+            t.wait(lambda: expected in dialog_text())
             t.send(b'\x1b')
-            t.wait(lambda: expected not in t.text())
+            t.wait(lambda: expected not in dialog_text())
             store.write_text(json.dumps(state))
 
         # A standalone view can report idle without a verified shared runtime.
@@ -440,9 +443,9 @@ def check_fake(root, binary):
 
         def expect_blocked(message):
             t.send(b'\x1b[3~')
-            t.expect(message)
+            t.wait(lambda: message in dialog_text())
             t.send(b'\x1b')
-            t.wait(lambda: message not in t.text())
+            t.wait(lambda: message not in dialog_text())
             assert not json.loads(store.read_text())['deleted']
 
         linked = root / 'nested-linked'
@@ -498,9 +501,11 @@ def check_fake(root, binary):
         t.resize(9, 30)
         t.expect('Enlarge terminal')
         t.send(b'\x1b')
+        t.wait(lambda: 'Enlarge terminal' not in t.text())
         assert worktree.exists() and not json.loads(store.read_text())['deleted']
         assert (bare / 'HEAD').is_file() and (nested / '.git').is_dir()
         t.resize(40, 120)
+        t.expect_focus('Folders')
 
         t.send(b'\x1b[3~')
         t.expect('Type the branch name')

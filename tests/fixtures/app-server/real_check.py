@@ -45,7 +45,7 @@ def screen_since(terminal, offset):
     return screen.text()
 
 def history_visible(text, expected_messages):
-    normalize = lambda value: ' '.join(value.split())
+    normalize = lambda value: ' '.join(value.replace('`', '').split())
     return bool(expected_messages) and all(normalize(message) in normalize(text) for message in expected_messages)
 
 
@@ -177,6 +177,11 @@ def run_case(binary, codex, home, mode):
         # Use only system tools; never inherit caller credentials or config.
         env['PATH'] = '/usr/bin:/bin'
         tid, cwd = fixture['baseline']['id'], str(home/'old')
+        # Confine discovery and trust to this disposable fixture, including when
+        # scratch lives inside the developer's Git checkout.
+        subprocess.run(['git', 'init', '-q', cwd], env=env, check=True)
+        with (home/'codex/config.toml').open('a') as config:
+            config.write('\n[projects.' + json.dumps(cwd) + ']\ntrust_level = "trusted"\n')
         result.update(session_id=tid, executable_sha256=hashlib.sha256(Path(codex).read_bytes()).hexdigest())
         result['version'] = subprocess.check_output([codex, '--version'], env=env, cwd=home, text=True, timeout=10).strip()
         passed(phase)

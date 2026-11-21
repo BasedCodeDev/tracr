@@ -120,7 +120,9 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         t.resize(80, 119)
         t.send(b'\x1b`')
         t.expect('Second creation commit')
-        t.expect_focus('Folders');t.expect_action('Create worktree');open_worktree(t, expected='requires Git 2.48 or newer')
+        # The menu snapshots availability while Git discovery is still updating.
+        # This case checks version gating; the retrying shortcut waits for ownership.
+        t.expect_focus('Folders');open_worktree(t, expected='requires Git 2.48 or newer')
         t.send(b'\x1b')
         t.wait(lambda: 'Create worktree' not in t.text())
         t.finish()

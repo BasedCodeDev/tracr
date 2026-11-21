@@ -42,7 +42,8 @@ def main():
     print('Scratch:',root,flush=True)
     for mode in args.mode or ('legacy','paginated'):
         for scenario in args.scenario or SCENARIOS:
-            home=root/(mode+'-'+scenario)
+            # Leave room for Codex's Unix socket suffix under checkout-local scratch.
+            home=root/(mode[0]+str(SCENARIOS.index(scenario)))
             owner=None
             daemon=None
             daemon_log=None

@@ -240,6 +240,11 @@ def _populate_fixture(binary, root, mode):
         template = json.loads((Path(__file__).resolve().parents[1] /
                               'tests/fixtures/codex-relocation/messages.json').read_text())
         items = json.loads(json.dumps(template).replace('OLD_PATH', str(old)))
+        # Render fixture paths literally: random scratch names may contain
+        # underscores that Codex otherwise interprets as Markdown emphasis.
+        for item in items:
+            text = item['content'][0]['text']
+            item['content'][0]['text'] = text.replace(str(old) + '/file.txt', '`' + str(old) + '/file.txt`')
         s.call('thread/inject_items', {'threadId': tid, 'items': items})
         s.close(); s = None
         # Fixture-only synthesis: injection has no real turn, so give persisted
