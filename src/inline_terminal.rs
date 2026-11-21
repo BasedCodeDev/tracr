@@ -196,6 +196,7 @@ pub struct Manager {
     pub active: Option<u64>,
     pub picker: bool,
     selected: usize,
+    picker_page_size: std::cell::Cell<usize>,
     confirmation: Option<Confirmation>,
     pub area: Rect,
     pub visible: bool,
@@ -783,8 +784,14 @@ impl Manager {
                 }
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('g') => self.picker = false,
-                    KeyCode::PageUp => self.selected = 0,
-                    KeyCode::PageDown => self.selected = self.sessions.len().saturating_sub(1),
+                    KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                        self.selected = crate::tui::list_index(
+                            key.code,
+                            self.selected,
+                            self.sessions.len(),
+                            self.picker_page_size.get(),
+                        );
+                    }
                     KeyCode::Up | KeyCode::Char('k') => {
                         self.selected = self.selected.saturating_sub(1)
                     }
@@ -1072,6 +1079,7 @@ impl Manager {
             inner.width,
             inner.height.saturating_sub(1 + warning_height),
         );
+        self.picker_page_size.set(usize::from(rows_area.height));
         if sessions.is_empty() {
             frame.render_widget(
                 Paragraph::new("No open terminals").style(Style::default().fg(Color::DarkGray)),

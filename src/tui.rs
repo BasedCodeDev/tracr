@@ -156,6 +156,7 @@ pub struct WorktreePicker {
     oid: String,
     matches: Vec<crate::git::Worktree>,
     selected: usize,
+    page_size: std::cell::Cell<usize>,
 }
 
 fn matching_worktrees(
@@ -307,6 +308,76 @@ impl DrawerReminder {
     }
 }
 
+/// Geometry of a list with variable-height entries from its last draw.
+#[derive(Default)]
+pub struct ListPage {
+    height: usize,
+    starts: Vec<usize>,
+}
+
+impl ListPage {
+    fn clear(&mut self) {
+        self.height = 0;
+        self.starts.clear();
+    }
+
+    pub(crate) fn set(&mut self, height: usize, starts: Vec<usize>) {
+        *self = Self { height, starts };
+    }
+
+    pub(crate) fn select(&self, code: KeyCode, index: usize, len: usize) -> usize {
+        if self.starts.len() != len || len == 0 || self.height == 0 {
+            return list_index(code, index, len, 1);
+        }
+        let index = index.min(len - 1);
+        match code {
+            KeyCode::PageUp => {
+                let target = self.starts[index].saturating_sub(self.height);
+                self.starts
+                    .partition_point(|&start| start <= target)
+                    .saturating_sub(1)
+                    .min(index.saturating_sub(1))
+            }
+            KeyCode::PageDown => {
+                let target = self.starts[index].saturating_add(self.height);
+                self.starts
+                    .partition_point(|&start| start < target)
+                    .min(len - 1)
+            }
+            _ => list_index(code, index, len, 1),
+        }
+    }
+
+    pub(crate) fn set_items(&mut self, height: usize, items: &[ListItem<'_>]) {
+        let mut start = 0;
+        self.set(
+            height,
+            items
+                .iter()
+                .map(|item| {
+                    let offset = start;
+                    start += item.height();
+                    offset
+                })
+                .collect(),
+        );
+    }
+}
+
+pub(crate) fn list_index(code: KeyCode, index: usize, len: usize, page: usize) -> usize {
+    let last = len.saturating_sub(1);
+    let index = index.min(last);
+    match code {
+        KeyCode::Home => 0,
+        KeyCode::End => last,
+        KeyCode::Up => index.saturating_sub(1),
+        KeyCode::Down => index.saturating_add(1).min(last),
+        KeyCode::PageUp => index.saturating_sub(page.max(1)),
+        KeyCode::PageDown => index.saturating_add(page.max(1)).min(last),
+        _ => index,
+    }
+}
+
 pub struct View {
     pub folder_navigation: FolderNavigation,
     /// Scoped to the displayed frame and its next input; cleared before updates.
@@ -347,7 +418,11 @@ pub struct View {
     pub relink_back: bool,
     pub relink_scroll: u16,
     pub relink_scroll_limit: std::cell::Cell<u16>,
-    pub help_page_size: usize,
+    pub folder_page_size: std::cell::Cell<usize>,
+    pub session_page_size: std::cell::Cell<usize>,
+    pub source_page_size: std::cell::Cell<usize>,
+    pub help_page: std::cell::RefCell<ListPage>,
+    pub search_page: std::cell::RefCell<ListPage>,
     pub info: Option<InfoModal>,
     pub commit_info: Option<crate::commit_info::Dialog>,
     pub message: Option<String>,
@@ -400,7 +475,11 @@ impl Default for View {
             relink_back: Default::default(),
             relink_scroll: Default::default(),
             relink_scroll_limit: Default::default(),
-            help_page_size: Default::default(),
+            folder_page_size: Default::default(),
+            session_page_size: Default::default(),
+            source_page_size: Default::default(),
+            help_page: Default::default(),
+            search_page: Default::default(),
             info: Default::default(),
             commit_info: Default::default(),
             message: Default::default(),
@@ -1378,8 +1457,10 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             );
         } else if expanded {
             use crate::git_sessions::Row;
+            let inner = pane_block("Git Worktrees", view.git_focus).inner(git_area);
+            let height = usize::from(inner.height);
+            view.history.page.set(height.max(1));
             let mut presentation = view.git_sessions.borrow_mut();
-            let height = usize::from(git_area.height.saturating_sub(3));
             let mut width = usize::from(git_area.width.saturating_sub(4));
             presentation.width = Some(width);
             presentation.sync(browser, &view.history);
@@ -1498,7 +1579,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             }
             scrollbar::draw(
                 frame,
-                scrollbar::inside_border_track(git_area, pane_block("", false).inner(git_area)),
+                scrollbar::inside_border_track(git_area, inner),
                 presentation.rows.len(),
                 range.len(),
                 range.start,
@@ -1553,6 +1634,9 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             area.width.saturating_sub(2),
             area.height.saturating_sub(2).min(16),
         );
+        picker
+            .page_size
+            .set(usize::from(popup.height.saturating_sub(2)) / 2);
         let items: Vec<_> = picker
             .matches
             .iter()
@@ -1610,6 +1694,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             Paragraph::new("↑/↓ select · Enter creates · Esc cancels"),
             regions.hints,
         );
+        view.source_page_size.set(usize::from(regions.body.height));
         let items: Vec<_> = creation_sources(browser)
             .iter()
             .map(|&i| ListItem::new(safe_text(&browser.specs[i].label())))
@@ -1787,6 +1872,10 @@ pub(crate) fn render_picker(
         30,
     );
     if inner.height < 10 {
+        picker.page.borrow_mut().clear();
+        if let Some(worktrees) = &picker.worktrees {
+            worktrees.page.borrow_mut().clear();
+        }
         frame.render_widget(
             Paragraph::new("Enlarge terminal to choose a folder. Esc cancels."),
             inner,
@@ -1933,6 +2022,9 @@ pub(crate) fn render_picker(
     } else {
         "Folders"
     };
+    let page = worktrees.map_or(&picker.page, |w| &w.page);
+    page.borrow_mut()
+        .set_items(usize::from(tree_area.height.saturating_sub(2)), &items);
     let state = worktrees.map_or(&picker.list_state, |w| &w.list_state);
     let mut state = state.borrow_mut();
     state.select(selected);
@@ -2008,6 +2100,8 @@ enum Command {
     GitReturn,
     GitUp,
     GitDown,
+    GitPageUp,
+    GitPageDown,
     GitLeft,
     GitRight,
     GitHome,
@@ -2025,6 +2119,8 @@ enum Command {
     PaneRight,
     PreviousItem,
     NextItem,
+    PageUp,
+    PageDown,
     FirstItem,
     LastItem,
     FolderFocus,
@@ -2083,6 +2179,7 @@ fn open_help(browser: &Browser, view: &mut View) {
     view.help_control = 0;
     view.help_query.clear();
     view.help_searching = false;
+    view.help_page.get_mut().clear();
 }
 fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     // Keep action identities stable while a menu is open. Availability is still
@@ -2144,14 +2241,16 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             "Previous item / scroll up",
         ),
         (NextItem, "Navigation", "↓ / j", "Next item / scroll down"),
-        (FirstItem, "Navigation", "PageUp", "First item"),
-        (LastItem, "Navigation", "PageDown", "Last item"),
+        (PageUp, "Navigation", "PageUp", "Previous page"),
+        (PageDown, "Navigation", "PageDown", "Next page"),
+        (FirstItem, "Navigation", "Home", "First item"),
+        (LastItem, "Navigation", "End", "Last item"),
     ];
     entries.retain(|entry| {
         (entry.0 != Recover || view.recovery_available)
             && (entry.0 != EnterFolder || view.context() == 0)
             && (entry.0 != PreviousPane || view.context() == 1)
-            && (!matches!(entry.0, FirstItem | LastItem) || view.context() != 2)
+            && (!matches!(entry.0, PageUp | PageDown | FirstItem | LastItem) || view.context() != 2)
     });
     if view.context() == 0 {
         entries.push((
@@ -2238,8 +2337,10 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
                 (GitDown, "Git", "↓ / j", "Next commit/session"),
                 (GitLeft, "Git", "← / h", "Scroll left"),
                 (GitRight, "Git", "l", "Scroll right"),
-                (GitHome, "Git", "PageUp / Home", "First loaded item"),
-                (GitEnd, "Git", "PageDown / End", "Last loaded item"),
+                (GitPageUp, "Git", "PageUp", "Previous page"),
+                (GitPageDown, "Git", "PageDown", "Next page"),
+                (GitHome, "Git", "Home", "First loaded item"),
+                (GitEnd, "Git", "End", "Last loaded item"),
             ]);
         }
         entries.push((GitReturn, "Navigation", "Esc", "Close drawer"));
@@ -2347,8 +2448,10 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             command,
             section,
             group: if section == tab_section
-                || matches!(command, PreviousItem | NextItem | FirstItem | LastItem)
-            {
+                || matches!(
+                    command,
+                    PreviousItem | NextItem | PageUp | PageDown | FirstItem | LastItem
+                ) {
                 tab_section
             } else {
                 "Global"
@@ -2524,6 +2627,7 @@ fn filtered_menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
 fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     let inner = crate::modal::shell(frame, "Actions & shortcuts", 80, 28);
     if inner.width < 26 || inner.height < 7 {
+        view.help_page.borrow_mut().clear();
         frame.render_widget(
             Paragraph::new("Enlarge terminal. Esc closes.").wrap(Wrap { trim: false }),
             inner,
@@ -2579,6 +2683,7 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     }
     let mut last_section = "";
     let mut selected_row = 0;
+    let mut entry_rows = Vec::with_capacity(entries.len());
     for (i, entry) in entries.iter().enumerate() {
         if entry.group != last_section {
             if !last_section.is_empty() {
@@ -2596,6 +2701,7 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             )));
             last_section = entry.group;
         }
+        entry_rows.push(items.len());
         if i == selected {
             selected_row = items.len();
         }
@@ -2638,6 +2744,10 @@ fn draw_help(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     }
     let lines = scrollbar::ListLines::new(&items);
     let body = scrollbar::content_area(sections[0], lines.total());
+    view.help_page.borrow_mut().set(
+        usize::from(body.height),
+        entry_rows.into_iter().map(|row| lines.top(row)).collect(),
+    );
     let mut state =
         ListState::default().with_selected((!entries.is_empty()).then_some(selected_row));
     frame.render_stateful_widget(
@@ -2880,6 +2990,7 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     .padding(ratatui::widgets::Padding::horizontal(1));
     let results = browser.search_results(&view.search_query);
     if results.is_empty() {
+        view.search_page.borrow_mut().clear();
         frame.render_widget(
             Paragraph::new(
                 if browser.loading()
@@ -2931,6 +3042,9 @@ fn draw_search(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     let body = result_block.inner(sections[3]);
     let lines = scrollbar::ListLines::new(&items);
     let mut state = ListState::default().with_selected(Some(index));
+    view.search_page
+        .borrow_mut()
+        .set_items(result_height, &items);
     frame.render_stateful_widget(
         List::new(items)
             .block(result_block)
@@ -3108,6 +3222,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 ratatui::widgets::Padding::new(0, u16::from(scrolling), 1, 0),
             );
             let visible_rows = usize::from(block.inner(area).height);
+            view.folder_page_size.set(visible_rows);
             let top = selected
                 .filter(|_| visible_rows > 0)
                 .map(|index| {
@@ -3186,12 +3301,14 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                     .iter()
                     .position(|s| Some(&s.key) == browser.selected.as_ref()),
             );
+            let title = browser.scope_label();
+            let block = pane_block(&title, view.context() == 1)
+                .padding(ratatui::widgets::Padding::new(0, right_padding, 1, 0));
+            view.session_page_size
+                .set(usize::from(block.inner(area).height) / 3);
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(
-                        pane_block(&browser.scope_label(), view.context() == 1)
-                            .padding(ratatui::widgets::Padding::new(0, right_padding, 1, 0)),
-                    )
+                    .block(block)
                     .highlight_style(selection_style(view.context() == pane))
                     .highlight_symbol("> "),
                 area,
@@ -3732,8 +3849,14 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
     if let Some(mut picker) = view.worktree_picker.take() {
         match key.code {
             KeyCode::Esc => return Action::Continue,
-            KeyCode::PageUp => picker.selected = 0,
-            KeyCode::PageDown => picker.selected = picker.matches.len().saturating_sub(1),
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                picker.selected = list_index(
+                    key.code,
+                    picker.selected,
+                    picker.matches.len(),
+                    picker.page_size.get(),
+                );
+            }
             KeyCode::Up | KeyCode::Char('k') => picker.selected = picker.selected.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('j') => {
                 picker.selected = (picker.selected + 1).min(picker.matches.len().saturating_sub(1))
@@ -3889,8 +4012,14 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
             KeyCode::Esc => view.source_picker = None,
             KeyCode::Up => *selected = selected.saturating_sub(1),
             KeyCode::Down => *selected = (*selected + 1).min(sources.len().saturating_sub(1)),
-            KeyCode::PageUp => *selected = 0,
-            KeyCode::PageDown => *selected = sources.len().saturating_sub(1),
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                *selected = list_index(
+                    key.code,
+                    *selected,
+                    sources.len(),
+                    view.source_page_size.get(),
+                );
+            }
             KeyCode::Enter => {
                 let source = sources.get(*selected).copied();
                 view.source_picker = None;
@@ -3956,10 +4085,12 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
             KeyCode::Down | KeyCode::Char('j') => {
                 view.help_selected = (view.help_selected + 1).min(entries.len().saturating_sub(1))
             }
-            KeyCode::PageUp => view.help_selected = 0,
-            KeyCode::PageDown => view.help_selected = entries.len().saturating_sub(1),
-            KeyCode::Home => view.help_selected = 0,
-            KeyCode::End => view.help_selected = entries.len().saturating_sub(1),
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                view.help_selected =
+                    view.help_page
+                        .borrow()
+                        .select(key.code, view.help_selected, entries.len());
+            }
             KeyCode::Enter | KeyCode::Char(' ') if key.kind != KeyEventKind::Repeat => {
                 if let Some(command) = selected_command.filter(|_| action_enabled) {
                     view.help = false;
@@ -4001,13 +4132,16 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
             }
             KeyCode::Enter | KeyCode::Char(' ') if view.search_control == 1 => view.editing = false,
             KeyCode::Esc => view.editing = false,
-            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
-                let next = match key.code {
-                    KeyCode::PageUp => 0,
-                    KeyCode::PageDown => results.len().saturating_sub(1),
-                    KeyCode::Up => index.saturating_sub(1),
-                    _ => (index + 1).min(results.len().saturating_sub(1)),
-                };
+            KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+            | KeyCode::Home
+            | KeyCode::End => {
+                let next = view
+                    .search_page
+                    .borrow()
+                    .select(key.code, index, results.len());
                 view.search_selected = results.get(next).map(|s| s.key.clone());
             }
             KeyCode::Enter | KeyCode::Char(' ')
@@ -4096,8 +4230,10 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
             KeyCode::Down | KeyCode::Char('j') => Command::GitDown,
             KeyCode::Left | KeyCode::Char('h') => Command::GitLeft,
             KeyCode::Char('l') => Command::GitRight,
-            KeyCode::PageUp | KeyCode::Home => Command::GitHome,
-            KeyCode::PageDown | KeyCode::End => Command::GitEnd,
+            KeyCode::PageUp => Command::GitPageUp,
+            KeyCode::PageDown => Command::GitPageDown,
+            KeyCode::Home => Command::GitHome,
+            KeyCode::End => Command::GitEnd,
             KeyCode::Char('f') => Command::GitFollow,
             _ => return Action::Continue,
         };
@@ -4129,8 +4265,10 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         KeyCode::Esc => Command::PreviousPane,
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
-        KeyCode::PageUp => Command::FirstItem,
-        KeyCode::PageDown => Command::LastItem,
+        KeyCode::PageUp => Command::PageUp,
+        KeyCode::PageDown => Command::PageDown,
+        KeyCode::Home => Command::FirstItem,
+        KeyCode::End => Command::LastItem,
         KeyCode::Enter if key.kind == KeyEventKind::Repeat => return Action::Continue,
         KeyCode::Enter if view.focus == 0 => Command::EnterFolder,
         KeyCode::Enter
@@ -4152,6 +4290,8 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 | Command::CommitInfo
                 | Command::GitUp
                 | Command::GitDown
+                | Command::GitPageUp
+                | Command::GitPageDown
                 | Command::GitHome
                 | Command::GitEnd
                 | Command::GitFollow
@@ -4234,6 +4374,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                         oid,
                         matches,
                         selected: 0,
+                        page_size: Default::default(),
                     };
                     if picker.matches.len() == 1 {
                         return select_git_worktree(browser, view, &picker);
@@ -4275,7 +4416,12 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             view.git_sessions.borrow_mut().follow();
             view.history.follow();
         }
-        Command::GitUp | Command::GitDown | Command::GitHome | Command::GitEnd => {
+        Command::GitUp
+        | Command::GitDown
+        | Command::GitPageUp
+        | Command::GitPageDown
+        | Command::GitHome
+        | Command::GitEnd => {
             use crate::git_history::Movement;
             let mut presentation = view.git_sessions.borrow_mut();
             presentation.sync(browser, &view.history);
@@ -4283,6 +4429,8 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 match command {
                     Command::GitUp => Movement::Up,
                     Command::GitDown => Movement::Down,
+                    Command::GitPageUp => Movement::PageUp,
+                    Command::GitPageDown => Movement::PageDown,
                     Command::GitHome => Movement::Home,
                     _ => Movement::End,
                 },
@@ -4330,6 +4478,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
         }
         Command::Search => {
+            view.search_page.get_mut().clear();
             view.editing = true;
             view.search_control = 0;
             view.search_query.clear();
@@ -4361,12 +4510,20 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         Command::PreviousPane => {
             view.message = None;
         }
-        Command::PreviousItem | Command::NextItem => {
-            let delta = if command == Command::PreviousItem {
+        Command::PreviousItem | Command::NextItem | Command::PageUp | Command::PageDown => {
+            let direction = if matches!(command, Command::PreviousItem | Command::PageUp) {
                 -1
             } else {
                 1
             };
+            let page = match command {
+                Command::PageUp | Command::PageDown if view.focus == 0 => {
+                    view.folder_page_size.get()
+                }
+                Command::PageUp | Command::PageDown => view.session_page_size.get(),
+                _ => 1,
+            };
+            let delta = direction * page.max(1) as isize;
             match view.focus {
                 0 => {
                     let rows = view.folder_rows(browser);
@@ -4446,6 +4603,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 return Action::CreateNew(sources[0]);
             }
             view.source_picker = Some(0);
+            view.source_page_size.set(0);
             view.source_control = 0;
         }
         Command::Resume => {
@@ -4918,9 +5076,6 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 _ => None,
             });
             let size = terminal.size()?;
-            view.help_page_size =
-                usize::from(size.height.saturating_sub(2).min(22).saturating_sub(8))
-                    / if size.width < 74 { 2 } else { 1 };
             view.folder_rows_snapshot = Some(std::rc::Rc::new(browser.folder_rows()));
             terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame, &browser); })?;
             guard.mouse_capture(view.terminals.borrow().active.is_some())?;
@@ -5265,61 +5420,113 @@ mod cleanup_tests {
     use super::*;
 
     #[test]
-    fn page_keys_select_list_endpoints_and_handle_empty_results() {
-        let mut browser = entry_fixture(12, 1);
+    fn browser_paging_uses_the_rendered_pane_height() {
+        let mut browser = entry_fixture(20, 1);
         let mut view = folder_view();
+        let path = (0..20).fold(std::path::PathBuf::from("/"), |path, i| {
+            path.join(format!("node{i:02}"))
+        });
+        browser.open_folder(path);
         let rows = browser.folder_rows();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 9)).unwrap();
+        terminal
+            .draw(|frame| draw_pane(frame, frame.area(), 0, &browser, &view))
+            .unwrap();
+        press(&mut browser, &mut view, KeyCode::Home);
+        assert_eq!(browser.folder, rows[0].filter);
         press(&mut browser, &mut view, KeyCode::PageDown);
+        assert_eq!(browser.folder, rows[6].filter);
+        press(&mut browser, &mut view, KeyCode::End);
         assert_eq!(browser.folder, rows.last().unwrap().filter);
         press(&mut browser, &mut view, KeyCode::PageUp);
-        assert_eq!(browser.folder, rows.first().unwrap().filter);
+        assert_eq!(browser.folder, rows[rows.len() - 7].filter);
+
         browser.open_folder("/tmp".into());
         view.toggle_drawer();
-        for (key, first) in [(KeyCode::PageDown, false), (KeyCode::PageUp, true)] {
-            let sessions = browser.visible();
-            let expected = if first {
-                sessions.first()
-            } else {
-                sessions.last()
-            }
-            .unwrap()
-            .key
-            .clone();
-            press(&mut browser, &mut view, key);
-            assert_eq!(browser.selected.as_ref(), Some(&expected));
-            view.editing = true;
-            let results = browser.search_results("");
-            let expected = if first {
-                results.first()
-            } else {
-                results.last()
-            }
-            .unwrap()
-            .key
-            .clone();
-            press(&mut browser, &mut view, key);
-            assert_eq!(view.search_selected.as_ref(), Some(&expected));
-            view.editing = false;
+        let sessions: Vec<_> = browser
+            .visible()
+            .iter()
+            .map(|session| session.key.clone())
+            .collect();
+        for (height, step) in [(9, 2), (15, 4)] {
+            terminal.backend_mut().resize(100, height);
+            terminal.resize(Rect::new(0, 0, 100, height)).unwrap();
+            terminal
+                .draw(|frame| draw_pane(frame, frame.area(), 1, &browser, &view))
+                .unwrap();
+            press(&mut browser, &mut view, KeyCode::Home);
+            press(&mut browser, &mut view, KeyCode::PageDown);
+            assert_eq!(browser.selected.as_ref(), Some(&sessions[step]));
+            press(&mut browser, &mut view, KeyCode::PageDown);
+            assert_eq!(browser.selected.as_ref(), Some(&sessions[step * 2]));
+            press(&mut browser, &mut view, KeyCode::PageUp);
+            assert_eq!(browser.selected.as_ref(), Some(&sessions[step]));
         }
-        view.editing = true;
-        view.search_query = "no matching session".into();
-        press(&mut browser, &mut view, KeyCode::PageDown);
-        assert!(view.search_selected.is_none());
-        view.editing = false;
+        for _ in 0..sessions.len() {
+            press(&mut browser, &mut view, KeyCode::PageDown);
+        }
+        assert_eq!(browser.selected.as_ref(), sessions.last());
+        for _ in 0..sessions.len() {
+            press(&mut browser, &mut view, KeyCode::PageUp);
+        }
+        assert_eq!(browser.selected.as_ref(), sessions.first());
+
         browser.open_folder("/empty".into());
         press(&mut browser, &mut view, KeyCode::PageUp);
         assert!(browser.selected.is_none());
-        view.help = true;
+    }
+
+    #[test]
+    fn search_paging_and_endpoints_track_result_selection() {
+        let mut browser = entry_fixture(20, 1);
+        let mut view = View {
+            editing: true,
+            ..View::default()
+        };
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| draw_search(frame, &browser, &view))
+            .unwrap();
+        let results: Vec<_> = browser
+            .search_results("")
+            .iter()
+            .map(|session| session.key.clone())
+            .collect();
         press(&mut browser, &mut view, KeyCode::PageDown);
-        assert_eq!(view.help_selected, menu_entries(&browser, &view).len() - 1);
+        let selected = results
+            .iter()
+            .position(|key| Some(key) == view.search_selected.as_ref())
+            .unwrap();
+        assert!(selected > 1 && selected < results.len() - 1);
         press(&mut browser, &mut view, KeyCode::PageUp);
-        assert_eq!(view.help_selected, 0);
+        assert_eq!(view.search_selected.as_ref(), results.first());
+        press(&mut browser, &mut view, KeyCode::End);
+        assert_eq!(view.search_selected.as_ref(), results.last());
+        press(&mut browser, &mut view, KeyCode::Home);
+        assert_eq!(view.search_selected.as_ref(), results.first());
+
+        view.search_query = "no matching session".into();
+        press(&mut browser, &mut view, KeyCode::PageDown);
+        assert!(view.search_selected.is_none());
+        let mut browser = entry_fixture(1, 1);
+        view.search_query.clear();
+        let only = browser.search_results("")[0].key.clone();
+        for code in [
+            KeyCode::PageDown,
+            KeyCode::PageUp,
+            KeyCode::End,
+            KeyCode::Home,
+        ] {
+            press(&mut browser, &mut view, code);
+            assert_eq!(view.search_selected.as_ref(), Some(&only));
+        }
     }
 
     #[tokio::test]
-    async fn git_page_keys_jump_past_a_page_of_sessions() {
+    async fn git_page_keys_use_the_rendered_height() {
         use crate::git_sessions::tests::{add_session, fixture};
         let (mut browser, history) = fixture().await;
+        select_git_fixture(&mut browser, "/repo/.git");
         for i in 0..12 {
             add_session(
                 &mut browser,
@@ -5339,14 +5546,26 @@ mod cleanup_tests {
             dialog_area: true,
             ..View::default()
         };
-        view.history.page.set(2);
-        press(&mut browser, &mut view, KeyCode::PageDown);
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 10)).unwrap();
+        // The compact drawer gives Git the full height minus its borders and top padding.
+        for (height, step) in [(10, 7), (8, 5)] {
+            terminal.backend_mut().resize(100, height);
+            terminal.resize(Rect::new(0, 0, 100, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            press(&mut browser, &mut view, KeyCode::PageDown);
+            assert_eq!(view.git_sessions.borrow().selected, step);
+            assert!(view.git_sessions.borrow().session().is_some());
+            press(&mut browser, &mut view, KeyCode::PageUp);
+            assert_eq!(view.history.selected, 0);
+            assert_eq!(view.git_sessions.borrow().selected, 0);
+        }
+        press(&mut browser, &mut view, KeyCode::End);
         assert_eq!(view.history.selected, 1);
         assert_eq!(
             view.git_sessions.borrow().selected,
             view.git_sessions.borrow().rows.len() - 1
         );
-        press(&mut browser, &mut view, KeyCode::PageUp);
+        press(&mut browser, &mut view, KeyCode::Home);
         assert_eq!(view.history.selected, 0);
         assert_eq!(view.git_sessions.borrow().selected, 0);
     }
