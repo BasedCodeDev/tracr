@@ -31,6 +31,86 @@ fn io_ready(fd: std::os::fd::RawFd, events: i16) -> bool {
     unsafe { libc::poll(&mut descriptor, 1, 100) > 0 }
 }
 
+/// Presentation data resolved from cached discovery, never from Git during drawing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorktreeLabel {
+    name: String,
+    dirty: bool,
+}
+impl WorktreeLabel {
+    pub(crate) fn for_folder(
+        browser: &crate::browser::Browser,
+        folder: &std::path::Path,
+    ) -> Option<Self> {
+        let crate::git_discovery::Outcome::Repository {
+            repository,
+            root: Some(root),
+        } = browser.ownership.get(folder)?.effective()?
+        else {
+            return None;
+        };
+        let worktree = browser
+            .repositories
+            .get(&repository.common_dir)?
+            .worktrees
+            .iter()
+            .skip(1)
+            .find(|w| !w.bare && &w.path == root)?;
+        let name = worktree
+            .branch
+            .as_deref()
+            .map(|b| b.strip_prefix("refs/heads/").unwrap_or(b))
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                root.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            });
+        Some(Self {
+            name: crate::browser::safe_text(&name),
+            dirty: browser
+                .worktree_status
+                .get(root)
+                .and_then(|s| s.as_ref().ok())
+                .is_some_and(|s| s.dirty()),
+        })
+    }
+
+    fn line(&self, width: u16) -> ratatui::text::Line<'static> {
+        use ratatui::text::{Line, Span};
+        use unicode_segmentation::UnicodeSegmentation;
+        use unicode_width::UnicodeWidthStr;
+        let suffix = if self.dirty { " *" } else { "" };
+        let available = usize::from(width).saturating_sub(suffix.len());
+        let mut name = String::new();
+        let clipped = self.name.width() > available;
+        let budget = available.saturating_sub(usize::from(clipped));
+        for grapheme in self.name.graphemes(true) {
+            if name.width() + grapheme.width() > budget {
+                break;
+            }
+            name.push_str(grapheme);
+        }
+        if clipped && available > 0 {
+            name.push('…');
+        }
+        Line::from(vec![
+            Span::styled(name, Style::default().fg(crate::git_render::BRANCH_COLOR)),
+            Span::styled(
+                if self.dirty && width == 1 {
+                    "*"
+                } else if width == 0 {
+                    ""
+                } else {
+                    suffix
+                },
+                Style::default().fg(crate::git_render::DIRTY_COLOR),
+            ),
+        ])
+    }
+}
+
 struct Session {
     id: u64,
     key: Option<SessionKey>,
@@ -774,6 +854,17 @@ impl Manager {
         Ok(Input::Consumed)
     }
     pub fn draw(&mut self, frame: &mut Frame<'_>, area: Rect, focused: bool, framed: bool) -> bool {
+        self.draw_with_worktree(frame, area, focused, framed, None)
+    }
+
+    pub(crate) fn draw_with_worktree(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        focused: bool,
+        framed: bool,
+        worktree: Option<&WorktreeLabel>,
+    ) -> bool {
         let border = Block::default()
             .borders(Borders::ALL)
             .border_type(if focused {
@@ -854,12 +945,39 @@ impl Manager {
             }
         }
         let (row, col) = screen.cursor_position();
+        let top = if framed {
+            Rect::new(inner.x, area.y, inner.width, 1)
+        } else {
+            Rect::new(area.x, area.y, area.width, 1)
+        };
+        let worktree_line = worktree.map(|label| label.line(top.width));
+        let label_width = worktree_line.as_ref().map_or(0, |line| line.width() as u16);
+        if let Some(line) = worktree_line {
+            if top.width > label_width {
+                frame.render_widget(
+                    Paragraph::new(" ").style(Style::default().bg(Color::Black)),
+                    Rect::new(top.right() - label_width - 1, top.y, 1, 1),
+                );
+            }
+            frame.render_widget(
+                Paragraph::new(line).style(Style::default().bg(Color::Black)),
+                Rect::new(
+                    top.right().saturating_sub(label_width),
+                    top.y,
+                    label_width,
+                    1,
+                ),
+            );
+        }
         if screen.scrollback() > 0 {
             let label = format!(" ↑ {} lines · type to return ", screen.scrollback());
-            let width = (label.len() as u16).min(area.width);
+            let right = top
+                .right()
+                .saturating_sub(label_width + u16::from(label_width > 0));
+            let width = (label.len() as u16).min(right.saturating_sub(top.x));
             frame.render_widget(
                 Paragraph::new(label).style(Style::default().fg(Color::Yellow).bg(Color::Black)),
-                Rect::new(area.right().saturating_sub(width), area.y, width, 1),
+                Rect::new(right.saturating_sub(width), top.y, width, 1),
             );
         }
         if focused
@@ -1186,6 +1304,154 @@ impl vte::Perform for Queries {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn worktree_label_resolves_launch_directory_and_cached_status() {
+        use crate::git_discovery::{Outcome, Ownership};
+        let mut browser = crate::browser::Browser::new(vec![]);
+        let common = std::path::PathBuf::from("/project/.git");
+        let main = std::path::PathBuf::from("/project");
+        let linked = std::path::PathBuf::from("/feature-folder");
+        let nested = linked.join("src");
+        for (folder, root) in [(&main, &main), (&linked, &linked), (&nested, &linked)] {
+            browser.ownership.insert(
+                folder.clone(),
+                Ownership {
+                    generation: 0,
+                    previous: None,
+                    outcome: Some(Outcome::Repository {
+                        repository: crate::git::Directory {
+                            common_dir: common.clone(),
+                            git_dir: common.clone(),
+                        },
+                        root: Some(root.clone()),
+                    }),
+                },
+            );
+        }
+        browser.repositories.insert(
+            common.clone(),
+            crate::git::Repository {
+                common_dir: common.clone(),
+                git_dir: common.clone(),
+                worktrees: [(&main, "main"), (&linked, "feature/overlay")]
+                    .into_iter()
+                    .map(|(path, branch)| crate::git::Worktree {
+                        path: path.clone(),
+                        head: None,
+                        branch: Some(format!("refs/heads/{branch}")),
+                        bare: false,
+                        locked: false,
+                        prunable: false,
+                    })
+                    .collect(),
+            },
+        );
+        assert!(WorktreeLabel::for_folder(&browser, &main).is_none());
+        assert!(WorktreeLabel::for_folder(&browser, std::path::Path::new("/elsewhere")).is_none());
+        assert_eq!(
+            WorktreeLabel::for_folder(&browser, &nested),
+            Some(WorktreeLabel {
+                name: "feature/overlay".into(),
+                dirty: false
+            })
+        );
+        for counts in [
+            crate::worktree_status::Counts {
+                staged: 1,
+                ..Default::default()
+            },
+            crate::worktree_status::Counts {
+                modified: 1,
+                ..Default::default()
+            },
+            crate::worktree_status::Counts {
+                untracked: 1,
+                ..Default::default()
+            },
+        ] {
+            browser.worktree_status.insert(linked.clone(), Ok(counts));
+            assert!(WorktreeLabel::for_folder(&browser, &nested).unwrap().dirty);
+        }
+        browser
+            .worktree_status
+            .insert(linked.clone(), Err("unavailable".into()));
+        assert!(!WorktreeLabel::for_folder(&browser, &nested).unwrap().dirty);
+        browser.repositories.get_mut(&common).unwrap().worktrees[1].branch = None;
+        assert_eq!(
+            WorktreeLabel::for_folder(&browser, &nested).unwrap().name,
+            "feature-folder"
+        );
+    }
+
+    #[test]
+    fn worktree_label_clips_unicode_and_preserves_dirty_marker() {
+        let label = WorktreeLabel {
+            name: "界e\u{301}/long".into(),
+            dirty: true,
+        };
+        for width in 0..20 {
+            let line = label.line(width);
+            assert!(line.width() <= usize::from(width));
+            if width > 0 {
+                assert!(line.to_string().ends_with('*'));
+            }
+        }
+        assert_eq!(label.line(6).to_string(), "界e\u{301}… *");
+        let line = label.line(30);
+        assert_eq!(
+            line.spans[0].style.fg,
+            Some(crate::git_render::BRANCH_COLOR)
+        );
+        assert_eq!(line.spans[1].style.fg, Some(crate::git_render::DIRTY_COLOR));
+    }
+
+    #[test]
+    fn worktree_overlay_aligns_without_resizing_and_coexists_with_scrollback() {
+        let mut manager = Manager {
+            area: Rect::new(0, 0, 40, 10),
+            ..Default::default()
+        };
+        manager
+            .launch(&command("import time; time.sleep(30)"), None, "test".into())
+            .unwrap();
+        let label = WorktreeLabel {
+            name: "feature".into(),
+            dirty: true,
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 10)).unwrap();
+        for framed in [false, true] {
+            terminal
+                .draw(|frame| {
+                    manager.draw_with_worktree(frame, frame.area(), true, framed, Some(&label));
+                })
+                .unwrap();
+            let right = if framed { 39 } else { 40 };
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(right - 1, 0)].symbol(), "*");
+            assert_eq!(buffer[(right - 1, 0)].fg, crate::git_render::DIRTY_COLOR);
+            assert_eq!(buffer[(right - 9, 0)].symbol(), "f");
+            assert_eq!(buffer[(right - 9, 0)].fg, crate::git_render::BRANCH_COLOR);
+            assert_eq!(
+                manager.sessions[0].size,
+                if framed { (8, 38) } else { (10, 40) }
+            );
+        }
+        manager.sessions[0]
+            .parser
+            .process(&b"output\r\n".repeat(40));
+        manager.sessions[0].parser.set_scrollback(5);
+        terminal
+            .draw(|frame| {
+                manager.draw_with_worktree(frame, frame.area(), true, false, Some(&label));
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let row: String = (0..40).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert!(row.contains("lines"));
+        assert!(row.ends_with("feature *"));
+    }
+
     fn key(code: KeyCode, modifiers: KeyModifiers) -> Event {
         Event::Key(KeyEvent::new(code, modifiers))
     }
