@@ -2,9 +2,11 @@
 use crate::{
     browser::Browser,
     domain::{RuntimeStatus, SessionKey, SessionSummary},
+    git::GraphRow,
     git_discovery::Outcome,
     git_history::{History, Movement},
 };
+use ratatui::text::Line;
 use std::{collections::BTreeMap, path::PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -112,6 +114,10 @@ pub fn annotations(browser: &Browser, history: &History) -> Vec<Annotation> {
 #[derive(Clone, Debug)]
 pub enum Row {
     Graph(usize),
+    References {
+        anchor: usize,
+        line: Line<'static>,
+    },
     Session {
         anchor: usize,
         annotation: usize,
@@ -122,9 +128,10 @@ pub enum Row {
 /// Share the first connector rows with the final sessions in each commit block.
 /// Unpaired sessions precede routing, where existing vertical continuations apply.
 pub fn compose_rows(
-    rows: &[crate::git::GraphRow],
+    rows: &[GraphRow],
     tails: &BTreeMap<usize, std::ops::Range<usize>>,
     session_oids: &[&str],
+    reference_lines: impl Fn(&str) -> Vec<Line<'static>>,
 ) -> Vec<Row> {
     let mut attached: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (index, oid) in session_oids.iter().enumerate() {
@@ -134,6 +141,13 @@ pub fn compose_rows(
     let mut i = 0;
     while i < rows.len() {
         result.push(Row::Graph(i));
+        if let Some(oid) = rows[i].oid.as_deref() {
+            result.extend(
+                reference_lines(oid)
+                    .into_iter()
+                    .map(|line| Row::References { anchor: i, line }),
+            );
+        }
         if let Some(indices) = rows[i].oid.as_deref().and_then(|oid| attached.get(oid)) {
             let tail = tails.get(&i).cloned().unwrap_or(i + 1..i + 1);
             let shared = indices.len().min(tail.len());
@@ -165,6 +179,10 @@ pub struct Presentation {
     anchor_oid: Option<String>,
     repository: Option<PathBuf>,
     geometry: (u64, usize, usize),
+    pub width: Option<usize>,
+    reference_layout: (Option<usize>, u64),
+    reference_offset: usize,
+    height: usize,
 }
 impl Presentation {
     pub fn sync(&mut self, browser: &Browser, history: &History) {
@@ -179,7 +197,8 @@ impl Presentation {
             history.rows.len(),
         );
         let annotations = annotations(browser, history);
-        let old_offset = self.selected.saturating_sub(self.top);
+        let old_offset = self.cursor().saturating_sub(self.top);
+        let old_selection = self.selection.clone();
         let old_anchor = self.anchor_oid.clone();
         let repository_changed = self.repository != repository;
         if repository_changed
@@ -189,10 +208,18 @@ impl Presentation {
         {
             self.selection = history_oid.clone().map(Selection::Commit);
         }
-        if repository_changed || self.geometry != geometry || self.annotations != annotations {
+        let reference_layout = (self.width, history.reference_revision);
+        let rebuild = repository_changed
+            || self.geometry != geometry
+            || self.annotations != annotations
+            || self.reference_layout != reference_layout;
+        if rebuild {
             self.annotations = annotations;
             let oids: Vec<_> = self.annotations.iter().map(|a| a.oid.as_str()).collect();
-            self.rows = compose_rows(&history.rows, &history.tails, &oids);
+            self.rows = compose_rows(&history.rows, &history.tails, &oids, |oid| {
+                self.width
+                    .map_or_else(Vec::new, |width| history.reference_lines(oid, width))
+            });
             self.positions = self
                 .rows
                 .iter()
@@ -206,6 +233,7 @@ impl Presentation {
                 .filter_map(|(i, row)| self.key(row, history).map(|_| i))
                 .collect();
             self.geometry = geometry;
+            self.reference_layout = reference_layout;
             self.repository = repository;
         }
         let locate = |key: &Selection| self.positions.get(key).copied();
@@ -228,7 +256,15 @@ impl Presentation {
             .rows
             .get(self.selected)
             .and_then(|row| self.key(row, history));
-        self.top = self.selected.saturating_sub(old_offset);
+        if rebuild || self.selection != old_selection {
+            self.reference_offset = if self.selection == old_selection {
+                self.reference_offset
+                    .min(self.reference_end() - self.selected)
+            } else {
+                0
+            };
+            self.top = self.cursor().saturating_sub(old_offset);
+        }
         self.anchor_oid = self
             .anchor()
             .and_then(|i| history.rows.get(i))
@@ -238,6 +274,7 @@ impl Presentation {
     fn key(&self, row: &Row, history: &History) -> Option<Selection> {
         match row {
             Row::Graph(i) => history.rows.get(*i)?.oid.clone().map(Selection::Commit),
+            Row::References { .. } => None,
             Row::Session { annotation, .. } => Some(Selection::Session(
                 self.annotations[*annotation].session.key.clone(),
             )),
@@ -261,17 +298,36 @@ impl Presentation {
     pub fn anchor(&self) -> Option<usize> {
         match self.rows.get(self.selected)? {
             Row::Graph(i) => Some(*i),
-            Row::Session { anchor, .. } => Some(*anchor),
+            Row::References { anchor, .. } | Row::Session { anchor, .. } => Some(*anchor),
         }
     }
+    pub fn cursor(&self) -> usize {
+        self.selected + self.reference_offset
+    }
+    fn reference_end(&self) -> usize {
+        self.rows
+            .iter()
+            .skip(self.selected + 1)
+            .take_while(|row| matches!(row, Row::References { .. }))
+            .count()
+            + self.selected
+    }
     pub fn range(&mut self, height: usize) -> std::ops::Range<usize> {
+        self.height = height;
         self.top = self.top.min(self.rows.len().saturating_sub(height));
-        if self.selected < self.top {
-            self.top = self.selected;
+        let cursor = self.cursor();
+        let mut bottom = cursor;
+        if self.reference_offset == 0 {
+            // Keep the whole commit and its labels together when they fit.
+            let end = self.reference_end();
+            if end - self.selected < height {
+                bottom = end;
+            }
         }
-        if self.selected >= self.top + height.max(1) {
-            self.top = self.selected + 1 - height.max(1);
-        }
+        self.top = self
+            .top
+            .min(cursor)
+            .max((bottom + 1).saturating_sub(height.max(1)));
         self.top..(self.top + height).min(self.rows.len())
     }
     pub fn navigate(&mut self, movement: Movement, history: &mut History) {
@@ -282,21 +338,44 @@ impl Presentation {
         let current = selectable
             .partition_point(|i| *i < self.selected)
             .min(selectable.len() - 1);
-        let target = match movement {
-            Movement::Up => selectable[current.saturating_sub(1)],
-            Movement::Down => selectable[(current + 1).min(selectable.len() - 1)],
-            Movement::Home => selectable[0],
-            Movement::End => *selectable.last().unwrap(),
-            Movement::PageUp => {
-                selectable[selectable
-                    .partition_point(|i| *i < self.selected.saturating_sub(history.page.get()))
-                    .min(selectable.len() - 1)]
+        let end = self.reference_end();
+        let reading_refs = match movement {
+            Movement::Down
+                if self.height > 0 && end > self.cursor() && end >= self.top + self.height =>
+            {
+                let next_page_end = self.top + self.height * 2 - 1;
+                self.reference_offset = end.min(next_page_end) - self.selected;
+                true
             }
-            Movement::PageDown => {
-                selectable[selectable
-                    .partition_point(|i| *i < self.selected.saturating_add(history.page.get()))
-                    .min(selectable.len() - 1)]
+            Movement::Up if self.reference_offset > 0 => {
+                self.reference_offset = 0;
+                true
             }
+            _ => false,
+        };
+        let target = if reading_refs {
+            self.selected
+        } else {
+            let target = match movement {
+                Movement::Up => selectable[current.saturating_sub(1)],
+                Movement::Down => selectable[(current + 1).min(selectable.len() - 1)],
+                Movement::Home => selectable[0],
+                Movement::End => *selectable.last().unwrap(),
+                Movement::PageUp => {
+                    selectable[selectable
+                        .partition_point(|i| *i < self.selected.saturating_sub(history.page.get()))
+                        .min(selectable.len() - 1)]
+                }
+                Movement::PageDown => {
+                    selectable[selectable
+                        .partition_point(|i| *i < self.selected.saturating_add(history.page.get()))
+                        .min(selectable.len() - 1)]
+                }
+            };
+            if target != self.selected || !matches!(movement, Movement::Down) {
+                self.reference_offset = 0;
+            }
+            target
         };
         self.selected = target;
         self.selection = self.key(&self.rows[target], history);
@@ -312,6 +391,7 @@ impl Presentation {
     pub fn follow(&mut self) {
         self.selection = None;
         self.history_oid = None;
+        self.reference_offset = 0;
     }
 }
 
@@ -670,6 +750,47 @@ pub(crate) mod tests {
                 .iter()
                 .any(|a| a.session.title == "waiting")
         );
+    }
+
+    #[tokio::test]
+    async fn reference_reflow_preserves_sessions_and_graph_lanes() {
+        use crate::git::{RefKind, RefLabel};
+        let (mut browser, mut history) = fixture().await;
+        let key = add_session(
+            &mut browser,
+            "attached",
+            "/repo/src",
+            "/repo",
+            "/repo/.git",
+            RuntimeStatus::Idle,
+            1,
+        );
+        let mut view = Presentation {
+            width: Some(40),
+            ..Default::default()
+        };
+        view.sync(&browser, &history);
+        view.navigate(Movement::Down, &mut history);
+        assert_eq!(view.session().unwrap().session.key, key);
+
+        history.set_references(BTreeMap::from([(
+            "head".into(),
+            vec![RefLabel {
+                kind: RefKind::Local,
+                name: "feature/branch".into(),
+            }],
+        )]));
+        view.sync(&browser, &history);
+        assert_eq!(view.session().unwrap().session.key, key);
+        assert!(
+            matches!(&view.rows[1], Row::References { anchor: 0, line } if line.to_string() == "[feature/branch]")
+        );
+        assert_eq!(history.continuation_spans(0)[0].content, "│");
+
+        view.width = Some(10);
+        view.sync(&browser, &history);
+        assert!(view.selected > 2);
+        assert_eq!(view.session().unwrap().session.key, key);
     }
 
     #[tokio::test]

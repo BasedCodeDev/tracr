@@ -213,7 +213,7 @@ fn cancellation_interrupts_wide_routing_without_returning_partial_output() {
 }
 
 #[test]
-fn shared_session_rows_preserve_topology_across_every_fixture_and_prefix() {
+fn reference_and_session_rows_preserve_topology_across_every_fixture_and_prefix() {
     use tracr::{
         git::GraphRow,
         git_render::RenderedRow,
@@ -248,9 +248,15 @@ fn shared_session_rows_preserve_topology_across_every_fixture_and_prefix() {
                     .iter()
                     .flat_map(|c| std::iter::repeat_n(c.oid.as_str(), count))
                     .collect();
-                let presented = compose_rows(&rows, &tails, &session_oids);
+                let reference_count = usize::from(count > 0) * 2;
+                let presented = compose_rows(&rows, &tails, &session_oids, |_| {
+                    vec![ratatui::text::Line::from("[branch]"); reference_count]
+                });
                 let shared: usize = tails.values().map(|tail| count.min(tail.len())).sum();
-                assert_eq!(presented.len(), rows.len() + session_oids.len() - shared);
+                assert_eq!(
+                    presented.len(),
+                    rows.len() + session_oids.len() + commits.len() * reference_count - shared
+                );
                 let mut graph = original.clone();
                 graph.rows.clear();
                 graph.positions.clear();
@@ -284,6 +290,10 @@ fn shared_session_rows_preserve_topology_across_every_fixture_and_prefix() {
                                 None,
                             )
                         }
+                        Row::References { anchor, .. } => (
+                            tracr::git_render::annotation_continuation(&rows[anchor]),
+                            None,
+                        ),
                     };
                     graph.rows.push(RenderedRow { spans, oid });
                 }

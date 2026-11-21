@@ -1300,24 +1300,31 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 git_area,
             );
         } else if expanded {
+            use crate::git_sessions::Row;
             let mut presentation = view.git_sessions.borrow_mut();
+            let width = usize::from(git_area.width.saturating_sub(4));
+            presentation.width = Some(width);
             presentation.sync(browser, &view.history);
             let range = presentation.range(usize::from(git_area.height.saturating_sub(3)));
             let more_above = range.start > 0;
             let more_below = range.end < presentation.rows.len()
                 || (!view.history.exhausted && !presentation.rows.is_empty());
-            let selected = presentation.selected.saturating_sub(range.start);
+            let selected = presentation.cursor().saturating_sub(range.start);
             // Use all loaded rows, so scrolling does not shift the provider column.
             let name_width = git_session_name_width(&presentation);
-            let width = usize::from(git_area.width.saturating_sub(4));
-            // Preserve existing horizontal bounds, extending them for annotation text.
+            // Commit subjects, session annotations, and labels in very narrow panes can pan.
             let requested = view.history.horizontal.get();
             view.history.clamp_horizontal(width);
-            let session_max = presentation
+            let annotation_max = presentation
                 .rows
                 .iter()
                 .filter_map(|row| match row {
-                    crate::git_sessions::Row::Session {
+                    Row::References { line, .. } => Some(
+                        view.history
+                            .reference_line_width(line)
+                            .saturating_sub(width),
+                    ),
+                    Row::Session {
                         anchor,
                         annotation,
                         connector,
@@ -1343,16 +1350,19 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 view.history
                     .horizontal
                     .get()
-                    .max(requested.min(session_max)),
+                    .max(requested.min(annotation_max)),
             );
             let items: Vec<_> = presentation.rows[range]
                 .iter()
                 .map(|row| {
                     let spans = match row {
-                        crate::git_sessions::Row::Graph(i) => {
-                            view.history.row_spans(&view.history.rows[*i])
+                        Row::Graph(i) => view.history.row_spans(&view.history.rows[*i]),
+                        Row::References { anchor, line } => {
+                            let mut spans = view.history.continuation_spans(*anchor);
+                            spans.extend(line.spans.iter().cloned());
+                            spans
                         }
-                        crate::git_sessions::Row::Session {
+                        Row::Session {
                             anchor,
                             annotation,
                             connector,
@@ -1368,10 +1378,8 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                     let item =
                         ListItem::new(graph_viewport(spans, view.history.horizontal.get(), width));
                     let background = match row {
-                        crate::git_sessions::Row::Graph(i) => {
-                            view.history.row_background(&view.history.rows[*i])
-                        }
-                        crate::git_sessions::Row::Session { .. } => None,
+                        Row::Graph(i) => view.history.row_background(&view.history.rows[*i]),
+                        _ => None,
                     };
                     if let Some(background) = background {
                         item.style(Style::default().bg(background))
@@ -6200,6 +6208,61 @@ mod cleanup_tests {
             subject: "Selected commit".into(),
         }];
         (browser, view)
+    }
+
+    #[tokio::test]
+    async fn git_history_wraps_refs_and_scrolls_through_the_last_commit() {
+        use crate::git::{RefKind, RefLabel};
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
+        select_git_fixture(&mut browser, "/project/.git");
+        let branches: Vec<_> = (0..10)
+            .map(|i| format!("feature/branch-number-{i}"))
+            .collect();
+        view.history
+            .set_references(std::collections::BTreeMap::from([(
+                "selected-oid".into(),
+                branches
+                    .iter()
+                    .map(|name| RefLabel {
+                        kind: RefKind::Local,
+                        name: name.clone(),
+                    })
+                    .collect(),
+            )]));
+        let render = |terminal: &mut Terminal<ratatui::backend::TestBackend>,
+                      browser: &Browser,
+                      view: &View| {
+            terminal.draw(|frame| draw(frame, browser, view)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        };
+        let mut wide = Terminal::new(ratatui::backend::TestBackend::new(110, 35)).unwrap();
+        let text = render(&mut wide, &browser, &view);
+        let subject = text.find("Selected commit").unwrap();
+        assert!(
+            branches
+                .iter()
+                .all(|name| text.find(name).unwrap() > subject)
+        );
+
+        let mut narrow = Terminal::new(ratatui::backend::TestBackend::new(38, 11)).unwrap();
+        let mut seen = render(&mut narrow, &browser, &view);
+        assert!(seen.contains("Selected commit"));
+        assert!(!seen.contains(&branches[9]));
+        for _ in 0..branches.len() {
+            press(&mut browser, &mut view, KeyCode::Down);
+            seen.push_str(&render(&mut narrow, &browser, &view));
+        }
+        assert!(branches.iter().all(|name| seen.contains(name)));
+        assert_eq!(view.history.selected, 0);
+        assert_eq!(selected_commit(&browser, &view).unwrap().1, "selected-oid");
+        press(&mut browser, &mut view, KeyCode::Up);
+        assert!(render(&mut narrow, &browser, &view).contains("Selected commit"));
     }
 
     #[tokio::test]
