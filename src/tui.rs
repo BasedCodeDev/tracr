@@ -7585,11 +7585,11 @@ mod cleanup_tests {
                 .unwrap();
             let buffer = terminal.backend().buffer();
             let thumb: Vec<_> = (2..11)
-                .filter(|y| buffer[(78, *y)].fg == Color::Cyan)
+                .filter(|y| buffer[(78, *y)].fg == Color::Rgb(112, 112, 112))
                 .collect();
             assert!(!thumb.is_empty());
             for y in 2..11 {
-                assert!(matches!(buffer[(78, y)].symbol(), "│" | "▐"));
+                assert_eq!(buffer[(78, y)].symbol(), "▎");
             }
             if index == 0 {
                 assert_eq!(thumb.first(), Some(&2));
@@ -7650,7 +7650,7 @@ mod cleanup_tests {
             let first: String = (0..160).map(|x| buffer[(x, 2)].symbol()).collect();
             assert!(first.contains(&rows[top].label), "{first}");
             let thumb: Vec<_> = (2..8)
-                .filter(|y| buffer[(158, *y)].fg == Color::Cyan)
+                .filter(|y| buffer[(158, *y)].fg == Color::Rgb(112, 112, 112))
                 .collect();
             assert!(!thumb.is_empty());
             if selected == 0 {

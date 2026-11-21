@@ -260,7 +260,7 @@ mod tests {
             let buffer = terminal.backend().buffer();
             assert_eq!(
                 buffer[(19, if scroll == 0 { 0 } else { 4 })].fg,
-                Color::Cyan
+                Color::Rgb(112, 112, 112)
             );
             let rendered: String = buffer.content.iter().map(|c| c.symbol()).collect();
             assert!(rendered.contains(if scroll == 0 { "line 0" } else { "line 99" }));

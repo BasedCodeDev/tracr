@@ -2,7 +2,7 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     widgets::{ListItem, Paragraph, Scrollbar, ScrollbarState},
 };
 
@@ -47,10 +47,18 @@ pub(crate) fn draw(frame: &mut Frame<'_>, track: Rect, total: usize, visible: us
         Scrollbar::default()
             .begin_symbol(None)
             .end_symbol(None)
-            .track_symbol(Some("│"))
-            .track_style(Style::default().fg(Color::DarkGray))
-            .thumb_symbol("▐")
-            .thumb_style(Style::default().fg(Color::Cyan)),
+            .track_symbol(Some("▎"))
+            .track_style(
+                Style::default()
+                    .fg(Color::Rgb(56, 56, 56))
+                    .remove_modifier(Modifier::BOLD),
+            )
+            .thumb_symbol("▎")
+            .thumb_style(
+                Style::default()
+                    .fg(Color::Rgb(112, 112, 112))
+                    .remove_modifier(Modifier::BOLD),
+            ),
         track,
         // Ratatui expects the number of possible viewport positions, not rows.
         &mut ScrollbarState::new(max.saturating_add(1))
@@ -174,13 +182,21 @@ mod tests {
                     .unwrap();
                 let buffer = terminal.backend().buffer();
                 let thumb: Vec<_> = (1..1 + height)
-                    .filter(|y| buffer[(6, *y)].fg == Color::Cyan)
+                    .filter(|y| buffer[(6, *y)].fg == Color::Rgb(112, 112, 112))
                     .collect();
                 if total > visible {
                     assert!(!thumb.is_empty());
-                    assert!(matches!(buffer[(6, 1)].symbol(), "│" | "▐"));
+                    for y in 1..1 + height {
+                        let cell = &buffer[(6, y)];
+                        assert_eq!(cell.symbol(), "▎");
+                        assert!(matches!(
+                            cell.fg,
+                            Color::Rgb(56, 56, 56) | Color::Rgb(112, 112, 112)
+                        ));
+                        assert!(!cell.modifier.contains(Modifier::BOLD));
+                    }
                     for y in &thumb {
-                        assert_eq!(buffer[(6, *y)].symbol(), "▐");
+                        assert_eq!(buffer[(6, *y)].symbol(), "▎");
                     }
                     if top == 0 {
                         assert_eq!(thumb[0], 1);
@@ -222,7 +238,10 @@ mod tests {
                 original.line_count(body.width).saturating_sub(3)
             );
             if body.width < width {
-                assert_eq!(terminal.backend().buffer()[(width - 1, 2)].fg, Color::Cyan);
+                assert_eq!(
+                    terminal.backend().buffer()[(width - 1, 2)].fg,
+                    Color::Rgb(112, 112, 112)
+                );
             }
         }
     }

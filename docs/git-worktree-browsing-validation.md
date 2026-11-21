@@ -117,7 +117,8 @@ change. Library session-navigation tests pass.
 
 The expanded scope adds the application's shared visual scrollbar to Git,
 retaining its border arrows and exact commit counter on the top border. The
-track uses a thin dark gray `│`; the thumb uses a solid half-cell cyan `▐`.
+track and thumb use the same quarter-cell `▎` glyph, colored `#383838` and
+`#707070` respectively, without bold styling.
 Scrollbars appear only when loaded content exceeds the viewport. Git proportions
 refer to the loaded prefix; computing them never queries total Git history.
 
@@ -162,3 +163,11 @@ lists reserve or reuse right padding so long text cannot extend beneath the trac
 Git and folder horizontal clipping use the reduced content width. Unbordered
 scrolling bodies retain their existing reserved scrollbar column. All 194 library
 tests, Clippy, formatting and the build passed after this placement correction.
+
+### Fine graphite styling
+
+Design A uses three seamlessly aligned quarter-cell rectangles (`▎`): graphite
+`#383838` above and below, and a slightly brighter `#707070` thumb. The shared
+renderer uses explicit RGB grays and removes bold styling. Placement, proportions,
+Git arrows/counter and reserved content space are unchanged. Rendering tests assert
+the exact glyph, both gray colors and absence of bold, including viewport endpoints.
