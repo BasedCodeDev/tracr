@@ -74,16 +74,21 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
             assert '┏Folders' not in t.text() and '┌Folders' not in t.text()
         t.send(b'\x1b[D')  # Left remains graph scrolling.
         t.expect_action('Restore Git panel')
-        for exit_key in [b'\x1b', b'\x7f', b'\x1bz']:
+        for exit_key in [b'\x1bz']:
             t.send(exit_key)
             t.wait(lambda: not t.line(0).startswith('┏Git Worktrees'))
             t.expect_action('Select worktree folder')
             t.send(b'\x1bz')
             t.expect_action('Restore Git panel')
-        t.send(b'\t')
-        t.wait(lambda: not t.line(0).startswith('┏Git Worktrees'))
-        t.expect_focus('Folders')
-        t.send(b'\t\x1bz')
+        t.expect('Alt+Z Exit zoom')
+        t.send(b'\x1b\x7f')
+        t.expect('Alt+Z Exit zoom')
+        for tab in [b'\t', b'\x1b[Z']:
+            t.send(tab)
+            t.expect_focus('Commit information')
+            t.expect('Alt+Z Exit zoom')
+            t.send(tab)
+            t.expect_focus('Git Worktrees')
         t.expect_action('Restore Git panel')
         t.send(b'\x1b[B')  # First session beneath the commit.
         t.expect_action('Resume session')
@@ -108,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.send(b'\x1bz')
         t.expect_action('Restore Git panel')
         assert 'FAKE CODING SESSION' not in t.text()
-        t.send(b'\x1b[C')
+        t.send(b'\x1bz\x1b[C')
         t.expect('FAKE CODING SESSION')
         assert json.loads((home/'launch.json').read_text())['pid'] == launch['pid']
         t.send(b'x')

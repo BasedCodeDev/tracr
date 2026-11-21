@@ -389,11 +389,20 @@ impl Dialog {
 
     pub fn draw_panel(&self, frame: &mut Frame<'_>, inner: Rect) {
         if inner.width < 32 || inner.height < 14 {
-            frame.render_widget(
+            let message =
                 Paragraph::new("Enlarge terminal to view details.\nEsc history · y copy hash")
-                    .wrap(ratatui::widgets::Wrap { trim: false }),
-                inner,
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .alignment(ratatui::layout::Alignment::Center);
+            let height = message
+                .line_count(inner.width.max(1))
+                .min(usize::from(inner.height)) as u16;
+            let area = Rect::new(
+                inner.x,
+                inner.y + (inner.height - height) / 2,
+                inner.width,
+                height,
             );
+            frame.render_widget(message, area);
             return;
         }
         self.draw_content(frame, inner, true);

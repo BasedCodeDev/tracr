@@ -1708,7 +1708,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         2 => panels.git,
         _ => panels.sessions,
     };
-    if let Some(hint_area) = focused_area {
+    if let Some(hint_area) = focused_area.filter(|_| !view.git_details_focused) {
         draw_action_hint(
             frame,
             hint_area,
@@ -1726,6 +1726,26 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 Rect::new(area.x + 1, area.bottom() - 1, 11, 1),
             );
         }
+    }
+    if let Some(area) = panels
+        .details
+        .filter(|area| area.width >= 9 && area.height > 0)
+    {
+        let hint = if area.width >= 21 {
+            " Alt+Z Exit zoom "
+        } else {
+            " Alt+Z "
+        };
+        let width = hint.len() as u16;
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().fg(Color::Cyan)),
+            Rect::new(
+                area.right().saturating_sub(width + 1),
+                area.bottom() - 1,
+                width,
+                1,
+            ),
+        );
     }
     if footer_height > 0 {
         frame.render_widget(Paragraph::new(message), layout[1]);
@@ -2578,6 +2598,20 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             "Focus Git Worktrees",
         ));
     }
+    if view.git_zoomed {
+        entries.retain(|entry| {
+            !(entry.0 == ToggleDrawer && entry.2 == "→")
+                && !(entry.0 == GitReturn && !view.git_details_focused)
+        });
+        for entry in &mut entries {
+            match entry.0 {
+                CyclePane | CyclePaneBack => entry.3 = "Switch Git / commit details",
+                PaneUp => entry.3 = "Focus Git Worktrees",
+                PaneDown => entry.3 = "Focus commit details",
+                _ => {}
+            }
+        }
+    }
     entries
         .retain(|entry| entry.0 != CreateWorktree || worktree_unavailable(browser, view).is_none());
     if browser
@@ -2664,9 +2698,6 @@ fn sync_git_details(browser: &Browser, view: &mut View) {
             crate::commit_info::Dialog::new(repository.clone(), oid.clone())
         });
         view.git_details_key = selected;
-    }
-    if view.git_details.is_none() {
-        view.git_details_focused = false;
     }
 }
 
@@ -4476,7 +4507,11 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
     }
     if view.drawer_open && key.code == KeyCode::Right && key.modifiers == KeyModifiers::NONE {
         if key.kind == KeyEventKind::Press {
-            view.toggle_drawer();
+            if view.git_zoomed {
+                view.git_details_focused = true;
+            } else {
+                view.toggle_drawer();
+            }
         }
         return Action::Continue;
     }
@@ -4727,9 +4762,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         Command::GitReturn => {
             if view.git_details_focused {
                 view.git_details_focused = false;
-            } else if view.git_zoomed {
-                view.git_zoomed = false;
-            } else if view.drawer_open {
+            } else if !view.git_zoomed && view.drawer_open {
                 view.toggle_drawer();
             }
         }
@@ -4832,7 +4865,9 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
         Command::Archives => browser.include_archived = !browser.include_archived,
         Command::CyclePane | Command::CyclePaneBack => {
-            if view.drawer_open {
+            if view.git_zoomed {
+                view.git_details_focused = !view.git_details_focused;
+            } else if view.drawer_open {
                 if view.history.present() {
                     view.drawer_git = !view.drawer_git;
                     view.normalize_focus();
@@ -4842,7 +4877,10 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
         }
         Command::PaneUp | Command::PaneDown | Command::PaneLeft | Command::PaneRight => {
-            if view.drawer_open && view.history.present() {
+            if view.git_zoomed {
+                view.git_details_focused =
+                    matches!(command, Command::PaneDown | Command::PaneRight);
+            } else if view.drawer_open && view.history.present() {
                 view.drawer_git = match command {
                     Command::PaneUp | Command::PaneLeft => false,
                     Command::PaneDown | Command::PaneRight => true,
@@ -8298,50 +8336,40 @@ mod cleanup_tests {
         press(&mut browser, &mut view, KeyCode::Esc);
         assert!(!view.help);
         assert!(view.git_zoomed);
-        assert!(
-            menu_entries(&browser, &view)
-                .iter()
-                .any(|entry| entry.command == Command::GitReturn
-                    && entry.label == "Restore Git panel")
-        );
         for code in [KeyCode::Esc, KeyCode::Backspace] {
             press(&mut browser, &mut view, code);
-            assert!(!view.git_zoomed);
+            assert!(view.git_zoomed);
             assert!(view.drawer_open);
             assert_eq!(view.context(), 2);
-            handle_key(&mut browser, &mut view, zoom);
         }
-        handle_key(&mut browser, &mut view, zoom);
-        assert!(!view.git_zoomed);
-
         for code in [KeyCode::Tab, KeyCode::BackTab] {
-            handle_key(&mut browser, &mut view, zoom);
             press(&mut browser, &mut view, code);
-            assert!(!view.git_zoomed);
-            assert_eq!(view.context(), 0);
+            assert!(view.git_zoomed);
+            assert!(view.git_details_focused);
+            sync_git_details(&browser, &mut view);
+            assert!(view.git_details_focused); // Empty details still accepts focus.
             press(&mut browser, &mut view, code);
+            assert!(view.git_zoomed);
+            assert!(!view.git_details_focused);
         }
-        handle_key(&mut browser, &mut view, zoom);
         handle_key(
             &mut browser,
             &mut view,
             KeyEvent::new(KeyCode::Down, KeyModifiers::ALT),
         );
-        assert!(view.git_zoomed);
+        assert!(view.git_zoomed && view.git_details_focused);
         handle_key(
             &mut browser,
             &mut view,
             KeyEvent::new(KeyCode::Up, KeyModifiers::ALT),
         );
-        assert!(!view.git_zoomed);
-        assert_eq!(view.context(), 0);
-        press(&mut browser, &mut view, KeyCode::Tab);
-        handle_key(&mut browser, &mut view, zoom);
+        assert!(view.git_zoomed && !view.git_details_focused);
         press(&mut browser, &mut view, KeyCode::Right);
+        assert!(view.git_zoomed && view.git_details_focused);
+        handle_key(&mut browser, &mut view, zoom);
         assert!(!view.git_zoomed);
-        assert!(!view.drawer_open);
-        view.toggle_drawer();
-        assert!(!view.git_zoomed);
+        assert!(view.drawer_open);
+        assert!(!view.git_details_focused);
         handle_key(&mut browser, &mut view, zoom);
         view.history.tick(None, 1, false, 1).await;
         view.normalize_focus();
