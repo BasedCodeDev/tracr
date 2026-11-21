@@ -239,6 +239,7 @@ pub struct CodexProvider {
     binary: std::path::PathBuf,
     rpc: Mutex<Rpc>,
     listed: StdMutex<BTreeSet<SessionKey>>,
+    startup_trace: crate::startup_trace::Trace,
 }
 #[derive(Serialize, Deserialize)]
 struct Position {
@@ -250,12 +251,22 @@ struct Position {
 
 impl CodexProvider {
     pub async fn connect(binary: &Path, source: SourceConfig) -> Result<Self, ProviderError> {
-        let rpc = Rpc::start(binary, &source.home).await?;
+        Self::connect_with_trace(binary, source, Default::default()).await
+    }
+    pub(crate) async fn connect_with_trace(
+        binary: &Path,
+        source: SourceConfig,
+        startup_trace: crate::startup_trace::Trace,
+    ) -> Result<Self, ProviderError> {
+        let initialize = startup_trace.span("codex_initialize");
+        let rpc = Rpc::start(binary, &source.home).await;
+        initialize.finish(if rpc.is_ok() { "ok" } else { "error" }, None);
         Ok(Self {
             source,
             binary: binary.to_owned(),
-            rpc: Mutex::new(rpc),
+            rpc: Mutex::new(rpc?),
             listed: StdMutex::new(BTreeSet::new()),
+            startup_trace,
         })
     }
     pub async fn close(&self) {
@@ -464,7 +475,21 @@ impl SessionProvider for CodexProvider {
             }
             Some(c) => serde_json::from_str(&c.0).map_err(|_| ProviderError::InvalidCursor)?,
         };
+        let request = self
+            .startup_trace
+            .span(match (position.fallback, position.archived) {
+                (false, false) => "codex_database_list",
+                (false, true) => "codex_database_list_archived",
+                (true, false) => "codex_reconciled_list",
+                (true, true) => "codex_reconciled_list_archived",
+            });
         let response = self.rpc.lock().await.call("thread/list", json!({"limit":100,"archived":position.archived,"cursor":position.cursor,"modelProviders":[],"sourceKinds":SOURCE_KINDS,"sortKey":"updated_at","sortDirection":"desc","useStateDbOnly":!position.fallback})).await;
+        let rows = response
+            .as_ref()
+            .ok()
+            .and_then(|value| value["data"].as_array())
+            .map(Vec::len);
+        request.finish(if rows.is_some() { "ok" } else { "error" }, rows);
         let response = match response {
             Ok(response) => response,
             Err(error)
@@ -473,7 +498,11 @@ impl SessionProvider for CodexProvider {
                         .iter()
                         .any(|code| error.to_string().contains(code)) =>
             {
-                *self.rpc.lock().await = Rpc::start(&self.binary, &self.source.home).await?;
+                let reconnect = self.startup_trace.span("codex_reconnect");
+                let rpc = Rpc::start(&self.binary, &self.source.home).await;
+                reconnect.finish(if rpc.is_ok() { "ok" } else { "error" }, None);
+                let rpc = rpc?;
+                *self.rpc.lock().await = rpc;
                 return Ok(SessionPage {
                     sessions: Vec::new(),
                     warnings: vec![format!(
@@ -511,7 +540,17 @@ impl SessionProvider for CodexProvider {
                         continue;
                     }
                     if position.fallback {
-                        match self.read(&summary.key).await {
+                        let read = self.startup_trace.span("codex_reconcile_read");
+                        let result = self.read(&summary.key).await;
+                        read.finish(
+                            match &result {
+                                Ok(Some(_)) => "ok",
+                                Ok(None) => "missing",
+                                Err(_) => "error",
+                            },
+                            None,
+                        );
+                        match result {
                             Ok(Some(mut fresh)) => {
                                 fresh.archived = position.archived;
                                 summary = fresh;

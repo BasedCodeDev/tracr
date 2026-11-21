@@ -3,6 +3,7 @@ use crate::{
     config::SourceConfig,
     domain::*,
     providers::{SessionProvider, codex::CodexProvider, fixture::FixtureProvider},
+    startup_trace::Trace,
 };
 use serde::Serialize;
 use std::{
@@ -47,11 +48,16 @@ impl SourceSpec {
         }
     }
     pub(crate) async fn open(&self) -> Result<Provider, String> {
+        self.open_with_trace(Trace::default()).await
+    }
+    async fn open_with_trace(&self, trace: Trace) -> Result<Provider, String> {
         match self {
-            Self::Codex { binary, source } => CodexProvider::connect(binary, source.clone())
-                .await
-                .map(|provider| Provider::Codex(Box::new(provider)))
-                .map_err(|e| e.to_string()),
+            Self::Codex { binary, source } => {
+                CodexProvider::connect_with_trace(binary, source.clone(), trace)
+                    .await
+                    .map(|provider| Provider::Codex(Box::new(provider)))
+                    .map_err(|e| e.to_string())
+            }
             Self::Fixture(path) => FixtureProvider::open(path)
                 .map(Provider::Fixture)
                 .map_err(|e| e.to_string()),
@@ -148,6 +154,20 @@ impl Update {
             | Self::Finished { generation, .. }
             | Self::Folder { generation, .. }
             | Self::Detail { generation, .. } => *generation,
+        }
+    }
+    pub(crate) fn trace_details(&self) -> (&'static str, Option<usize>, Option<usize>) {
+        match self {
+            Self::Ready { source, .. } => ("ui_apply_ready", Some(*source), None),
+            Self::Page {
+                source, sessions, ..
+            } => ("ui_apply_page", Some(*source), Some(sessions.len())),
+            Self::Finished { source, .. } => ("ui_apply_finished", Some(*source), None),
+            Self::Live {
+                source, statuses, ..
+            } => ("ui_apply_live", Some(*source), Some(statuses.len())),
+            Self::Folder { .. } => ("ui_apply_folder", None, None),
+            Self::Detail { .. } => ("ui_apply_detail", None, None),
         }
     }
 }
@@ -1064,6 +1084,7 @@ pub struct Discovery {
     requested: HashSet<SessionKey>,
     folder_limit: Arc<Semaphore>,
     live_enabled: bool,
+    startup_trace: Trace,
 }
 impl Default for Discovery {
     fn default() -> Self {
@@ -1081,10 +1102,14 @@ impl Discovery {
             requested: HashSet::new(),
             folder_limit: Arc::new(Semaphore::new(8)),
             live_enabled: false,
+            startup_trace: Trace::default(),
         }
     }
     pub fn enable_live(&mut self) {
         self.live_enabled = true;
+    }
+    pub(crate) fn trace_startup(&mut self, trace: Trace) {
+        self.startup_trace = trace;
     }
     pub fn refresh(&mut self, browser: &mut Browser) {
         for task in self.tasks.drain(..) {
@@ -1093,6 +1118,8 @@ impl Discovery {
         self.checked.clear();
         self.requested.clear();
         browser.begin_refresh();
+        let startup_trace = std::mem::take(&mut self.startup_trace);
+        startup_trace.mark("discovery_started", Some(browser.specs.len()));
         let limit = Arc::new(Semaphore::new(4));
         for (source, spec) in browser.specs.clone().into_iter().enumerate() {
             if self.live_enabled {
@@ -1152,13 +1179,19 @@ impl Discovery {
             let tx = self.tx.clone();
             let generation = browser.generation;
             let limit = limit.clone();
+            let trace = startup_trace.for_source(source);
+            let discovery_span = trace.span("source_discovery");
             self.tasks.push(tokio::spawn(async move {
                 let _permit = limit
                     .acquire_owned()
                     .await
                     .expect("discovery semaphore open");
+                trace.mark("source_slot_acquired", None);
+                let mut count = 0;
+                let mut warned = false;
                 let result = async {
-                    let provider = Arc::new(spec.open().await?);
+                    let provider = Arc::new(spec.open_with_trace(trace.clone()).await?);
+                    trace.mark("source_ready_queued", None);
                     let _ = tx.send(Update::Ready {
                         generation,
                         source,
@@ -1168,6 +1201,9 @@ impl Discovery {
                     let mut seen = HashSet::new();
                     loop {
                         let page = provider.page(cursor).await?;
+                        count += page.sessions.len();
+                        warned |= !page.warnings.is_empty();
+                        trace.mark("source_page_queued", Some(page.sessions.len()));
                         if tx
                             .send(Update::Page {
                                 generation,
@@ -1192,6 +1228,16 @@ impl Discovery {
                     Ok(())
                 }
                 .await;
+                discovery_span.finish(
+                    if result.is_err() {
+                        "error"
+                    } else if warned {
+                        "incomplete"
+                    } else {
+                        "ok"
+                    },
+                    Some(count),
+                );
                 let _ = tx.send(Update::Finished {
                     generation,
                     source,

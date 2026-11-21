@@ -96,7 +96,22 @@ struct Output {
     sources: Vec<SourceDiagnostic>,
 }
 
-async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
+async fn run(cli: Cli, launched: std::time::Instant) -> Result<u8, Box<dyn std::error::Error>> {
+    let trace = if matches!(cli.command, None | Some(Command::Browse { .. }))
+        && let Some(directory) = std::env::var_os("TRACR_STARTUP_TRACE_DIR")
+        && !directory.is_empty()
+    {
+        match tracr::startup_trace::Trace::open(std::path::Path::new(&directory), launched) {
+            Ok(trace) => trace,
+            Err(error) => {
+                eprintln!("tracr: could not open startup trace: {error}");
+                Default::default()
+            }
+        }
+    } else {
+        Default::default()
+    };
+    trace.mark("launch", None);
     let env = Environment::capture()?;
     let config = config::resolve(&env, cli.config.as_deref(), &cli.codex_home)?;
     let command = cli.command.unwrap_or(Command::Browse {
@@ -219,7 +234,8 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     match command {
         Command::Worktrees { .. } | Command::MoveSession { .. } => unreachable!(),
         Command::Browse { .. } => {
-            tracr::tui::run(browser).await?;
+            trace.mark("browser_configured", Some(browser.specs.len()));
+            tracr::tui::run_with_startup_trace(browser, trace).await?;
             Ok(tracr::dev_reload::exit_code())
         }
         Command::List { json, .. } => {
@@ -297,6 +313,7 @@ async fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
 }
 #[tokio::main]
 async fn main() -> ExitCode {
+    let launched = std::time::Instant::now();
     let cli = Cli::parse();
     // Validate after global arguments have propagated from the parent command.
     // Clap's subcommand conflict check alone misses --codex-home before `list`.
@@ -333,7 +350,7 @@ async fn main() -> ExitCode {
         Some(Command::MoveSession { destination, .. }) => Some(destination.clone()),
         _ => None,
     };
-    match run(cli).await {
+    match run(cli, launched).await {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
             if let Some(destination) = move_destination {
