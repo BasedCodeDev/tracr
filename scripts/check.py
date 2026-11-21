@@ -56,6 +56,7 @@ def main():
     if args.codex:
         stage('real-codex', ['python3', 'tests/fixtures/app-server/real_check.py', str(root / 'target/debug/tracr'), args.codex], built)
         stage('real-status', ['python3', 'tests/fixtures/app-server/real_status_check.py', str(root / 'target/debug/tracr'), args.codex], built)
+        stage('real-preview', ['python3', 'tests/fixtures/app-server/preview_check.py', str(root / 'target/debug/tracr'), args.codex], built)
         stage('real-shared', ['python3', 'tests/fixtures/app-server/shared_check.py', str(root / 'target/debug/tracr'), args.codex], built)
         # Ask Cargo for the exact acceptance executable instead of guessing a hash or
         # accidentally selecting an old test artifact from another toolchain.

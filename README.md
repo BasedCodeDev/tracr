@@ -333,6 +333,14 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   Waiting sessions appear first, followed by errors, running, and idle sessions;
   newer sessions come first within each status. Unloaded and unknown sessions are
   omitted. Updates use the same live-status feed as Sessions, without reloading Git.
+- Highlighting a Git session previews it in the Sessions panel. A session already
+  open in this Tracr window shows its terminal; sessions in another client show a
+  read-only live transcript through the shared Codex runtime. The preview cannot
+  send input or answer approvals. If live access is unavailable, saved history is
+  labeled as nonstreaming, or the session is highlighted in its folder's list.
+  Moving to a commit or leaving Git restores the original folder, search, and
+  session selection. Joining mid-response may initially show only new text;
+  the completed response replaces it when available.
 - Enter on a Git session row selects its folder and resumes the session,
   or offers relinking if its folder is missing. Enter on a commit selects its worktree folder,
   offering a chooser when multiple worktrees match, then applies the same

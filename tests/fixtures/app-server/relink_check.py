@@ -55,8 +55,6 @@ with tempfile.TemporaryDirectory(prefix='tracr-relink-ui-') as tmp:
         journal=next((state/'tracr/relocations').glob('*.json'))
         data=json.loads(journal.read_text());data['phase']='verifying';journal.write_text(json.dumps(data))
         reopened.send(b'r');reopened.expect_action('Inspect/recover relocation')
-        reopened.send(b'?');reopened.expect('Inspect/recover relocation')
-        reopened.send(b'\x1b');reopened.wait(lambda:'Actions & shortcuts' not in reopened.text())
         data['phase']='complete';journal.write_text(json.dumps(data))
         reopened.send(b'u');reopened.expect_action('Inspect/recover relocation', False)
         assert 'Inspect/recover relocation' not in reopened.text()

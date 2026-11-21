@@ -67,3 +67,4 @@ pub mod search;
 pub mod worktree_report;
 
 pub mod move_session;
+pub mod session_preview;

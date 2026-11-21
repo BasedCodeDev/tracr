@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.send(b'\x1b[B')
         t.expect_action('Resume session')
         settings({'type': 'notLoaded'})
-        t.wait(lambda: 'Task first · codex' not in t.text())
+        t.wait(lambda: '└─ Task first' not in t.text())
         t.expect_action('Select worktree folder')
         settings({'type': 'idle'})
         t.expect('Idle └─ Task first · codex · feature')

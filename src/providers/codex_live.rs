@@ -23,6 +23,86 @@ use tokio_tungstenite::{
 };
 
 type Socket = WebSocketStream<Join<ChildStdout, ChildStdin>>;
+
+/// A viewer may subscribe, but cannot send input, change settings, or answer requests.
+pub(crate) struct PreviewClient(LiveClient);
+impl PreviewClient {
+    pub(crate) async fn connect(binary: &Path, source: SourceConfig) -> Result<Self, String> {
+        let home = source.home.clone();
+        let client = timeout(
+            Duration::from_secs(5),
+            LiveClient::open(binary, source, true),
+        )
+        .await
+        .map_err(|_| "Preview connection timed out".to_owned())??;
+        let operational = OperationalClient(client);
+        operational.validate_server_home(&home)?;
+        Ok(Self(operational.0))
+    }
+
+    pub(crate) async fn next(&mut self) -> Result<Value, String> {
+        loop {
+            match self.0.socket.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    return serde_json::from_str(&text).map_err(|e| e.to_string());
+                }
+                Some(Ok(Message::Ping(_))) => {
+                    self.0.socket.flush().await.map_err(|e| e.to_string())?
+                }
+                Some(Ok(Message::Pong(_))) => (),
+                _ => return Err("Live preview disconnected".into()),
+            }
+        }
+    }
+
+    pub(crate) async fn call(
+        &mut self,
+        method: &str,
+        params: Value,
+        events: &mut Vec<Value>,
+    ) -> Result<Value, String> {
+        if !matches!(
+            method,
+            "thread/read" | "thread/turns/list" | "thread/resume" | "thread/unsubscribe"
+        ) {
+            return Err("Operation is not allowed on a preview connection".into());
+        }
+        if method == "thread/resume"
+            && params != json!({"threadId": params["threadId"], "excludeTurns": true})
+        {
+            return Err("Preview cannot change session settings".into());
+        }
+        let mut buffered_bytes: usize = events.iter().map(|v| v.to_string().len()).sum();
+        self.0.sequence += 1;
+        let id = self.0.sequence;
+        self.0
+            .send(json!({"id":id,"method":method,"params":params}))
+            .await?;
+        timeout(Duration::from_secs(10), async {
+            loop {
+                let value = self.next().await?;
+                if value.get("method").is_some() {
+                    // Requests are retained for display only, never acknowledged or answered.
+                    buffered_bytes += value.to_string().len();
+                    if events.len() >= 512 || buffered_bytes > 2 * 1024 * 1024 {
+                        return Err("Preview event buffer overflow; reconnecting".into());
+                    }
+                    events.push(value);
+                } else if value.get("id").and_then(Value::as_u64) == Some(id) {
+                    if let Some(error) = value.get("error") {
+                        return Err(format!("{method}: {error}"));
+                    }
+                    return value
+                        .get("result")
+                        .cloned()
+                        .ok_or_else(|| "Missing preview response".into());
+                }
+            }
+        })
+        .await
+        .map_err(|_| "Preview request timed out".to_owned())?
+    }
+}
 #[derive(Clone, Debug)]
 pub struct LiveSession {
     pub title: String,
