@@ -1507,7 +1507,8 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         selected_git_repository(browser).is_some(),
     );
     if let Some(area) = panels.details {
-        let block = pane_block("Commit information", view.git_details_focused);
+        let block = pane_block("Commit information", view.git_details_focused)
+            .padding(ratatui::widgets::Padding::new(2, 2, 1, 1));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if let Some(info) = &view.git_details {
