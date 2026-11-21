@@ -900,8 +900,18 @@ fn block(title: &str, focused: bool) -> Block<'_> {
 }
 
 /// Keep the counter inside the corners and reserve its columns before truncating the title.
-fn git_history_block(area: Rect, focused: bool, count: Option<usize>) -> Block<'static> {
-    let counter = count.map(|count| format!(" {count} "));
+fn git_history_block(
+    area: Rect,
+    focused: bool,
+    count: Option<usize>,
+    more_above: bool,
+) -> Block<'static> {
+    let counter = match (count, more_above) {
+        (Some(count), true) => Some(format!(" {count} ↑ ")),
+        (Some(count), false) => Some(format!(" {count} ")),
+        (None, true) => Some(" ↑ ".into()),
+        (None, false) => None,
+    };
     let available = usize::from(area.width.saturating_sub(2));
     let counter =
         counter.filter(|text| unicode_width::UnicodeWidthStr::width(text.as_str()) <= available);
@@ -935,10 +945,14 @@ mod git_counter_tests {
     fn narrow_title_reserves_counter_and_corners() {
         let area = Rect::new(0, 0, 12, 5);
         for focused in [false, true] {
-            for (count, expected) in [(Some(12345), " 12345 "), (Some(1), " 1 "), (Some(0), " 0 ")]
-            {
+            for (count, above, expected) in [
+                (Some(12345), true, " 12345 ↑ "),
+                (Some(1), true, " 1 ↑ "),
+                (Some(0), false, " 0 "),
+                (None, true, " ↑ "),
+            ] {
                 let mut buffer = Buffer::empty(area);
-                git_history_block(area, focused, count).render(area, &mut buffer);
+                git_history_block(area, focused, count, above).render(area, &mut buffer);
                 let start = area.right() - 1 - expected.chars().count() as u16;
                 let text: String = (start..area.right() - 1)
                     .map(|x| buffer[(x, 0)].symbol())
@@ -1457,7 +1471,12 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 .collect();
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(git_history_block(git_area, view.git_focus, commits_above))
+                    .block(git_history_block(
+                        git_area,
+                        view.git_focus,
+                        commits_above,
+                        range.start > 0,
+                    ))
                     .highlight_symbol("> ")
                     .highlight_style(selection_style(view.context() == 2)),
                 git_area,
@@ -1473,6 +1492,18 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 range.len(),
                 range.start,
             );
+            if range.end < presentation.rows.len()
+                || (!view.history.exhausted && !presentation.rows.is_empty())
+            {
+                frame.render_widget(
+                    Paragraph::new(" ↓ ").style(
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Rect::new(git_area.right() - 4, git_area.bottom() - 1, 3, 1),
+                );
+            }
         } else {
             draw_rail(frame, git_area, panels.mode, " Git Worktrees ");
         }
@@ -7538,7 +7569,7 @@ mod cleanup_tests {
                 .collect();
             assert!(!thumb.is_empty());
             for y in 2..11 {
-                assert_eq!(buffer[(79, y)].symbol(), "│");
+                assert!(matches!(buffer[(79, y)].symbol(), "│" | "▐"));
             }
             if index == 0 {
                 assert_eq!(thumb.first(), Some(&2));

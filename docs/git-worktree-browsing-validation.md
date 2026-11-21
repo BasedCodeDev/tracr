@@ -115,9 +115,9 @@ change. Library session-navigation tests pass.
 
 ## Shared thin scrollbars (2026-11-21)
 
-The expanded scope replaces Git's arrows with the application's shared visual
-scrollbar, retaining the exact commit counter on the top border. The track and
-thumb both use the thin `│` glyph: dark gray track, cyan thumb, no arrowheads.
+The expanded scope adds the application's shared visual scrollbar to Git,
+retaining its border arrows and exact commit counter on the top border. The
+track uses a thin dark gray `│`; the thumb uses a solid half-cell cyan `▐`.
 Scrollbars appear only when loaded content exceeds the viewport. Git proportions
 refer to the loaded prefix; computing them never queries total Git history.
 
@@ -148,3 +148,11 @@ selection, Git counter preservation and resizing. Idle scenarios emitted no Git
 commands or redraw output. The supplemental Git-session script still has the
 previously reproduced baseline failure searching for “Select worktree folder”.
 Logs and benchmark samples are in this worktree's ignored `.tmp/uniform-*` files.
+
+### Scrollbar visibility correction
+
+The thumb now uses a solid half-cell `▐`, so it differs visibly from the thin `│`
+track even when foreground colors are difficult to distinguish. Its terminal-column
+allocation is unchanged. Git also retains its upper/lower border arrows alongside
+the scrollbar, with the commit counter immediately left of the upper arrow.
+The lower arrow still indicates unconfirmed/unloaded history at the loaded edge.

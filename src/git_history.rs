@@ -2617,16 +2617,21 @@ mod tests {
                 view.history.top.set(selected.saturating_sub(2));
                 terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
                 let buffer = terminal.backend().buffer();
-                assert!(
-                    !buffer
-                        .content
-                        .iter()
-                        .any(|cell| matches!(cell.symbol(), "↑" | "↓")
+                let has_arrow = |symbol| {
+                    buffer.content.iter().any(|cell| {
+                        cell.symbol() == symbol
                             && cell.fg == Color::Cyan
-                            && cell.modifier.contains(Modifier::BOLD))
-                );
+                            && cell.modifier.contains(Modifier::BOLD)
+                    })
+                };
+                assert_eq!(has_arrow("↑"), selected != 0);
+                assert_eq!(has_arrow("↓"), selected != 79);
                 let top = view.git_sessions.borrow().top;
-                let expected_counter = format!(" {top} ");
+                let expected_counter = if top > 0 {
+                    format!(" {top} ↑ ")
+                } else {
+                    " 0 ".into()
+                };
                 let expected_width = expected_counter.chars().count();
                 let right = if width >= 120 {
                     (width * 2 / 5).min(60)
@@ -2656,7 +2661,10 @@ mod tests {
                     .clone()
                     .filter(|y| {
                         let cell = &buffer[(right - 1, *y)];
-                        assert_eq!(cell.symbol(), "│");
+                        assert!(matches!(cell.symbol(), "│" | "▐"));
+                        if cell.fg == Color::Cyan {
+                            assert_eq!(cell.symbol(), "▐");
+                        }
                         cell.fg == Color::Cyan
                     })
                     .collect();

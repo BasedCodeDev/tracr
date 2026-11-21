@@ -38,7 +38,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, track: Rect, total: usize, visible: us
             .end_symbol(None)
             .track_symbol(Some("│"))
             .track_style(Style::default().fg(Color::DarkGray))
-            .thumb_symbol("│")
+            .thumb_symbol("▐")
             .thumb_style(Style::default().fg(Color::Cyan)),
         track,
         // Ratatui expects the number of possible viewport positions, not rows.
@@ -167,7 +167,10 @@ mod tests {
                     .collect();
                 if total > visible {
                     assert!(!thumb.is_empty());
-                    assert_eq!(buffer[(6, 1)].symbol(), "│");
+                    assert!(matches!(buffer[(6, 1)].symbol(), "│" | "▐"));
+                    for y in &thumb {
+                        assert_eq!(buffer[(6, *y)].symbol(), "▐");
+                    }
                     if top == 0 {
                         assert_eq!(thumb[0], 1);
                     }
