@@ -92,19 +92,19 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
             terminal.expect_focus('Folders')
             if action == 'presentation':
                 terminal.expect('[remote: origin/main]')
-                terminal.expect('[tag: light] [tag: release]')
-                terminal.expect('[HEAD] [◇ feature]')
+                terminal.expect('[tag: light]'); terminal.expect('[tag: release]')
+                terminal.expect('[HEAD]'); terminal.expect('[◇ feature]')
                 terminal.send(b'\tl')
                 terminal.expect_action('Commit information')
                 terminal.send(b'r')
                 terminal.wait(lambda: 'loading more' not in terminal.text())
                 terminal.send(b'f')
                 terminal.expect('[HEAD]')
-                terminal.expect('[HEAD] [◇ feature]')
+                terminal.expect('[HEAD]'); terminal.expect('[◇ feature]')
                 terminal.finish()
                 return
             if action == 'follow':
-                terminal.expect('[HEAD] [◇ feature] History 099')
+                terminal.expect('[HEAD] History 099'); terminal.expect('[◇ feature]')
                 terminal.send(b'\t\x1b[A')
                 oid = subprocess.check_output([real_git, '-C', str(project), 'rev-parse', 'HEAD~199'], env=env).decode().strip()[:7]
                 terminal.expect_selected_commit(subprocess.check_output([real_git, '-C', str(project), 'show', '-s', '--format=%s', oid], env=env).decode().strip())
@@ -126,7 +126,7 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                     terminal.send(direction)
                     deadline = time.monotonic() + .15
                     terminal.wait(lambda: time.monotonic() >= deadline)
-                terminal.expect(f'[HEAD] [{main_branch}] History 299')
+                terminal.expect('[HEAD] History 299'); terminal.expect(f'[{main_branch}]')
                 terminal.send(b'l')
                 for direction in [b'\x1b[A'] * 40 + [b'\x1b[B'] * 100:
                     if any(re.search(r'> .* (?:listed|feature) \(', terminal.line(row)) for row in range(terminal.dimensions[0])):
@@ -134,12 +134,12 @@ os.execv(os.environ['GIT_TEST_REAL'], [os.environ['GIT_TEST_REAL'], *args])
                     terminal.send(direction)
                     deadline = time.monotonic() + .15
                     terminal.wait(lambda: time.monotonic() >= deadline)
-                terminal.expect('[HEAD] [◇ feature] History 099')
+                terminal.expect('[HEAD] History 099'); terminal.expect('[◇ feature]')
                 terminal.finish()
                 return
             if action in ('progressive', 'expansion-quit'):
                 terminal.expect('History 299')
-                terminal.expect('[HEAD] [◇ feature]')
+                terminal.expect('[HEAD]'); terminal.expect('[◇ feature]')
                 terminal.send(b'\t\x1b[F')
                 if action == 'expansion-quit':
                     terminal.wait(lambda: bool(list(home.glob('pending-*'))))

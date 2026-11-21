@@ -1,19 +1,17 @@
-"""Real read-only Git previews against an independent Codex owner and local model.
+"""Real native Codex UI Git previews against an independent Codex owner and local model.
 No credentials, external model requests, or user sessions. Checks both history formats.
 """
 import http.server
 import json
 import os
 from pathlib import Path
-import socket
 import subprocess
 import sys
 import threading
 import time
 from pty_support import Terminal
-from real_status_check import probe
+from real_status_check import probe, Owner
 from diagnostics import run_cli, scratch_dir
-from check_codex_release import connect
 
 
 def check(binary, codex, root, mode):
@@ -30,11 +28,18 @@ def check(binary, codex, root, mode):
         def log_message(self, *_):
             pass
         def do_POST(self):
-            requests.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
-            n = len(requests)
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            with (root / 'http-requests.jsonl').open('a') as out:
+                out.write(json.dumps({'path': self.path, 'body': body}) + '\n')
+            if self.path != '/v1/responses':
+                self.send_response(200); self.end_headers(); self.wfile.write(b'{}'); return
+            title_request = 'Generate a concise, single-line task title' in json.dumps(body)
+            if not title_request:
+                requests.append(body)
+            n = 'title' if title_request else len(requests)
             item = {'type': 'message', 'id': f'msg{n}', 'role': 'assistant', 'status': 'completed',
-                    'content': [{'type': 'output_text', 'text': f'EXTERNAL_REPLY_{n}', 'annotations': []}]}
-            if state['approval'] and not state['issued']:
+                    'content': [{'type': 'output_text', 'text': 'Synthetic session' if title_request else f'EXTERNAL_REPLY_{n}', 'annotations': []}]}
+            if not title_request and state['approval'] and not state['issued']:
                 state['issued'] = True
                 item = {'type': 'function_call', 'id': f'fc{n}', 'call_id': f'call{n}', 'name': 'exec_command',
                         'arguments': json.dumps({'cmd': 'printf PREVIEW_APPROVAL_EXECUTED', 'sandbox_permissions': 'require_escalated',
@@ -67,17 +72,17 @@ def check(binary, codex, root, mode):
     model = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     threading.Thread(target=model.serve_forever, daemon=True).start()
     config = root / 'codex/config.toml'
-    config.write_text(config.read_text().replace('http://127.0.0.1:1/v1', f'http://127.0.0.1:{model.server_port}/v1'))
-    with socket.socket() as reservation:
-        reservation.bind(('127.0.0.1', 0))
-        port = reservation.getsockname()[1]
+    config.write_text(config.read_text().replace('http://127.0.0.1:1/v1', f'http://127.0.0.1:{model.server_port}/v1') + f'\n[projects.{json.dumps(str(project))}]\ntrust_level = "trusted"\n')
     log = (root / 'daemon.log').open('w')
-    daemon = subprocess.Popen([codex, 'app-server', '--listen', f'ws://127.0.0.1:{port}'], env=env, cwd=root, stdout=log, stderr=log)
-    wrapper = root / 'codex-proxy'
-    wrapper.write_text('#!/usr/bin/env python3\nimport os,sys,socket,select\n' +
-        f'if sys.argv[1:] != ["app-server","proxy"]: os.execv({codex!r},[{codex!r}]+sys.argv[1:])\n' +
-        f's=socket.create_connection(("127.0.0.1",{port}))\n' +
-        'while True:\n ready,_,_=select.select([s,sys.stdin.buffer],[],[])\n for stream in ready:\n  data=os.read(stream.fileno(),65536)\n  if not data: sys.exit(0)\n  if stream is s: sys.stdout.buffer.write(data);sys.stdout.buffer.flush()\n  else: s.sendall(data)\n')
+    daemon = subprocess.Popen([codex, 'app-server', '--listen', 'unix://'], env={**env, 'CODEX_HOME': 'codex'}, cwd=root, stdout=log, stderr=log)
+    wrapper = root / 'codex-client'
+    launches = root / 'preview-pids'
+    slow_prepare = root / 'slow-prepare'
+    preparing_pid = root / 'preparing-pid'
+    wrapper.write_text('#!/usr/bin/env python3\nimport os,sys,time\nfrom pathlib import Path\n' +
+        f'if sys.argv[1:] == ["app-server","--stdio"] and Path({str(slow_prepare)!r}).exists():\n Path({str(preparing_pid)!r}).write_text(str(os.getpid()))\n time.sleep(60)\n' +
+        f'if sys.argv[1:2] == ["resume"]:\n with open({str(launches)!r},"a") as log: log.write(str(os.getpid())+"\\n")\n' +
+        f'os.execv({codex!r},[{codex!r}]+sys.argv[1:])\n')
     wrapper.chmod(0o755)
     owner = terminal = None
     tid = fixture['baseline']['id']
@@ -86,7 +91,12 @@ def check(binary, codex, root, mode):
         deadline = time.monotonic() + 12
         while owner is None:
             try:
-                owner = connect(codex, env, port)
+                previous = Path.cwd()
+                try:
+                    os.chdir(root)
+                    owner = Owner(codex, {**env, 'CODEX_HOME': 'codex'})
+                finally:
+                    os.chdir(previous)
             except OSError:
                 assert time.monotonic() < deadline
                 time.sleep(.1)
@@ -97,18 +107,42 @@ def check(binary, codex, root, mode):
         terminal.send(b'\x1b`')
         terminal.send(b'\x1b[1;3C')
         terminal.expect_action('Select worktree folder')
+        slow_prepare.touch()
         terminal.send(b'\x1b[B')
-        terminal.expect('read-only')
-        terminal.expect('You: Remember the synthetic project')
-        terminal.expect('Assistant: The synthetic project')
+        terminal.wait(preparing_pid.exists)
+        preparing = int(preparing_pid.read_text())
+        terminal.send(b'\x1b[A')
+        terminal.wait(lambda: not Path(f'/proc/{preparing}').exists())
+        slow_prepare.unlink()
+        assert not launches.exists(), 'cancelled preparation launched a UI'
+        checks.append('leaving during preparation kills only its disposable metadata client')
+        terminal.send(b'\x1b[B')
+        terminal.expect('Codex preview · Enter to interact')
+        terminal.expect('OpenAI Codex')
+        terminal.expect('The synthetic project')
         assert not requests, 'highlighting started a model turn'
-        checks.append('highlight renders external history without starting a turn')
+        def settings():
+            reply = owner.call('thread/resume', {'threadId': tid, 'excludeTurns': True})
+            return {field: reply.get(field) for field in ['cwd', 'model', 'modelProvider', 'approvalPolicy', 'sandbox', 'reasoningEffort']}
+        assert settings() == {field: baseline.get(field) for field in settings()}, 'preview changed owner settings'
+        terminal.send(b'\x1b[200~DO_NOT_SEND_TO_CODEX\x1b[201~')
+        terminal.resize(45, 170)
+        terminal.expect('The synthetic project')
+        assert not requests, 'paste reached the preview'
+        terminal.resize(40, 160)
+        checks.append('highlight renders native Codex UI without starting a turn')
+        def latest_pid():
+            return int(launches.read_text().splitlines()[-1])
+        def gone(pid):
+            return not Path(f'/proc/{pid}').exists()
         def turn(text):
             owner.call('turn/start', {'threadId': tid, 'input': [{'type': 'text', 'text': text, 'text_elements': []}],
                                      'approvalPolicy': 'on-request', 'sandboxPolicy': {'type': 'readOnly'}})
         turn('Synthetic external update')
         terminal.expect('LIVE_STREAM_PREFIX')
+        streaming_pid = latest_pid()
         terminal.send(b'\x1b[A')
+        terminal.wait(lambda: gone(streaming_pid))
         terminal.wait(lambda: 'LIVE_STREAM_PREFIX' not in terminal.text())
         stream_release.set()
         deadline = time.monotonic() + 10
@@ -123,7 +157,7 @@ def check(binary, codex, root, mode):
         assert tid in owner.call('thread/loaded/list', {})['data']
         terminal.send(b'\x1b[B')
         terminal.expect('EXTERNAL_REPLY_1')
-        checks.append('commit restores session list; reselect restores external transcript')
+        checks.append('commit restores session list; reselect launches a fresh native Codex client')
         state['approval'] = True
         turn('Synthetic approval')
         deadline = time.monotonic() + 10
@@ -132,12 +166,22 @@ def check(binary, codex, root, mode):
             message = owner.q.get(timeout=max(.01, deadline-time.monotonic()))
             if isinstance(message, dict) and 'id' in message and 'requestApproval' in message.get('method', ''):
                 approval = message
-        terminal.expect('interactive client')
+        terminal.expect('Disposable preview test')
         assert len(requests) == 2, 'preview answered approval'
+        approval_settings = settings()
+        approval_pid = latest_pid()
+        terminal.send(b'\x1b[A')
+        terminal.wait(lambda: gone(approval_pid))
+        assert len(requests) == 2, 'detaching answered approval'
+        terminal.send(b'\x1b[B')
+        terminal.expect('Disposable preview test')
+        assert settings() == approval_settings, 'reattaching changed pending owner settings'
         owner.send({'id': approval['id'], 'result': {'decision': 'decline'}})
         terminal.expect('EXTERNAL_REPLY_3')
         checks.append('preview leaves approval unanswered; owner resolves it while preview stays attached')
+        idle_pid = latest_pid()
         terminal.send(b'\x1b')
+        terminal.wait(lambda: gone(idle_pid))
         terminal.wait(lambda: 'EXTERNAL_REPLY_3' not in terminal.text())
         turn('Owner still works after leaving Git')
         deadline = time.monotonic() + 10
@@ -152,6 +196,21 @@ def check(binary, codex, root, mode):
             assert current[field] == baseline[field], field
         assert len(requests) == 4
         checks.append('leaving preview preserves owner and produces no duplicate turns')
+        terminal.send(b'\x1b`\x1b[1;3C')
+        terminal.send(b'\x1b[H\x1b[B')
+        terminal.expect('EXTERNAL_REPLY_4')
+        promoted_pid = latest_pid()
+        launch_count = len(launches.read_text().splitlines())
+        terminal.send(b'\r' if mode == 'legacy' else b'\x1b[<0;100;20M')
+        terminal.wait(lambda: 'Codex preview · Enter to interact' not in terminal.text())
+        terminal.send(b'PROMOTED_INPUT')
+        terminal.expect('PROMOTED_INPUT')
+        time.sleep(.3)
+        terminal.send(b'\r')
+        terminal.expect('EXTERNAL_REPLY_5')
+        assert not gone(promoted_pid)
+        assert len(launches.read_text().splitlines()) == launch_count, 'promotion restarted Codex'
+        checks.append(('Enter' if mode == 'legacy' else 'Click') + ' promotes the same client and allows interaction without restarting')
         print(json.dumps({'mode': mode, 'status': 'passed', 'checks': checks}), flush=True)
         (root / 'results.json').write_text(json.dumps({'status': 'passed', 'mode': mode, 'checks': checks}, indent=2))
     finally:

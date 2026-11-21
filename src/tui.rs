@@ -1299,12 +1299,9 @@ fn sync_terminal_view(browser: &Browser, view: &View) {
 }
 
 fn tick_session_preview(browser: &Browser, view: &View) -> bool {
-    let target = preview_session(browser, view).and_then(|session| {
-        if view.terminals.borrow().owns(&session.key) { return None; }
-        browser.specs.iter().find(|spec| matches!(spec, crate::browser::SourceSpec::Codex { source, .. } if source.id == session.key.source_id))
-            .cloned().map(|spec| (session.key, spec))
-    });
-    view.session_preview.borrow_mut().tick(target)
+    let target = preview_session(browser, view)
+        .and_then(|session| (!view.terminals.borrow().owns(&session.key)).then_some(session.key));
+    view.session_preview.borrow_mut().tick(target, browser)
 }
 
 fn git_session_status(status: crate::domain::RuntimeStatus) -> &'static str {
@@ -1406,6 +1403,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     reminder.expire(std::time::Instant::now());
     view.drawer_reminder.set(reminder);
     view.terminals.borrow_mut().visible = false;
+    view.session_preview.borrow_mut().terminals.visible = false;
     if let Some(dialog) = &view.terminal_recovery {
         dialog.draw(frame);
         return;
@@ -3297,40 +3295,16 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 return;
             }
             let preview = preview_session(browser, view);
-            let preview_state = view.session_preview.borrow();
+            let mut preview_state = view.session_preview.borrow_mut();
             if let Some(session) = &preview {
-                if preview_state.key.as_ref() == Some(&session.key)
-                    && matches!(
-                        preview_state.snapshot.mode,
-                        crate::session_preview::Mode::Live | crate::session_preview::Mode::History
-                    )
-                {
-                    let text = preview_state
-                        .snapshot
-                        .text()
-                        .lines()
-                        .map(safe_text)
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let title = format!(
-                        "Preview · {} · {}",
-                        safe_text(&preview_state.snapshot.notice),
-                        safe_text(&session.title)
-                    );
-                    let paragraph =
-                        Paragraph::new(text).wrap(ratatui::widgets::Wrap { trim: false });
-                    let block = pane_block(&title, false);
-                    let inner = block.inner(area);
-                    let scroll = paragraph
-                        .line_count(inner.width.max(1))
-                        .saturating_sub(usize::from(inner.height));
-                    frame.render_widget(
-                        paragraph
-                            .block(block)
-                            .scroll((scroll.min(u16::MAX as usize) as u16, 0)),
-                        area,
-                    );
-                    return;
+                if preview_state.key.as_ref() == Some(&session.key) {
+                    let border = pane_block("Codex preview · Enter to interact", false);
+                    let inner = border.inner(area);
+                    preview_state.terminals.area = inner;
+                    if preview_state.terminals.draw(frame, inner, false, false) {
+                        frame.render_widget(border, area);
+                        return;
+                    }
                 }
             }
             let sessions = if let Some(session) = &preview {
@@ -3353,6 +3327,7 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                 .as_ref()
                 .map(|s| &s.key)
                 .or(browser.selected.as_ref());
+            let preview_notice = safe_text(&preview_state.notice);
             let scope = preview
                 .as_ref()
                 .map(|session| {
@@ -3364,10 +3339,10 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                             .map(|p| safe_text(&p.display().to_string()))
                             .unwrap_or_else(|| "Unknown folder".into()),
                         if preview_state.key.as_ref() == Some(&session.key) {
-                            if preview_state.snapshot.notice.is_empty() {
+                            if preview_state.notice.is_empty() {
                                 "Loading preview…"
                             } else {
-                                &preview_state.snapshot.notice
+                                &preview_notice
                             }
                         } else {
                             "Preview"
@@ -4423,6 +4398,9 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
             if let Some(annotation) = selected_git_session(browser, view) {
                 let session = annotation.session;
+                view.session_preview
+                    .borrow_mut()
+                    .promote(&mut view.terminals.borrow_mut(), &session.key);
                 if let Some(cwd) = session.cwd {
                     if let Some(main) = view
                         .history
@@ -5182,7 +5160,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let size = terminal.size()?;
             view.folder_rows_snapshot = Some(std::rc::Rc::new(browser.folder_rows()));
             terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame, &browser); })?;
-            guard.mouse_capture(view.terminals.borrow().active.is_some())?;
+            guard.mouse_capture(view.terminals.borrow().active.is_some() || view.session_preview.borrow().terminals.visible)?;
             idle.deadline = next_age_update(&browser, &view, size.height)
                 .into_iter().chain(view.drawer_reminder.get().deadline).min();
             }
@@ -5227,6 +5205,13 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
                 if let Event::Mouse(mouse) = &incoming {
+                    let preview_clicked = matches!(mouse.kind,crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left))
+                        && !view.modal_open() && view.session_preview.borrow().terminals.visible
+                        && view.session_preview.borrow().terminals.area.contains((mouse.column,mouse.row).into());
+                    if preview_clicked {
+                        let _ = execute_command(Command::GitSelectWorktree, &mut browser, &mut view);
+                        continue;
+                    }
                     if view.drawer_open { continue; }
                     if !view.modal_open() {
                         if matches!(mouse.kind,crossterm::event::MouseEventKind::Down(_)) && view.terminals.borrow().visible && view.terminals.borrow().area.contains((mouse.column,mouse.row).into()) {view.focus=1;view.git_focus=false;sync_terminal_view(&browser, &view);}
@@ -5497,6 +5482,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         Ok(())
     }
     .await;
+    view.session_preview.get_mut().shutdown().await;
     view.terminals.get_mut().shutdown().await;
     git_watch.stop();
     terminal_git_watch.stop();
