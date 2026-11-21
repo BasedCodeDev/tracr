@@ -533,19 +533,15 @@ impl History {
         Line::from(spans)
     }
 
-    pub(crate) fn primary_branch_rank(label: &crate::git::RefLabel) -> Option<u8> {
+    pub(crate) fn reference_labels(&self, oid: &str) -> Vec<&crate::git::RefLabel> {
         use crate::git::RefKind;
 
-        match (&label.kind, label.name.as_str()) {
-            (RefKind::Local, "main") => Some(0),
-            (RefKind::Local, "master") => Some(1),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn reference_labels(&self, oid: &str) -> Vec<&crate::git::RefLabel> {
         let mut labels: Vec<_> = self.references.get(oid).into_iter().flatten().collect();
-        labels.sort_by_key(|label| Self::primary_branch_rank(label).unwrap_or(2));
+        labels.sort_by_key(|label| match (&label.kind, label.name.as_str()) {
+            (RefKind::Local, "main") => 0,
+            (RefKind::Local, "master") => 1,
+            _ => 2,
+        });
         labels
     }
 

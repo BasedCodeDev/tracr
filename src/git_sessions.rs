@@ -237,8 +237,7 @@ fn commit_sections(
         }
     }
 
-    let mut sections = Vec::new();
-    let mut feature_groups = Vec::new();
+    let mut groups = Vec::new();
     let mut compact = Vec::new();
     for label in labels {
         let local = (label.kind == RefKind::Local).then_some(label.name.as_str());
@@ -250,27 +249,18 @@ fn commit_sections(
             compact.push(line);
             continue;
         };
-        let group = CommitSection::Branch {
+        groups.push(CommitSection::Branch {
             heading: history.wrap_reference_labels(width, [line]),
             sessions,
-        };
-        if History::primary_branch_rank(label).is_some() {
-            if !compact.is_empty() {
-                sections.push(CommitSection::References(
-                    history.wrap_reference_labels(width, std::mem::take(&mut compact)),
-                ));
-            }
-            sections.push(group);
-        } else {
-            feature_groups.push(group);
-        }
+        });
     }
+    let mut sections = Vec::new();
     if !compact.is_empty() {
         sections.push(CommitSection::References(
             history.wrap_reference_labels(width, compact),
         ));
     }
-    sections.extend(feature_groups);
+    sections.extend(groups);
     if !unmatched.is_empty() {
         sections.push(CommitSection::Sessions(unmatched));
     }

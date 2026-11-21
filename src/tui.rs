@@ -6183,13 +6183,13 @@ mod cleanup_tests {
             );
             lines.iter().position(|line| line.contains(needle)).unwrap()
         };
+        let compact = row("[master] [release] [tag: v1]");
         let main = row("[main]");
+        assert_eq!(main, compact + 1);
         assert_eq!(row("Main session"), main + 1);
         assert!(lines[main + 1].contains("└─"));
-        let compact = row("[master] [release] [tag: v1]");
-        assert_eq!(compact, main + 2);
         let feature = row("[feature]");
-        assert_eq!(feature, compact + 1);
+        assert_eq!(feature, main + 2);
         assert_eq!(row("Feature input"), feature + 1);
         assert!(lines[feature + 1].contains("├─"));
         assert_eq!(row("Feature runner"), feature + 2);
