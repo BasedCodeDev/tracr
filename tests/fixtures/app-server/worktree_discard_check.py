@@ -81,7 +81,7 @@ def setup(root, env):
     git('init', '-qb', 'main')
     git('config', 'user.name', 'Test')
     git('config', 'user.email', 'test@example.invalid')
-    (main / '.gitignore').write_text('ignored.txt\n/.worktrees/\n')
+    (main / '.gitignore').write_text('ignored.txt\n/.tmp/\n/.worktrees/\n')
     (main / 'tracked.txt').write_text('main\n')
     git('add', '.')
     git('commit', '-qm', 'Base')
@@ -166,20 +166,68 @@ def check_fake(root, binary):
             t.wait(lambda: expected not in t.text())
             store.write_text(json.dumps(state))
 
+        bare = worktree / '.tmp/real3/paginated/codex/.tmp/git-fixture'
+        bare.mkdir(parents=True)
+        git('init', '--bare', '-qb', 'main', cwd=bare)
+        (bare / 'config').unlink()
+        # Match the config-free bare repository that triggered the original block.
+        assert git('rev-parse', '--is-bare-repository', cwd=bare) == 'true'
         nested = worktree / 'nested'
         nested.mkdir()
         git('init', '-qb', 'main', cwd=nested)
-        t.send(b'd')
-        t.expect('Nested Git repository or submodule')
-        t.send(b'\x1b')
-        t.wait(lambda: 'Nested Git repository or submodule' not in t.text())
-        shutil.rmtree(nested)
+        git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+            'commit', '--allow-empty', '-qm', 'Nested history', cwd=nested)
 
+        def expect_blocked(message):
+            t.send(b'd')
+            t.expect(message)
+            t.send(b'\x1b')
+            t.wait(lambda: message not in t.text())
+            assert not json.loads(store.read_text())['deleted']
+
+        linked = root / 'nested-linked'
+        git('worktree', 'add', '-qb', 'linked', str(linked), cwd=nested)
+        expect_blocked('Repository has linked worktrees')
+        assert linked.is_dir()
+        git('worktree', 'remove', str(linked), cwd=nested)
+
+        external = root / 'external'
+        external.mkdir()
+        git('init', '--bare', '-qb', 'main', cwd=external)
+        alternates = nested / '.git/objects/info/alternates'
+        alternates.write_text(str(external / 'objects') + '\n')
+        expect_blocked('Shared or alternate Git storage')
+        alternates.unlink()
+
+        storage_link = nested / '.git/objects/info/storage-link'
+        storage_link.symlink_to(external / 'objects')
+        expect_blocked('points outside the repository')
+        storage_link.unlink()
+
+        hook = nested / 'local-hook'
+        hook.write_text('# Local test hook\n')
+        (nested / '.git/hooks/local-hook').symlink_to('../../local-hook')
+
+        linked_inside = worktree / 'linked-inside'
+        git('worktree', 'add', '-qb', 'linked-inside', str(linked_inside), cwd=nested)
+        expect_blocked('Linked checkout or external Git metadata')
+        git('worktree', 'remove', str(linked_inside), cwd=nested)
+
+        git('update-index', '--add', '--cacheinfo', f'160000,{git("rev-parse", "HEAD", cwd=nested)},submodule',
+            cwd=nested)
+        expect_blocked('Repository contains submodules')
+        git('update-index', '--force-remove', 'submodule', cwd=nested)
+
+        t.resize(40, 120)
         t.send(b'd')
-        t.expect('3 Codex conversations remaining')
+        t.expect('Nested repositories and their Git history will be permanently deleted')
+        t.expect('Bare repository .tmp/real3/paginated/codex/.tmp/git-fixture')
+        t.expect('Repository nested')
         t.expect('Staged and modified')
         t.expect('Untracked')
+        t.send(b'\x1b[6~')
         t.expect('Ignored')
+        t.expect('3 Codex conversations remaining')
         t.send(b'\x1b[6~')
         t.expect('Saved side chat')
         t.expect('Archived child [archived]')
@@ -191,11 +239,14 @@ def check_fake(root, binary):
         t.expect('Enlarge terminal')
         t.send(b'\x1b')
         assert worktree.exists() and not json.loads(store.read_text())['deleted']
-        t.resize(30, 100)
+        assert (bare / 'HEAD').is_file() and (nested / '.git').is_dir()
+        t.resize(40, 120)
 
         t.send(b'd')
+        t.expect('Type the branch name')
+        t.send(b'\x1b[6~\x1b[6~')
         t.expect('3 Codex conversations remaining')
-        (worktree / 'ignored.txt').write_text('changed after review')
+        git('symbolic-ref', 'HEAD', 'refs/heads/changed-after-review', cwd=bare)
         confirm(t)
         t.expect('reviewed worktree or its conversations changed')
         assert worktree.exists() and not json.loads(store.read_text())['deleted']
@@ -203,6 +254,8 @@ def check_fake(root, binary):
         t.wait(lambda: 'Discard stopped' not in t.text())
 
         t.send(b'd')
+        t.expect('Type the branch name')
+        t.send(b'\x1b[6~\x1b[6~')
         t.expect('3 Codex conversations remaining')
         confirm(t)
         t.expect('injected delete failure')
@@ -223,6 +276,8 @@ def check_fake(root, binary):
     try:
         t.expect('Unfinished discard')
         t.send(b'D')
+        t.expect('Type the branch name')
+        t.send(b'\x1b[6~\x1b[6~')
         t.expect('2 Codex conversations remaining')
         confirm(t)
         t.expect('Worktree, local branch, and conversations discarded')
@@ -231,6 +286,7 @@ def check_fake(root, binary):
     finally:
         t.close()
     verify_git(main, worktree, git)
+    assert (external / 'objects').is_dir()
     state = json.loads(store.read_text())
     assert state['deleted'] == [side[0], spawned[0], parent[0]]
     assert state['chats'] == dict([unrelated, extra])
@@ -240,6 +296,7 @@ def check_fake(root, binary):
     journal = root / 'state' / 'tracr' / 'worktree-discard' / 'current.json'
     record = json.loads(journal.read_text())
     record['phase'] = 'RemovingWorktree'
+    record['approved']['checkout'].pop('nested_repositories')
     journal.write_text(json.dumps(record))
     git('branch', 'feature', 'HEAD')
     t = launch(main)

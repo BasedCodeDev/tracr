@@ -819,7 +819,10 @@ field, and type the branch name. Then focus **Discard worktree** and press Enter
 
 Tracr verifies permanent deletion in Codex before removing the worktree. The
 discard includes staged, modified, untracked, and ignored files and the local
-feature branch. Close affected Codex sessions and terminals before discarding.
+feature branch. The dialog lists self-contained nested Git repositories whose
+history will also be deleted. Submodules, linked checkouts, and repositories
+using shared Git storage block discard. Close affected Codex sessions and
+terminals before discarding.
 If cleanup stops partway through, press **D** to review verified progress and
 confirm the remaining cleanup.
 

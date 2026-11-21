@@ -48,6 +48,14 @@ struct Checkout {
     status: Vec<String>,
     index: String,
     files: BTreeMap<PathBuf, FileStamp>,
+    #[serde(default)]
+    nested_repositories: BTreeMap<PathBuf, NestedRepository>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+enum NestedRepository {
+    Bare,
+    Checkout,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,12 +115,37 @@ impl Plan {
             self.unique_commits,
         );
         if let Some(checkout) = &self.checkout {
-            if checkout.status.is_empty() {
-                body.push_str("\nNo staged, modified, untracked, or ignored files.\n");
-            } else {
+            if !checkout.nested_repositories.is_empty() {
+                body.push_str(
+                    "\nNested repositories and their Git history will be permanently deleted.\n",
+                );
+                for (path, kind) in &checkout.nested_repositories {
+                    let label = match kind {
+                        NestedRepository::Bare => "Bare repository",
+                        NestedRepository::Checkout => "Repository",
+                    };
+                    let _ = writeln!(
+                        body,
+                        "  {label}  {}",
+                        safe_text(&path.display().to_string())
+                    );
+                }
+            }
+            let mut local_changes = checkout
+                .status
+                .iter()
+                .map(|record| record.split_at(3))
+                .filter(|(code, path)| {
+                    !matches!(*code, "?? " | "!! ")
+                        || !checkout
+                            .nested_repositories
+                            .keys()
+                            .any(|repo| Path::new(path).starts_with(repo))
+                })
+                .peekable();
+            if local_changes.peek().is_some() {
                 body.push_str("\nLocal changes and files\n");
-                for record in &checkout.status {
-                    let (code, path) = record.split_at(3);
+                for (code, path) in local_changes {
                     let label = match code {
                         "?? " => "Untracked",
                         "!! " => "Ignored",
@@ -124,6 +157,8 @@ impl Plan {
                     };
                     let _ = writeln!(body, "  {label}  {}", safe_text(path));
                 }
+            } else if checkout.nested_repositories.is_empty() {
+                body.push_str("\nNo staged, modified, untracked, or ignored files.\n");
             }
         } else {
             body.push_str("\nWorktree removal already verified.\n");
@@ -341,23 +376,10 @@ fn scan_files(root: &Path) -> Result<BTreeMap<PathBuf, FileStamp>> {
     let mut files = BTreeMap::new();
     let mut directories = vec![root.to_path_buf()];
     while let Some(dir) = directories.pop() {
-        if dir != root
-            && dir.join("HEAD").is_file()
-            && dir.join("objects").is_dir()
-            && dir.join("refs").is_dir()
-        {
-            return Err(format!("Nested Git repository at {}", dir.display()));
-        }
         for entry in fs::read_dir(&dir).map_err(error)? {
             let entry = entry.map_err(error)?;
             let path = entry.path();
-            if entry.file_name() == ".git" {
-                if dir != root {
-                    return Err(format!(
-                        "Nested Git repository or submodule at {}",
-                        dir.display()
-                    ));
-                }
+            if dir == root && entry.file_name() == ".git" {
                 continue;
             }
             let metadata = fs::symlink_metadata(&path).map_err(error)?;
@@ -378,12 +400,130 @@ fn scan_files(root: &Path) -> Result<BTreeMap<PathBuf, FileStamp>> {
     Ok(files)
 }
 
+async fn nested_repositories(
+    root: &Path,
+    files: &BTreeMap<PathBuf, FileStamp>,
+) -> Result<BTreeMap<PathBuf, NestedRepository>> {
+    let mut repositories = BTreeMap::new();
+    for (path, stamp) in files {
+        let directory = stamp.mode & libc::S_IFMT == libc::S_IFDIR;
+        if path.ends_with(".git") {
+            if !directory {
+                return Err(format!(
+                    "Linked checkout or external Git metadata at {}.",
+                    root.join(path).display()
+                ));
+            }
+            let parent = path.parent().expect("relative .git path has a parent");
+            repositories.insert(parent.to_path_buf(), NestedRepository::Checkout);
+        } else if directory
+            && [
+                ("HEAD", libc::S_IFREG),
+                ("objects", libc::S_IFDIR),
+                ("refs", libc::S_IFDIR),
+            ]
+            .iter()
+            .all(|(name, kind)| {
+                files.get(&path.join(name)).is_some_and(|stamp| {
+                    let mode = stamp.mode & libc::S_IFMT;
+                    mode == *kind || mode == libc::S_IFLNK
+                })
+            })
+        {
+            repositories
+                .entry(path.clone())
+                .or_insert(NestedRepository::Bare);
+        }
+    }
+    for (path, kind) in &repositories {
+        let directory = root.join(path);
+        let git_dir = match kind {
+            NestedRepository::Bare => path.clone(),
+            NestedRepository::Checkout => path.join(".git"),
+        };
+        verify_nested_repository(root, &directory, &git_dir, *kind, files)
+            .await
+            .map_err(|reason| {
+                format!("Nested Git repository at {}: {reason}", directory.display())
+            })?;
+    }
+    Ok(repositories)
+}
+
+async fn verify_nested_repository(
+    root: &Path,
+    directory: &Path,
+    git_dir: &Path,
+    kind: NestedRepository,
+    files: &BTreeMap<PathBuf, FileStamp>,
+) -> Result<()> {
+    let metadata = root.join(git_dir);
+    // Inspect Git storage links before asking Git to resolve the repository.
+    for (path, stamp) in files.iter().filter(|(path, _)| path.starts_with(git_dir)) {
+        if stamp.mode & libc::S_IFMT == libc::S_IFLNK {
+            let destination = fs::canonicalize(root.join(path))
+                .map_err(|e| format!("Cannot resolve Git storage link {}: {e}.", path.display()))?;
+            if !destination.starts_with(directory) {
+                return Err(format!(
+                    "Git storage link {} points outside the repository.",
+                    path.display()
+                ));
+            }
+        }
+    }
+    for path in [
+        "commondir",
+        "objects/info/alternates",
+        "objects/info/http-alternates",
+    ] {
+        if !missing(&metadata.join(path))? {
+            return Err(format!(
+                "Shared or alternate Git storage declared in {path}."
+            ));
+        }
+    }
+
+    // Git discovery must resolve to the directory we inspected, even if a
+    // malformed nested repository would otherwise fall back to its parent.
+    let actual = git::resolve_directory(directory).await?;
+    if actual.git_dir != metadata || actual.common_dir != metadata {
+        return Err("Git metadata belongs to a different repository.".into());
+    }
+    let rows = git::parse_worktrees(
+        &git::read(directory, &["worktree", "list", "--porcelain", "-z"]).await?,
+    )?;
+    let bare = kind == NestedRepository::Bare;
+    if !matches!(rows.as_slice(), [row] if row.path == directory && row.bare == bare) {
+        return Err(
+            "Repository has linked worktrees or a working directory outside its root.".into(),
+        );
+    }
+    if !bare {
+        // Compare the complete byte sequence so paths containing newlines work.
+        let top_level = git::read(directory, &["rev-parse", "--show-toplevel"]).await?;
+        if top_level.strip_suffix(b"\n") != Some(directory.as_os_str().as_encoded_bytes()) {
+            return Err("Repository uses a working directory outside its root.".into());
+        }
+        let index = git::read(directory, &["ls-files", "--stage", "-z"]).await?;
+        if has_submodules(&index) {
+            return Err("Repository contains submodules.".into());
+        }
+    }
+    Ok(())
+}
+
+fn has_submodules(index: &[u8]) -> bool {
+    index
+        .split(|byte| *byte == 0)
+        .any(|item| item.starts_with(b"160000 "))
+}
+
 async fn checkout(target: &Target) -> Result<Checkout> {
     let directory = fs::symlink_metadata(&target.path).map_err(error)?;
     let git_dir = git::resolve_directory(&target.path).await?.git_dir;
     let index = String::from_utf8(git::read(&target.path, &["ls-files", "--stage", "-z"]).await?)
         .map_err(error)?;
-    if index.split('\0').any(|item| item.starts_with("160000 ")) {
+    if has_submodules(index.as_bytes()) {
         return Err("Worktrees with submodules cannot be discarded.".into());
     }
     let status = String::from_utf8(
@@ -419,12 +559,14 @@ async fn checkout(target: &Target) -> Result<Checkout> {
     let files = tokio::task::spawn_blocking(move || scan_files(&root))
         .await
         .map_err(error)??;
+    let nested_repositories = nested_repositories(&target.path, &files).await?;
     Ok(Checkout {
         directory: (directory.dev(), directory.ino()),
         git_dir,
         status,
         index,
         files,
+        nested_repositories,
     })
 }
 
@@ -1121,7 +1263,7 @@ pub(crate) async fn execute(
         journal.phase = Phase::RemovingWorktree;
         save(state, &journal)?;
         let mut args = vec!["worktree", "remove"];
-        if !reviewed.status.is_empty() {
+        if !reviewed.status.is_empty() || !reviewed.nested_repositories.is_empty() {
             // A single force flag cannot remove a locked worktree.
             args.push("--force");
         }
