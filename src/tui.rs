@@ -1347,6 +1347,9 @@ fn sync_terminal_view(browser: &Browser, view: &View) {
 
 fn tick_session_preview(browser: &Browser, view: &View) -> bool {
     let target = preview_session(browser, view)
+        .filter(|session| {
+            view.discard.as_ref().and_then(|modal| modal.session_key()) != Some(&session.key)
+        })
         .and_then(|session| (!view.terminals.borrow().owns(&session.key)).then_some(session.key));
     view.session_preview.borrow_mut().tick(target, browser)
 }
@@ -2231,6 +2234,7 @@ enum Command {
     CloseTerminal,
     CreateWorktree,
     DiscardWorktree,
+    DeleteSession,
     RecoverDiscard,
     GitToggle,
     GitZoom,
@@ -2425,6 +2429,7 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         entries.extend([
             (Info, "Sessions", "i", "Session information"),
             (Relink, "Sessions", "m", "Move session"),
+            (DeleteSession, "Sessions", "Delete", "Delete session…"),
         ]);
     }
     if view.context() == 0 && selected_checkout(browser).is_some() {
@@ -2830,6 +2835,7 @@ fn unavailable(command: Command, browser: &Browser, view: &View) -> Option<Strin
             Some("Select a session first.".into())
         }
         Command::Relink => relink_unavailable(browser),
+        Command::DeleteSession => session_delete_target(browser).err(),
         Command::MoveFolder => crate::folder_move_ui::unavailable(browser),
         Command::Create => {
             if browser.loading() {
@@ -3949,6 +3955,7 @@ pub enum Action {
     OpenRelink,
     OpenFolderMove,
     OpenDiscard,
+    OpenSessionDelete,
     RecoverDiscard,
     ApplyDiscard,
     RetryDiscard,
@@ -3978,6 +3985,33 @@ fn selected_session(browser: &Browser) -> Option<crate::domain::SessionSummary> 
         .into_iter()
         .find(|s| Some(&s.key) == browser.selected.as_ref())
 }
+
+fn session_delete_target(
+    browser: &Browser,
+) -> Result<crate::worktree_discard::SessionTarget, String> {
+    let session = selected_session(browser).ok_or("Select a session first.")?;
+    let source = browser
+        .specs
+        .iter()
+        .find_map(|spec| match spec {
+            crate::browser::SourceSpec::Codex { binary, source }
+                if session.key.provider.0 == "codex" && session.key.source_id == source.id =>
+            {
+                Some(crate::folder_move::Source {
+                    id: source.id.clone(),
+                    home: source.home.clone(),
+                    binary: binary.clone(),
+                })
+            }
+            _ => None,
+        })
+        .ok_or("Fixture data is browse-only.")?;
+    if browser.state_path.is_none() {
+        return Err("Persistent state is required to coordinate session deletion.".into());
+    }
+    Ok(crate::worktree_discard::SessionTarget { source, session })
+}
+
 fn relink_unavailable(browser: &Browser) -> Option<String> {
     let session = match selected_session(browser) {
         Some(s) => s,
@@ -4633,6 +4667,11 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         {
             Command::DiscardWorktree
         }
+        KeyCode::Delete
+            if view.focus == 1 && key.kind == KeyEventKind::Press && key.modifiers.is_empty() =>
+        {
+            Command::DeleteSession
+        }
         KeyCode::Char('D') if view.discard_recovery_available => Command::RecoverDiscard,
         KeyCode::Char('u') => Command::Recover,
         KeyCode::Char('a') => Command::Archives,
@@ -4772,6 +4811,8 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 return Action::OpenDiscard;
             }
         }
+        Command::DeleteSession if view.context() == 1 => return Action::OpenSessionDelete,
+        Command::DeleteSession => {}
         Command::RecoverDiscard => return Action::RecoverDiscard,
         Command::CreateWorktree => {
             if worktree_unavailable(browser, view).is_some() {
@@ -5418,37 +5459,52 @@ pub async fn run_with_startup_trace(
             }
             if let Some(modal) = view.discard.as_mut().filter(|modal| modal.ready()) {
                 while input_reader.poll(Duration::ZERO)? { let _ = input_reader.read()?; }
+                let session = modal.session_key().is_some();
                 if let Some(result) = modal.tick().await {
+                    use crate::worktree_discard_ui::Discarded;
+
                     view.discard = None;
-                    let pending = relocation_state.as_deref().map(crate::worktree_discard::pending).transpose();
-                    let progress = match pending {
-                        Ok(Some(Some(journal))) => {
-                            view.discard_recovery_available = true;
-                            format!("{} Press D to review remaining cleanup.", journal.progress())
-                        }
-                        Ok(_) => {
-                            view.discard_recovery_available = false;
-                            String::new()
-                        }
-                        Err(error) => format!("Cannot read discard progress: {error}"),
-                    };
                     match result {
-                        Ok(main) => {
+                        Ok(Discarded::Session(key)) => {
+                            browser.remove_session(&key);
+                            view.message = Some("Codex session deleted.".into());
+                        }
+                        Ok(Discarded::Worktree(main)) => {
                             if browser.focus_root.is_some() { browser.focus_root = Some(main.clone()); }
                             browser.open_folder(main);
                             view.focus = 0;
                             view.git_focus = false;
+                            view.discard_recovery_available = false;
                             view.message = Some("Worktree, local branch, and conversations discarded.".into());
                         }
+                        Err(error) if session => {
+                            view.error_dialog = Some(crate::error_dialog::ErrorDialog::new(
+                                "Session deletion stopped", "Refreshing the session list.", error,
+                            ));
+                        }
                         Err(error) => {
+                            let pending = relocation_state.as_deref().map(crate::worktree_discard::pending).transpose();
+                            let progress = match pending {
+                                Ok(Some(Some(journal))) => {
+                                    view.discard_recovery_available = true;
+                                    format!("{} Press D to review remaining cleanup.", journal.progress())
+                                }
+                                Ok(_) => {
+                                    view.discard_recovery_available = false;
+                                    String::new()
+                                }
+                                Err(error) => format!("Cannot read discard progress: {error}"),
+                            };
                             view.error_dialog = Some(crate::error_dialog::ErrorDialog::new(
                                 "Discard stopped", "Review the reported state before retrying.", format!("{error}\n{progress}"),
                             ));
                         }
                     }
-                    browser.invalidate_git();
-                    view.history.request_refresh();
-                    candidates_dirty = true;
+                    if !session {
+                        browser.invalidate_git();
+                        view.history.request_refresh();
+                        candidates_dirty = true;
+                    }
                     discovery.refresh(&mut browser);
                 }
             }
@@ -5759,6 +5815,16 @@ pub async fn run_with_startup_trace(
                         }
                     }
                     match action {
+                        Action::OpenSessionDelete => {
+                            match session_delete_target(&browser) {
+                                Ok(target) => {
+                                    let Some(state) = relocation_state.clone() else { continue };
+                                    let local = view.terminals.borrow().session_terminals(&target.session.key);
+                                    view.discard = Some(crate::worktree_discard_ui::Modal::for_session(state, target, local));
+                                }
+                                Err(reason) => view.message = Some(reason),
+                            }
+                        }
                         Action::OpenDiscard | Action::RecoverDiscard => {
                             if let Some(reason) = crate::worktree_discard_ui::unavailable(&browser) {
                                 view.message = Some(reason.into());
@@ -5791,7 +5857,7 @@ pub async fn run_with_startup_trace(
                         }
                         Action::RetryDiscard | Action::ReleaseDiscardIdle | Action::ApplyDiscard => {
                             if let Some(modal) = view.discard.as_mut() {
-                                let local = modal.root().map(|root| view.terminals.borrow().worktree_terminals(root)).unwrap_or_default();
+                                let local = modal.terminals(&view.terminals.borrow());
                                 if matches!(action, Action::ApplyDiscard) && local.is_empty() {
                                     modal.start();
                                 } else {

@@ -221,7 +221,7 @@ pub(crate) struct OverlayState {
     confirmation: Option<Confirmation>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct WorktreeTerminal {
+pub(crate) struct DiscardTerminal {
     pub(crate) id: u64,
     pub(crate) title: String,
     pub(crate) folder: std::path::PathBuf,
@@ -259,15 +259,22 @@ impl Manager {
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
-    pub(crate) fn worktree_terminals(&self, root: &std::path::Path) -> Vec<WorktreeTerminal> {
+    pub(crate) fn worktree_terminals(&self, root: &std::path::Path) -> Vec<DiscardTerminal> {
+        self.discard_terminals(|session| {
+            session.folder.starts_with(root)
+                || std::fs::canonicalize(&session.folder).is_ok_and(|path| path.starts_with(root))
+        })
+    }
+
+    pub(crate) fn session_terminals(&self, key: &SessionKey) -> Vec<DiscardTerminal> {
+        self.discard_terminals(|session| session.key.as_ref() == Some(key))
+    }
+
+    fn discard_terminals(&self, matches: impl Fn(&Session) -> bool) -> Vec<DiscardTerminal> {
         self.sessions
             .iter()
-            .filter(|session| {
-                session.folder.starts_with(root)
-                    || std::fs::canonicalize(&session.folder)
-                        .is_ok_and(|path| path.starts_with(root))
-            })
-            .map(|session| WorktreeTerminal {
+            .filter(|session| matches(session))
+            .map(|session| DiscardTerminal {
                 id: session.id,
                 title: session.title.clone(),
                 folder: session.folder.clone(),
@@ -280,9 +287,24 @@ impl Manager {
     pub(crate) fn close_worktree_terminals(
         &mut self,
         root: &std::path::Path,
-        reviewed: &[WorktreeTerminal],
-    ) -> std::result::Result<Vec<WorktreeTerminal>, Vec<WorktreeTerminal>> {
-        let mut current = self.worktree_terminals(root);
+        reviewed: &[DiscardTerminal],
+    ) -> std::result::Result<Vec<DiscardTerminal>, Vec<DiscardTerminal>> {
+        self.close_discard_terminals(self.worktree_terminals(root), reviewed)
+    }
+
+    pub(crate) fn close_session_terminals(
+        &mut self,
+        key: &SessionKey,
+        reviewed: &[DiscardTerminal],
+    ) -> std::result::Result<Vec<DiscardTerminal>, Vec<DiscardTerminal>> {
+        self.close_discard_terminals(self.session_terminals(key), reviewed)
+    }
+
+    fn close_discard_terminals(
+        &mut self,
+        mut current: Vec<DiscardTerminal>,
+        reviewed: &[DiscardTerminal],
+    ) -> std::result::Result<Vec<DiscardTerminal>, Vec<DiscardTerminal>> {
         if current.iter().any(|terminal| !reviewed.contains(terminal)) {
             return Err(current);
         }

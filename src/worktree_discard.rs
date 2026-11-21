@@ -103,6 +103,37 @@ pub(crate) enum Preview {
     Blocked(Vec<Blocker>),
 }
 
+#[derive(Clone)]
+pub(crate) struct SessionTarget {
+    pub source: Source,
+    pub session: SessionSummary,
+}
+
+#[derive(PartialEq, Eq)]
+pub(crate) struct SessionPlan {
+    chat: Chat,
+    home_identity: (u64, u64),
+}
+
+impl SessionPlan {
+    pub(crate) fn review(&self, target: &SessionTarget) -> String {
+        use crate::browser::safe_text;
+
+        format!(
+            "Permanently delete this Codex session?\n\n{}\nFolder  {}\nSession  {}\nCodex home  {}\nStatus  {}",
+            safe_text(&self.chat.title),
+            safe_text(&self.chat.cwd.display().to_string()),
+            self.chat.id,
+            safe_text(&target.source.home.display().to_string()),
+            if self.chat.archived {
+                "Archived"
+            } else {
+                "Current"
+            },
+        )
+    }
+}
+
 impl Preview {
     fn require_clear(self) -> Result<Plan> {
         match self {
@@ -1055,7 +1086,7 @@ async fn read_status(rpc: &mut Rpc, chat: &Chat) -> Result<RuntimeStatus> {
         || actual.spawned_by != chat.spawned_by
     {
         return Err(format!(
-            "Codex conversation {} changed. Review the worktree again.",
+            "Codex conversation {} changed. Review it again.",
             chat.id
         ));
     }
@@ -1066,7 +1097,7 @@ async fn ensure_unloaded(rpc: &mut Rpc, chat: &Chat) -> Result<()> {
     let status = read_status(rpc, chat).await?;
     if status != RuntimeStatus::Unloaded {
         return Err(format!(
-            "Codex conversation {} became loaded ({}). Close it or review discard again.",
+            "Codex conversation {} became loaded ({}). Close it and retry.",
             crate::browser::safe_text(&chat.title),
             status.label().unwrap_or("Status unknown")
         ));
@@ -1289,6 +1320,193 @@ pub(crate) async fn preview(
     inspect(state, sources, target, previous).await
 }
 
+fn session_operations_clear(state: &Path) -> Result<()> {
+    if pending(state)?.is_some() {
+        return Err("Press D to review the unfinished worktree discard first.".into());
+    }
+    if crate::folder_move::pending(state)?.is_some() || !relocation::pending(state)?.is_empty() {
+        return Err("Recover unfinished relocations before deleting a session.".into());
+    }
+    Ok(())
+}
+
+async fn inspect_session(
+    state: &Path,
+    target: &SessionTarget,
+    rpc: &mut Rpc,
+    home_identity: (u64, u64),
+) -> Result<std::result::Result<SessionPlan, Blocker>> {
+    session_operations_clear(state)?;
+    let SessionTarget { source, session } = target;
+    let id = &session.key.native_id;
+    if session.key.provider.0 != "codex" || session.key.source_id != source.id || !uuid(id) {
+        return Err("The selected session has an invalid Codex identity.".into());
+    }
+
+    let thread = relocation::read(rpc, id).await?;
+    let chat = parse_chat(&thread, session.archived)?;
+    if chat.id != *id
+        || Some(&chat.cwd) != session.cwd.as_ref()
+        || chat.created != session.created_at
+    {
+        return Err("The selected session changed. Refresh and review it again.".into());
+    }
+    let attachment = chat
+        .attached_to
+        .as_deref()
+        .map(|parent| ("attachedToThreadId", parent));
+    let listed = page_threads(rpc, attachment, attachment.is_some()).await?;
+    let mut matches = listed
+        .iter()
+        .filter(|(thread, _)| thread["id"].as_str() == Some(id));
+    let current = matches
+        .next()
+        .ok_or("The selected session is missing from Codex. Refresh the list.")?;
+    if matches.next().is_some() || parse_chat(&current.0, current.1)? != chat {
+        return Err("The selected session changed. Refresh and review it again.".into());
+    }
+
+    let mut status = RuntimeStatus::from_codex(thread.get("status"));
+    let config = SourceConfig {
+        id: source.id.clone(),
+        home: source.home.clone(),
+    };
+    let mut shared_idle_folder = None;
+    if let Ok(mut live) =
+        crate::providers::codex_live::LiveClient::connect(&source.binary, config).await
+        && let Some(loaded) = live.session_snapshot().await?.remove(&session.key)
+    {
+        if matches!(status, RuntimeStatus::Unloaded | RuntimeStatus::Idle) {
+            status = loaded.status;
+        }
+        if loaded.status == RuntimeStatus::Idle {
+            shared_idle_folder = loaded.cwd;
+        }
+    }
+
+    for (filter, field) in [
+        ("attachedToThreadId", "side chat"),
+        ("parentThreadId", "spawned conversation"),
+    ] {
+        let dependents = page_threads(rpc, Some((filter, id)), true).await?;
+        for (dependent, archived) in &dependents {
+            let dependent = parse_chat(dependent, *archived)?;
+            let parent = if filter == "attachedToThreadId" {
+                dependent.attached_to
+            } else {
+                dependent.spawned_by
+            };
+            if parent.as_deref() != Some(id) || dependent.id == *id {
+                return Err(format!("Codex did not honor the {field} filter."));
+            }
+        }
+        if !dependents.is_empty() {
+            return Err(format!(
+                "This session has a {field}. Delete its dependent conversations first."
+            ));
+        }
+    }
+
+    if directory_identity(&source.home)? != home_identity {
+        return Err("The configured Codex home changed. Review the session again.".into());
+    }
+    if status == RuntimeStatus::Unloaded {
+        return Ok(Ok(SessionPlan {
+            chat,
+            home_identity,
+        }));
+    }
+    let release =
+        release_candidate(Some(&chat), status, shared_idle_folder.as_deref()).map(|chat| {
+            SessionSummary {
+                updated_at: chat.updated,
+                ..session.clone()
+            }
+        });
+    Ok(Err(Blocker {
+        source: source.clone(),
+        home_identity,
+        id: chat.id,
+        title: chat.title,
+        cwd: chat.cwd,
+        status,
+        archive: chat.archived,
+        release,
+    }))
+}
+
+pub(crate) async fn preview_session(
+    state: &Path,
+    target: &SessionTarget,
+) -> Result<std::result::Result<SessionPlan, Blocker>> {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let source = &target.source;
+        let home_identity = directory_identity(&source.home)?;
+        let mut rpc = Rpc::start(&source.binary, &source.home)
+            .await
+            .map_err(error)?;
+        let preview = inspect_session(state, target, &mut rpc, home_identity).await;
+        rpc.close().await;
+        preview
+    })
+    .await
+    .map_err(|_| "Codex session checks timed out.")?
+}
+
+pub(crate) async fn release_session(
+    state: &Path,
+    target: &SessionTarget,
+    approved: &[Blocker],
+) -> Result<(std::result::Result<SessionPlan, Blocker>, String)> {
+    let _lock = crate::folder_move::lock(state)?;
+    let fresh = preview_session(state, target).await?;
+    let Err(blocker) = &fresh else {
+        return Ok((fresh, String::new()));
+    };
+    if !approved.contains(blocker) || !blocker.can_release() {
+        return Ok((
+            fresh,
+            "The session changed. Review its current status before releasing.\n".into(),
+        ));
+    }
+    let report = release_blocker(blocker).await?;
+    Ok((preview_session(state, target).await?, report))
+}
+
+pub(crate) async fn execute_session(
+    state: &Path,
+    target: &SessionTarget,
+    reviewed: SessionPlan,
+) -> Result<()> {
+    let _lock = crate::folder_move::lock(state)?;
+    let source = &target.source;
+    if directory_identity(&source.home)? != reviewed.home_identity {
+        return Err("The configured Codex home changed. Review the session again.".into());
+    }
+    let mut rpc = Rpc::start(&source.binary, &source.home)
+        .await
+        .map_err(error)?;
+    let fresh = tokio::time::timeout(
+        Duration::from_secs(60),
+        inspect_session(state, target, &mut rpc, reviewed.home_identity),
+    )
+    .await
+    .map_err(|_| "Codex session checks timed out.")??
+    .map_err(|blocker| Blocker::review(&[blocker]))?;
+    if fresh != reviewed {
+        return Err("The reviewed session changed. Open a new review.".into());
+    }
+    delete_chat(&mut rpc, &fresh.chat).await?;
+    rpc.close().await;
+    verify_deleted(source, &fresh.chat)
+        .await
+        .map_err(|error| format!("Codex deletion could not be verified.\n{error}"))?;
+    if directory_identity(&source.home)? != fresh.home_identity {
+        return Err("Codex deletion could not be verified because its home changed.".into());
+    }
+    Ok(())
+}
+
 /// Release only the idle records the user reviewed. A fresh preview verifies
 /// both worktree eligibility and the conversation set before any release.
 pub(crate) async fn release_idle(
@@ -1298,7 +1516,6 @@ pub(crate) async fn release_idle(
     previous: Option<&Journal>,
     approved: Vec<Blocker>,
 ) -> Result<(Preview, String)> {
-    use crate::providers::codex_release::ReleaseOutcome;
     use std::fmt::Write;
 
     let _lock = crate::folder_move::lock(state)?;
@@ -1319,49 +1536,54 @@ pub(crate) async fn release_idle(
             );
             continue;
         }
-        let source = &blocker.source;
-        if directory_identity(&source.home)? != blocker.home_identity {
-            return Err("A configured Codex home was replaced.".into());
-        }
-        let config = SourceConfig {
-            id: source.id.clone(),
-            home: source.home.clone(),
-        };
-        let message = match crate::providers::codex_release::release_discard_idle(
-            &source.binary,
-            &config,
-            session,
-        )
-        .await
-        {
-            Ok(ReleaseOutcome::Released | ReleaseOutcome::AlreadyUnloaded) => continue,
-            Ok(ReleaseOutcome::StillLoaded) => {
-                "Still loaded. Close any Codex client using this conversation and retry.".into()
-            }
-            Ok(ReleaseOutcome::Busy) => {
-                "Conversation became active or its status could not be verified.".into()
-            }
-            Ok(ReleaseOutcome::Terminals(
-                crate::providers::codex_terminals::Blocker::Commands(_),
-            )) => "Background terminals are still running. Close them in Codex before retrying."
-                .into(),
-            Ok(ReleaseOutcome::Terminals(
-                crate::providers::codex_terminals::Blocker::Unavailable(err),
-            )) => format!("Could not verify background terminals. {err}"),
-            Ok(ReleaseOutcome::Unavailable) => {
-                "Could not connect to the shared Codex server.".into()
-            }
-            Err(error) => error,
-        };
-        let _ = writeln!(
-            report,
-            "{}  ·  {}",
-            crate::browser::safe_text(&session.title),
-            crate::browser::safe_text(&message)
-        );
+        report.push_str(&release_blocker(blocker).await?);
     }
     let fresh = preview(state, sources, selected, previous).await?;
     Ok((fresh, report))
+}
+
+async fn release_blocker(blocker: &Blocker) -> Result<String> {
+    use crate::providers::{codex_release::ReleaseOutcome, codex_terminals};
+
+    let session = blocker.release.as_ref().map_err(|reason| *reason)?;
+    let source = &blocker.source;
+    if directory_identity(&source.home)? != blocker.home_identity {
+        return Err("A configured Codex home was replaced.".into());
+    }
+    let config = SourceConfig {
+        id: source.id.clone(),
+        home: source.home.clone(),
+    };
+    let message = match crate::providers::codex_release::release_discard_idle(
+        &source.binary,
+        &config,
+        session,
+    )
+    .await
+    {
+        Ok(ReleaseOutcome::Released | ReleaseOutcome::AlreadyUnloaded) => {
+            return Ok(String::new());
+        }
+        Ok(ReleaseOutcome::StillLoaded) => {
+            "Still loaded. Close any Codex client using this conversation and retry.".into()
+        }
+        Ok(ReleaseOutcome::Busy) => {
+            "Conversation became active or its status could not be verified.".into()
+        }
+        Ok(ReleaseOutcome::Terminals(codex_terminals::Blocker::Commands(_))) => {
+            "Background terminals are still running. Close them in Codex before retrying.".into()
+        }
+        Ok(ReleaseOutcome::Terminals(codex_terminals::Blocker::Unavailable(err))) => {
+            format!("Could not verify background terminals. {err}")
+        }
+        Ok(ReleaseOutcome::Unavailable) => "Could not connect to the shared Codex server.".into(),
+        Err(error) => error,
+    };
+    Ok(format!(
+        "{}  ·  {}\n",
+        crate::browser::safe_text(&session.title),
+        crate::browser::safe_text(&message)
+    ))
 }
 
 async fn verify_deleted(source: &Source, chat: &Chat) -> Result<()> {
@@ -1383,7 +1605,13 @@ async fn delete_one(source: &Source, expected: &Chat) -> Result<()> {
     let mut rpc = Rpc::start(&source.binary, &source.home)
         .await
         .map_err(error)?;
-    ensure_unloaded(&mut rpc, expected).await?;
+    delete_chat(&mut rpc, expected).await?;
+    rpc.close().await;
+    verify_deleted(source, expected).await
+}
+
+async fn delete_chat(rpc: &mut Rpc, expected: &Chat) -> Result<()> {
+    ensure_unloaded(rpc, expected).await?;
     let result = rpc
         .call("thread/delete", json!({"threadId":expected.id}))
         .await
@@ -1391,8 +1619,7 @@ async fn delete_one(source: &Source, expected: &Chat) -> Result<()> {
     if result != json!({}) {
         return Err("Codex returned an invalid deletion acknowledgment.".into());
     }
-    rpc.close().await;
-    verify_deleted(source, expected).await
+    Ok(())
 }
 
 fn save(state: &Path, journal: &Journal) -> Result<()> {
