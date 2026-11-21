@@ -290,6 +290,8 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   drawer panel, then cycles only between Folders and Git. Outside a repository,
   focus stays on Folders. Active terminals receive Tab normally.
 - **Right Arrow** from either drawer panel focuses the session area.
+- **Left Arrow** from Sessions returns to the remembered drawer panel when no
+  Codex terminal is active. Inside Codex or a dialog, arrow keys retain their usual behavior.
 - **Escape** closes a dialog or search first, then focuses Sessions. The drawer stays
   visible beside the session list on wide screens.
 - Up / Down or `k/j` selects items. In Folders, `l` expands a folder;

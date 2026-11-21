@@ -2080,7 +2080,7 @@ time.sleep(60)
     }
 
     #[test]
-    fn tabs_and_alt_f_reach_child() {
+    fn tabs_left_arrow_and_alt_f_reach_child() {
         let mut manager = Manager {
             area: Rect::new(0, 0, 80, 24),
             ..Manager::default()
@@ -2100,6 +2100,10 @@ time.sleep(60)
             .input(&key(KeyCode::Char('f'), KeyModifiers::ALT))
             .unwrap();
         expected.extend_from_slice(b"\x1bf");
+        manager
+            .input(&key(KeyCode::Left, KeyModifiers::NONE))
+            .unwrap();
+        expected.extend_from_slice(b"\x1b[D");
         {
             for (code, modifiers) in [
                 (KeyCode::Tab, KeyModifiers::NONE),
