@@ -3746,6 +3746,8 @@ pub enum Action {
     ApplyDiscard,
     RetryDiscard,
     ReleaseDiscardIdle,
+    ReviewDiscardTerminals,
+    ConfirmDiscardTerminals,
     CloseDiscard,
     PreviewFolderMove,
     ApplyFolderMove,
@@ -4900,12 +4902,21 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             }
             if tick_session_preview(&browser, &view) { idle.wake(); }
             let (terminal_changed, terminal_exits) = view.terminals.borrow_mut().poll();
+            let unexpected_terminal_failure = terminal_exits.iter().find(|notice| {
+                notice.failed && notice.was_active
+                    && !view.discard.as_ref().is_some_and(|modal| modal.tracks_terminal(notice.id))
+            });
+            if let Some(modal) = view.discard.as_mut() {
+                if modal.poll_terminals(&view.terminals.borrow(), &terminal_exits, std::time::Instant::now()) {
+                    idle.wake();
+                }
+            }
             if terminal_changed { idle.wake(); }
             if let Some(error)=view.terminals.borrow_mut().input_error.take() {view.message=Some(error);}
             if !terminal_exits.is_empty() {
                 view.select_dialog_area(false);
                 view.message = Some(terminal_exits.iter().map(|notice| notice.message.as_str()).collect::<Vec<_>>().join("; "));
-                if let Some(notice) = terminal_exits.iter().find(|notice| notice.failed && notice.was_active) {
+                if let Some(notice) = unexpected_terminal_failure {
                     view.error_dialog = Some(crate::error_dialog::ErrorDialog::new("Terminal exited", "The session remains available to resume.", notice.message.clone()));
                 }
                 browser.invalidate_git();
@@ -5391,6 +5402,14 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                             view.discard = Some(crate::worktree_discard_ui::Modal::new(state, sources, selected.map(ToOwned::to_owned), journal, local));
                         }
                         Action::CloseDiscard => view.discard = None,
+                        Action::ReviewDiscardTerminals => {
+                            if let Some(modal) = view.discard.as_mut() { modal.review_terminals(); }
+                        }
+                        Action::ConfirmDiscardTerminals => {
+                            if let Some(modal) = view.discard.as_mut() {
+                                modal.confirm_terminals(&mut view.terminals.borrow_mut());
+                            }
+                        }
                         Action::RetryDiscard | Action::ReleaseDiscardIdle | Action::ApplyDiscard => {
                             if let Some(modal) = view.discard.as_mut() {
                                 let local = modal.root().map(|root| view.terminals.borrow().worktree_terminals(root)).unwrap_or_default();

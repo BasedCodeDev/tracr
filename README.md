@@ -821,10 +821,13 @@ Tracr verifies permanent deletion in Codex before removing the worktree. The
 discard includes staged, modified, untracked, and ignored files and the local
 feature branch. The dialog lists self-contained nested Git repositories whose
 history will also be deleted. Submodules, linked checkouts, and repositories
-using shared Git storage block discard. If Codex still has a conversation
-loaded, the dialog lists its status. Close its client and choose **Retry**, or
-choose **Release idle conversations** to ask Codex to release eligible idle
-conversations. Review and confirm the discard after the blockers clear.
+using shared Git storage block discard.
+
+Use **Close listed terminals…** and confirm to close the Tracr terminals shown
+in the dialog. Tracr checks Codex readiness again after those terminals exit.
+If a conversation stays loaded, close its client and choose **Retry**, or choose
+**Release idle conversations** for eligible idle conversations. Review and
+confirm the discard after the blockers clear.
 If cleanup stops partway through, press **D** to review verified progress and
 confirm the remaining cleanup.
 

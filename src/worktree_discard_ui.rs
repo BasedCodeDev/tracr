@@ -1,6 +1,7 @@
 use crate::{
     browser::{Browser, FolderFilter, SourceSpec, safe_text},
     folder_move::Source,
+    inline_terminal::{ExitNotice, Manager, WorktreeTerminal},
     modal::{self, Button, CachedBody},
     tui::Action,
     worktree_discard::{self as discard, Blocker, Journal, Plan, Preview},
@@ -9,12 +10,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     widgets::{Paragraph, Wrap},
 };
 use std::{
     cell::Cell,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 use tokio::task::JoinHandle;
 
@@ -60,12 +62,144 @@ enum Task {
     Discard(JoinHandle<Result<PathBuf, String>>),
 }
 
+#[derive(Clone, Copy)]
+enum TerminalPhase {
+    Review,
+    Confirm,
+    Closing {
+        deadline: Instant,
+        delayed: bool,
+        unverified: bool,
+    },
+}
+
+struct TerminalBlock {
+    terminals: Vec<WorktreeTerminal>,
+    phase: TerminalPhase,
+    list_changed: bool,
+    body: CachedBody,
+}
+
+impl TerminalBlock {
+    fn new(terminals: Vec<WorktreeTerminal>, phase: TerminalPhase, list_changed: bool) -> Self {
+        let mut block = Self {
+            terminals,
+            phase,
+            list_changed,
+            body: CachedBody::new(String::new()),
+        };
+        block.set_phase(phase);
+        block
+    }
+
+    fn shown_terminals(&self) -> impl Iterator<Item = &WorktreeTerminal> {
+        self.terminals
+            .iter()
+            .filter(|terminal| !matches!(self.phase, TerminalPhase::Confirm) || terminal.owned)
+    }
+
+    fn set_phase(&mut self, phase: TerminalPhase) {
+        self.phase = phase;
+        let text = self
+            .shown_terminals()
+            .map(|terminal| {
+                let title = safe_text(&terminal.title);
+                let folder = safe_text(&terminal.folder.display().to_string());
+                let mut text = format!("{title}\n  {folder}");
+                if !terminal.owned {
+                    text.push_str("\n  Preview terminal");
+                }
+                if let Some(key) = &terminal.key {
+                    text.push_str(&format!("\n  Session  {}", safe_text(&key.native_id)));
+                }
+                text
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        self.body = CachedBody::new(text);
+    }
+
+    fn buttons(&self, compact: bool) -> Vec<Button<Action>> {
+        let close = |label, action| Button {
+            action,
+            label,
+            enabled: true,
+            primary: true,
+        };
+        let cancel = Button {
+            action: Action::CloseDiscard,
+            label: "Cancel",
+            enabled: true,
+            primary: false,
+        };
+        match self.phase {
+            TerminalPhase::Review => {
+                let mut buttons = vec![cancel, close("Retry", Action::RetryDiscard)];
+                if self.terminals.iter().any(|terminal| terminal.owned) {
+                    buttons.push(close(
+                        if compact {
+                            "Close…"
+                        } else {
+                            "Close listed terminals…"
+                        },
+                        Action::ReviewDiscardTerminals,
+                    ));
+                }
+                buttons
+            }
+            TerminalPhase::Confirm => vec![
+                cancel,
+                close("Close terminals", Action::ConfirmDiscardTerminals),
+            ],
+            TerminalPhase::Closing { .. } => Vec::new(),
+        }
+    }
+
+    fn heading(&self) -> (String, &str) {
+        let count = self.shown_terminals().count();
+        let heading = if count == 1 {
+            "1 terminal".to_owned()
+        } else {
+            format!("{count} terminals")
+        };
+        match self.phase {
+            TerminalPhase::Review if self.list_changed => (
+                format!("{heading} in Tracr"),
+                "The terminal list changed. Review it before closing.",
+            ),
+            TerminalPhase::Review => (
+                format!("{heading} in Tracr"),
+                "Close the blocking terminals to continue discard.",
+            ),
+            TerminalPhase::Confirm => (
+                format!("Close {heading}?"),
+                "Running work in these terminals will stop.",
+            ),
+            TerminalPhase::Closing {
+                unverified: true, ..
+            } => (
+                format!("{heading} remaining"),
+                "Tracr could not verify that a terminal exited. Discard is paused.",
+            ),
+            TerminalPhase::Closing { delayed: true, .. } => (
+                format!("{heading} remaining"),
+                "Still waiting for terminal shutdown. Discard is paused.",
+            ),
+            TerminalPhase::Closing { .. } => (
+                format!("Closing {heading}…"),
+                "Discard checks will resume after the terminals exit.",
+            ),
+        }
+    }
+}
+
 pub struct Modal {
     state: PathBuf,
     sources: Vec<Source>,
     previous: Option<Journal>,
     selected: Option<PathBuf>,
     blocked: Option<(Vec<Blocker>, CachedBody)>,
+    local: Option<TerminalBlock>,
     review: Option<(Plan, CachedBody)>,
     task: Option<Task>,
     error: Option<String>,
@@ -83,7 +217,7 @@ impl Modal {
         sources: Vec<Source>,
         selected: Option<PathBuf>,
         previous: Option<Journal>,
-        local_terminals: Vec<String>,
+        local_terminals: Vec<WorktreeTerminal>,
     ) -> Self {
         let mut modal = Self {
             state,
@@ -91,6 +225,7 @@ impl Modal {
             previous,
             selected,
             blocked: None,
+            local: None,
             review: None,
             task: None,
             error: None,
@@ -112,17 +247,142 @@ impl Modal {
             .or(self.selected.as_deref())
     }
 
-    pub(crate) fn refresh(&mut self, local_terminals: Vec<String>, release: bool) {
-        if local_terminals.is_empty() {
-            self.check(release);
-        } else if self.task.is_none() {
-            self.reset_review();
-            let text = format!(
-                "Close these terminals in Tracr, then retry.\nPress Esc to return and use the Terminals menu.\n\n{}",
-                local_terminals.join("\n\n")
-            );
-            self.blocked = Some((Vec::new(), CachedBody::new(text)));
+    pub(crate) fn refresh(&mut self, terminals: Vec<WorktreeTerminal>, release: bool) {
+        if self.task.is_some() || self.is_closing_terminals() {
+            return;
         }
+        if terminals.is_empty() {
+            self.local = None;
+            self.check(release);
+        } else {
+            self.show_local(terminals, false);
+        }
+    }
+
+    fn show_local(&mut self, terminals: Vec<WorktreeTerminal>, list_changed: bool) {
+        self.reset_review();
+        self.blocked = None;
+        self.local = Some(TerminalBlock::new(
+            terminals,
+            TerminalPhase::Review,
+            list_changed,
+        ));
+    }
+
+    fn set_terminal_phase(&mut self, phase: TerminalPhase) {
+        if let Some(local) = &mut self.local {
+            local.set_phase(phase);
+        }
+        self.focus = 1;
+        self.scroll = 0;
+        self.limit.set(0);
+    }
+
+    pub(crate) fn review_terminals(&mut self) {
+        if self
+            .local
+            .as_ref()
+            .is_some_and(|local| matches!(local.phase, TerminalPhase::Review))
+        {
+            self.set_terminal_phase(TerminalPhase::Confirm);
+        }
+    }
+
+    pub(crate) fn confirm_terminals(&mut self, manager: &mut Manager) {
+        let Some(local) = self
+            .local
+            .as_ref()
+            .filter(|local| matches!(local.phase, TerminalPhase::Confirm))
+        else {
+            return;
+        };
+        let Some(root) = self.root() else { return };
+        match manager.close_worktree_terminals(root, &local.terminals) {
+            Ok(closing) if closing.is_empty() => {
+                let remaining = manager.worktree_terminals(root);
+                self.refresh(remaining, false);
+            }
+            Ok(closing) => {
+                let phase = TerminalPhase::Closing {
+                    deadline: Instant::now() + Duration::from_secs(8),
+                    delayed: false,
+                    unverified: false,
+                };
+                self.reset_review();
+                self.local = Some(TerminalBlock::new(closing, phase, false));
+            }
+            Err(current) => self.show_local(current, true),
+        }
+    }
+
+    fn is_closing_terminals(&self) -> bool {
+        self.local
+            .as_ref()
+            .is_some_and(|local| matches!(local.phase, TerminalPhase::Closing { .. }))
+    }
+
+    pub(crate) fn tracks_terminal(&self, id: u64) -> bool {
+        self.is_closing_terminals()
+            && self
+                .local
+                .as_ref()
+                .is_some_and(|local| local.terminals.iter().any(|terminal| terminal.id == id))
+    }
+
+    /// Called after the manager polls its children. Only a verified exit clears
+    /// a requested terminal, even if manager polling drops a failed child.
+    pub(crate) fn poll_terminals(
+        &mut self,
+        manager: &Manager,
+        exits: &[ExitNotice],
+        now: Instant,
+    ) -> bool {
+        let Some(local) = &mut self.local else {
+            return false;
+        };
+        let TerminalPhase::Closing {
+            deadline,
+            delayed,
+            unverified,
+        } = local.phase
+        else {
+            return false;
+        };
+        let waiting = now >= deadline;
+        if exits.is_empty() && waiting == delayed {
+            return false;
+        }
+        let mut failed = unverified;
+        let mut remaining = local.terminals.clone();
+        remaining.retain(
+            |terminal| match exits.iter().find(|exit| exit.id == terminal.id) {
+                Some(exit) if exit.exit_verified => false,
+                Some(_) => {
+                    failed = true;
+                    true
+                }
+                None => true,
+            },
+        );
+        if remaining.is_empty() {
+            self.local = None;
+            let current = self
+                .root()
+                .map(|root| manager.worktree_terminals(root))
+                .unwrap_or_default();
+            self.refresh(current, false);
+            return true;
+        }
+        if waiting != delayed || failed != unverified || remaining != local.terminals {
+            let phase = TerminalPhase::Closing {
+                deadline,
+                delayed: waiting,
+                unverified: failed,
+            };
+            self.local = Some(TerminalBlock::new(remaining, phase, false));
+            return true;
+        }
+        false
     }
 
     fn reset_review(&mut self) {
@@ -298,6 +558,14 @@ impl Modal {
             return Action::Continue;
         }
         if key.code == KeyCode::Esc {
+            if self
+                .local
+                .as_ref()
+                .is_some_and(|local| matches!(local.phase, TerminalPhase::Confirm))
+            {
+                self.set_terminal_phase(TerminalPhase::Review);
+                return Action::Continue;
+            }
             return Action::CloseDiscard;
         }
         if matches!(
@@ -314,6 +582,30 @@ impl Modal {
             } else {
                 self.scroll.saturating_add(amount).min(self.limit.get())
             };
+            return Action::Continue;
+        }
+        if let Some(local) = &self.local {
+            if !self.fits.get() || self.is_closing_terminals() {
+                return Action::Continue;
+            }
+            let buttons = local.buttons(false);
+            let mut selected = self.focus - 1;
+            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+                modal::cycle(
+                    &mut selected,
+                    &[true; 3][..buttons.len()],
+                    key.code == KeyCode::BackTab,
+                );
+                self.focus = selected + 1;
+            } else {
+                match modal::activate(key, &buttons, selected) {
+                    Some(Action::CloseDiscard) if matches!(local.phase, TerminalPhase::Confirm) => {
+                        self.set_terminal_phase(TerminalPhase::Review);
+                    }
+                    Some(action) => return action,
+                    None => {}
+                }
+            }
             return Action::Continue;
         }
         if self.blocked.is_some() {
@@ -381,7 +673,9 @@ impl Modal {
             .as_ref()
             .map(Journal::progress)
             .unwrap_or_default();
-        if let Some((_, body)) = &self.review {
+        if let Some(local) = &self.local {
+            self.draw_local(frame, inner, regions, local);
+        } else if let Some((_, body)) = &self.review {
             if !fits {
                 frame.render_widget(
                     Paragraph::new("Enlarge terminal to review and confirm. Esc cancels.")
@@ -477,6 +771,71 @@ impl Modal {
             }
         }
     }
+    fn draw_local(
+        &self,
+        frame: &mut Frame<'_>,
+        inner: ratatui::layout::Rect,
+        regions: modal::Regions,
+        local: &TerminalBlock,
+    ) {
+        let fits = inner.width >= 34 && inner.height >= 9;
+        self.fits.set(fits);
+        if !fits {
+            frame.render_widget(
+                Paragraph::new("Enlarge terminal for actions. Esc goes back.")
+                    .wrap(Wrap { trim: true }),
+                inner,
+            );
+            return;
+        }
+        let (heading, message) = local.heading();
+        let warning = matches!(
+            local.phase,
+            TerminalPhase::Confirm
+                | TerminalPhase::Closing {
+                    unverified: true,
+                    ..
+                }
+        );
+        let header = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(2),
+            Constraint::Min(1),
+        ])
+        .split(regions.body);
+        frame.render_widget(
+            Paragraph::new(heading).style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            header[0],
+        );
+        let style = if warning {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default()
+        };
+        frame.render_widget(
+            Paragraph::new(message)
+                .style(style)
+                .wrap(Wrap { trim: true }),
+            header[1],
+        );
+        self.limit
+            .set(local.body.draw(frame, header[2], self.scroll));
+        let buttons = local.buttons(inner.width < 52);
+        modal::buttons(frame, regions.actions, &buttons, self.focus.checked_sub(1));
+        let hints = if self.is_closing_terminals() {
+            "↑↓ Scroll  •  Esc Close dialog"
+        } else {
+            "↑↓ Scroll  •  Tab Focus  •  Esc Back"
+        };
+        frame.render_widget(
+            Paragraph::new(hints).style(Style::default().fg(Color::DarkGray)),
+            regions.hints,
+        );
+    }
 }
 
 impl Drop for Modal {
@@ -484,5 +843,66 @@ impl Drop for Modal {
         if let Some(Task::Review { task, .. }) = self.task.take() {
             task.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delayed_or_unverified_terminal_exit_keeps_discard_blocked() {
+        let terminal = WorktreeTerminal {
+            id: 1,
+            title: "Terminal".into(),
+            folder: "/feature".into(),
+            key: None,
+            owned: true,
+        };
+        let mut modal = Modal::new(
+            "state".into(),
+            Vec::new(),
+            Some("/feature".into()),
+            None,
+            vec![terminal],
+        );
+        let deadline = Instant::now();
+        modal.set_terminal_phase(TerminalPhase::Closing {
+            deadline,
+            delayed: false,
+            unverified: false,
+        });
+        let manager = Manager::default();
+        assert!(modal.poll_terminals(&manager, &[], deadline));
+        assert!(
+            modal
+                .local
+                .as_ref()
+                .unwrap()
+                .heading()
+                .1
+                .contains("Still waiting")
+        );
+        assert!(!modal.ready());
+
+        let exit = ExitNotice {
+            id: 1,
+            exit_verified: false,
+            failed: true,
+            was_active: false,
+            message: "Wait failed".into(),
+        };
+        assert!(modal.poll_terminals(&manager, &[exit], deadline));
+        assert!(
+            modal
+                .local
+                .as_ref()
+                .unwrap()
+                .heading()
+                .1
+                .contains("could not verify")
+        );
+        assert!(modal.tracks_terminal(1));
+        assert!(!modal.ready());
     }
 }

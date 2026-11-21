@@ -6,10 +6,12 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 from uuid import UUID
 
 from pty_support import Terminal
@@ -143,6 +145,21 @@ def fake():
         print(json.dumps(reply), flush=True)
 
 
+def fake_terminal():
+    home = Path(os.environ['CODEX_HOME'])
+
+    def terminate(_signal, _frame):
+        (home / 'terminal-closing').touch()
+        time.sleep(0.8)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, terminate)
+    (home / 'terminal-pid').write_text(str(os.getpid()))
+    print('DISPOSABLE CODING TERMINAL', flush=True)
+    while True:
+        signal.pause()
+
+
 def setup(root, env):
     main, worktree = root / 'project', root / 'project' / '.worktrees' / 'feature'
     main.mkdir()
@@ -182,6 +199,84 @@ def verify_git(main, worktree, git):
     assert git('branch', '--format=%(refname:short)').splitlines() == ['main', 'unrelated']
     assert (main / 'tracked.txt').read_text() == 'main\n'
     assert git('log', '-1', '--format=%s') == 'Base'
+
+
+def check_local_terminals(root, binary):
+    root.mkdir()
+    env = {**os.environ, 'XDG_STATE_HOME': str(root / 'state'),
+           'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_CONFIG_NOSYSTEM': '1'}
+    env.pop('TRACR_DEV_CONTROL', None)
+    _, worktree, git = setup(root, env)
+    home = root / 'codex'
+    home.mkdir()
+    store = home / 'threads.json'
+    tid = str(UUID(int=1))
+    title = 'Feature with an open terminal'
+    chat = dict(id=tid, cwd=str(worktree), name=title, preview=title, createdAt=1, updatedAt=1,
+                archived=False, status={'type': 'notLoaded'}, source='cli', canAcceptDirectInput=True)
+    state = dict(chats={tid: chat}, deleted=[], worktree=str(worktree))
+    store.write_text(json.dumps(state))
+    t = Terminal([binary, '--codex-home', str(home), '--codex-bin', str(Path(__file__).resolve()),
+                  str(worktree)], env)
+    try:
+        t.inspect('ID: ' + tid)
+        t.send(b'\r')
+        t.expect('DISPOSABLE CODING TERMINAL')
+        pid = int((home / 'terminal-pid').read_text())
+        t.send(b'\x02')
+        t.expect('Open here')
+        t.send(b'\x1b`')
+        t.expect_focus('Folders')
+        t.send(b'\x1b[3~')
+        t.expect('1 terminal in Tracr')
+        t.expect(title)
+        t.expect('Close listed terminals…')
+        t.resize(16, 40)
+        t.expect('[ Close… ]')
+        t.send(b'\x1b[Z\r')
+        t.expect('Close 1 terminal?')
+        t.expect('Running work in these terminals will')
+        t.expect('>[ Cancel ]')
+        t.send(b'\r')
+        t.expect('1 terminal in Tracr')
+        assert not (home / 'terminal-closing').exists()
+        os.kill(pid, 0)
+        t.resize(40, 120)
+        t.send(b'\x1b[Z\r')
+        t.expect('Running work in these terminals will stop.')
+        t.send(b'\t')
+        t.expect('>[ Close terminals ]')
+        assert not (home / 'terminal-closing').exists()
+
+        state['shared'] = {'loaded': {tid: {'type': 'idle'}}}
+        store.write_text(json.dumps(state))
+        t.send(b'\r')
+        t.expect('Closing 1 terminal…')
+        t.wait(lambda: (home / 'terminal-closing').exists())
+        assert 'Type the branch name' not in t.text()
+        t.expect('Codex still has these conversations loaded')
+        t.expect(title + ' · Idle')
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            raise AssertionError('Terminal was still running after Codex readiness was checked')
+        assert worktree.exists() and git('rev-parse', 'feature').strip()
+        assert json.loads(store.read_text())['deleted'] == []
+
+        state.pop('shared')
+        store.write_text(json.dumps(state))
+        t.send(b'\t')
+        t.expect('>[ Retry ]')
+        t.send(b'\r')
+        t.expect('Type the branch name')
+        assert worktree.exists() and json.loads(store.read_text())['deleted'] == []
+        t.send(b'\x1b')
+        t.wait(lambda: 'Type the branch name' not in t.text())
+        t.finish()
+    finally:
+        t.close()
 
 
 def check_fake(root, binary):
@@ -537,6 +632,8 @@ def check_native(root, binary, codex):
 if __name__ == '__main__':
     if sys.argv[1] == 'app-server':
         fake()
+    elif sys.argv[1] in ('resume', '--cd'):
+        fake_terminal()
     else:
         scratch = Path('.tmp').resolve()
         scratch.mkdir(exist_ok=True)
@@ -546,5 +643,6 @@ if __name__ == '__main__':
             if len(sys.argv) == 3:
                 check_native(root, binary, str(Path(sys.argv[2]).resolve()))
             else:
+                check_local_terminals(root / 'local-terminals', binary)
                 check_fake(root, binary)
         print('worktree discard: passed')
