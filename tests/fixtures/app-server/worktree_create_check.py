@@ -81,7 +81,9 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         # New worktree is selected in Folders, and its HEAD is followed.
         t.resize(60, 100)
         t.expect('─ ◇ feature/from-folder')
-        t.expect('Second creation commit')
+        # The old commit text remains visible during navigation. Wait
+        # for the destination's HEAD label before interacting with its history.
+        t.expect('[HEAD] [◇ feature/from-folder]')
         t.send(b'\x1b[Z\x1b[B')
         t.expect_selected_commit(git(project, 'show', '-s', '--format=%s', first))
         open_worktree(t)

@@ -326,6 +326,9 @@ pub struct View {
     pub terminal_recovery: Option<crate::terminal_recovery::Dialog>,
     pub history: crate::git_history::History,
     pub git_sessions: std::cell::RefCell<crate::git_sessions::Presentation>,
+    pub git_preview: std::cell::RefCell<Option<ratatui::buffer::Buffer>>,
+    pub git_navigation_loading: bool,
+    pub git_navigation_error: bool,
     pub git_hidden: bool,
     pub folders_hidden: bool,
     pub git_size_limited: bool,
@@ -376,6 +379,9 @@ impl Default for View {
             terminal_recovery: Default::default(),
             history: Default::default(),
             git_sessions: Default::default(),
+            git_preview: Default::default(),
+            git_navigation_loading: false,
+            git_navigation_error: false,
             git_hidden: Default::default(),
             folders_hidden: Default::default(),
             git_size_limited: Default::default(),
@@ -614,6 +620,101 @@ struct PanelLayout {
     sessions: Option<Rect>,
     git: Option<Rect>,
     graph_visible: bool,
+}
+
+// Only confirmed ownership may reserve Git panel space. Discovery stays off the
+// render path, and effective ownership preserves the panel during refreshes.
+fn selected_git_context(browser: &Browser) -> Option<&crate::git_discovery::Outcome> {
+    let FolderFilter::Path(path) = &browser.folder else {
+        return None;
+    };
+    browser
+        .ownership
+        .get(path)
+        .and_then(|record| record.effective())
+}
+
+fn selected_git_repository(browser: &Browser) -> Option<&std::path::PathBuf> {
+    match selected_git_context(browser) {
+        Some(crate::git_discovery::Outcome::Repository { repository, .. }) => {
+            Some(&repository.common_dir)
+        }
+        _ => None,
+    }
+}
+
+fn git_preview_pending(browser: &Browser, view: &View) -> bool {
+    view.folder_navigation.pending()
+        || view.git_navigation_loading
+        || (selected_git_repository(browser).is_some()
+            && view.history.repository().as_ref() != selected_git_repository(browser))
+}
+
+fn git_preview_blocked(browser: &Browser, view: &View) -> bool {
+    git_preview_pending(browser, view) || view.git_navigation_error
+}
+
+fn finish_git_navigation(view: &mut View) {
+    if view.git_navigation_loading && view.history.navigation_ready() {
+        view.git_navigation_loading = false;
+        view.git_navigation_error = view.history.error.is_some();
+    } else if view.git_navigation_error
+        && view.history.error.is_none()
+        && view.history.navigation_ready()
+    {
+        view.git_navigation_error = false;
+    }
+}
+
+fn cache_git_preview(frame: &mut Frame<'_>, area: Rect, view: &View) {
+    let inner = pane_block("Git Worktrees", false).inner(area);
+    let mut snapshot = ratatui::buffer::Buffer::empty(Rect::new(0, 0, inner.width, inner.height));
+    for y in 0..inner.height {
+        for x in 0..inner.width {
+            snapshot[(x, y)] = frame.buffer_mut()[(inner.x + x, inner.y + y)].clone();
+        }
+    }
+    *view.git_preview.borrow_mut() = Some(snapshot);
+}
+
+fn draw_git_preview(frame: &mut Frame<'_>, area: Rect, view: &View) {
+    let block = pane_block("Git Worktrees", view.git_focus);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if let Some(snapshot) = view.git_preview.borrow().as_ref() {
+        for y in 0..inner.height.min(snapshot.area.height) {
+            for x in 0..inner.width.min(snapshot.area.width) {
+                let cell = &snapshot[(x, y)];
+                // Never copy half a wide glyph at the new right edge.
+                if x as usize + unicode_width::UnicodeWidthStr::width(cell.symbol())
+                    > inner.width as usize
+                {
+                    continue;
+                }
+                let target = &mut frame.buffer_mut()[(inner.x + x, inner.y + y)];
+                *target = cell.clone();
+            }
+        }
+    } else {
+        frame.render_widget(Paragraph::new("Loading Git preview…"), inner);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn select_git_fixture(browser: &mut Browser, repository: &str) {
+    let path = std::path::PathBuf::from(repository);
+    browser.folder = FolderFilter::Path(path.clone());
+    browser.apply_ownership(
+        browser.git_generation,
+        path.clone(),
+        crate::git_discovery::Outcome::Repository {
+            repository: crate::git::Directory {
+                common_dir: path.clone(),
+                git_dir: path,
+            },
+            root: None,
+        },
+    );
 }
 
 // Shared by drawing, input navigation, Git scheduling, and terminal sizing.
@@ -983,7 +1084,10 @@ fn browser_footer(_area: Rect, browser: &Browser, view: &View) -> (String, u16) 
             )
         })
         .collect();
-    if view.history.present() && !view.git_hidden {
+    if view.history.present()
+        && !view.git_hidden
+        && !(git_preview_pending(browser, view) && view.git_preview.borrow().is_some())
+    {
         if let Some(notice) = view.history.notice() {
             issues.insert(0, safe_text(&notice));
         }
@@ -1037,6 +1141,9 @@ fn browser_footer(_area: Rect, browser: &Browser, view: &View) -> (String, u16) 
 }
 
 fn selected_git_session(browser: &Browser, view: &View) -> Option<crate::git_sessions::Annotation> {
+    if git_preview_blocked(browser, view) {
+        return None;
+    }
     let mut presentation = view.git_sessions.borrow_mut();
     presentation.sync(browser, &view.history);
     presentation.session().cloned()
@@ -1182,14 +1289,21 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         layout[0],
         area.height,
         view,
-        view.history.present() || view.folder_navigation.pending(),
+        selected_git_repository(browser).is_some(),
     );
     let git_area = panels.git;
     let expanded = panels.graph_visible;
     if let Some(git_area) = git_area {
-        if expanded && view.folder_navigation.pending() {
+        if expanded && git_preview_pending(browser, view) {
+            draw_git_preview(frame, git_area, view);
+        } else if expanded && view.git_navigation_error {
             frame.render_widget(
-                Paragraph::new("Loading Git preview…").block(pane_block("Git", view.git_focus)),
+                Paragraph::new(
+                    view.history
+                        .notice()
+                        .unwrap_or_else(|| "Loading Git history…".into()),
+                )
+                .block(pane_block("Git Worktrees", view.git_focus)),
                 git_area,
             );
         } else if expanded {
@@ -1281,6 +1395,9 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                 git_area,
                 &mut ListState::default().with_selected(Some(selected)),
             );
+            if !view.history.loading() && view.history.error.is_none() {
+                cache_git_preview(frame, git_area, view);
+            }
             for (visible, y, marker) in [
                 (more_above, git_area.y, " ↑ "),
                 (more_below, git_area.bottom() - 1, " ↓ "),
@@ -2132,7 +2249,8 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
 }
 
 fn selected_commit(browser: &Browser, view: &View) -> Option<(std::path::PathBuf, String)> {
-    if !view.git_focus
+    if git_preview_blocked(browser, view)
+        || !view.git_focus
         || view.git_hidden
         || view.git_size_limited
         || selected_git_session(browser, view).is_some()
@@ -2146,6 +2264,9 @@ fn selected_commit(browser: &Browser, view: &View) -> Option<(std::path::PathBuf
 }
 
 fn worktree_unavailable(browser: &Browser, view: &View) -> Option<String> {
+    if view.git_focus && git_preview_blocked(browser, view) {
+        return Some("Wait for the selected Git history to load.".into());
+    }
     if view.git_focus
         && view
             .history
@@ -3855,7 +3976,7 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
 }
 
 fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> Action {
-    if view.folder_navigation.pending()
+    if git_preview_blocked(browser, view)
         && matches!(
             command,
             Command::GitSelectWorktree
@@ -3871,7 +3992,7 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
     {
         return Action::Continue;
     }
-    if view.folder_navigation.pending() && view.git_focus && command == Command::CreateWorktree {
+    if git_preview_blocked(browser, view) && view.git_focus && command == Command::CreateWorktree {
         return Action::Continue;
     }
     if view.context() == 0 && view.folders_hidden && !available_when_folders_hidden(command) {
@@ -4389,28 +4510,23 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let updates = git_discovery.poll().await;
             candidates_dirty |= !updates.is_empty();
             git_discovery.apply_batch(&mut browser, updates);
-            let context = match &browser.folder {
-                FolderFilter::Path(path) => browser.ownership.get(path).and_then(|r| r.effective()),
-                _ => None,
-            };
+            let context = selected_git_context(&browser);
             let pending_context = match &browser.folder {
                 FolderFilter::Path(path) => browser.ownership.get(path).is_none_or(|record| record.outcome.is_none() && record.previous.is_none()),
                 _ => false,
             };
-            let target = match context {
-                Some(crate::git_discovery::Outcome::Repository { repository, .. }) => Some(repository.common_dir.clone()),
-                _ => None,
-            };
+            let target = selected_git_repository(&browser).cloned();
             let checkout = match context { Some(crate::git_discovery::Outcome::Repository { root, .. }) => root.clone(), _ => None };
             let selected_folder = match &browser.folder { FolderFilter::Path(path) => Some(path.clone()), _ => None };
             let root_selected = selected_folder != history_folder && checkout.is_some() && selected_folder == checkout;
             if !pending_context {
+                if selected_folder != history_folder || view.folder_navigation.pending() {
+                    view.git_navigation_loading = target.is_some();
+                    view.git_navigation_error = false;
+                }
                 history_folder = selected_folder;
                 view.history.checkout(checkout, root_selected).await;
             }
-            let target = if pending_context {
-                if view.folder_navigation.pending() { None } else { view.history.repository() }
-            } else { target };
             let size = terminal.size()?;
             let area = Rect::new(0, 0, size.width, size.height);
             view.layout_mode.set(LayoutMode::for_size(size.width, size.height));
@@ -4421,7 +4537,12 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let graph_visible = panels.graph_visible;
             let page = usize::from(panels.git.map_or(0, |area| area.height.saturating_sub(3))).max(1);
             git_watch.context(target.clone(), browser.git_generation, graph_visible);
+            if target.is_none() {
+                view.git_navigation_loading = false;
+                view.git_navigation_error = false;
+            }
             view.history.tick(target, browser.git_generation, graph_visible, page).await;
+            finish_git_navigation(&mut view);
             if let Some(repository) = view.history.repository().filter(|_| !view.history.rows.is_empty()) {
                 browser.order_worktrees(repository, view.history.revision(), view.history.rows.iter().filter_map(|row| row.oid.as_deref()));
             }
@@ -5127,8 +5248,266 @@ mod cleanup_tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect();
-        assert!(text.contains("Loading Git preview"));
+        assert!(!text.contains("Loading Git preview"));
         assert!(!text.contains("selected-oid"));
+    }
+
+    #[tokio::test]
+    async fn git_panel_waits_for_selected_folder_ownership() {
+        use crate::git_discovery::{Outcome, Ownership};
+        for (width, height) in [(180, 40), (80, 24), (80, 10)] {
+            let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
+            let folder = std::path::PathBuf::from("/plain");
+            browser.folder = FolderFilter::Path(folder.clone());
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            let mut render = |browser: &Browser, view: &View| {
+                terminal.draw(|frame| draw(frame, browser, view)).unwrap();
+                terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+            };
+            for pending in [true, false] {
+                if pending {
+                    view.folder_navigation.observe(
+                        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+                        true,
+                        std::time::Instant::now(),
+                    );
+                } else {
+                    view.folder_navigation.finish();
+                }
+                // Old history must not reserve space for an unknown or non-Git folder.
+                for outcome in [
+                    None,
+                    Some(Outcome::NotRepository),
+                    Some(Outcome::Unavailable("offline".into())),
+                ] {
+                    browser.ownership.insert(
+                        folder.clone(),
+                        Ownership {
+                            generation: browser.git_generation,
+                            outcome,
+                            previous: None,
+                        },
+                    );
+                    assert!(selected_git_repository(&browser).is_none());
+                    let screen = render(&browser, &view);
+                    assert!(!screen.contains("Loading Git preview"));
+                    assert!(!screen.contains("Selected commit"));
+                    let panels = panel_layout(
+                        Rect::new(0, 0, width, height),
+                        height,
+                        &view,
+                        selected_git_repository(&browser).is_some(),
+                    );
+                    assert!(panels.git.is_none());
+                }
+            }
+            // Confirmation shows the preview, never commits from the previous repository.
+            let repository = Outcome::Repository {
+                repository: crate::git::Directory {
+                    common_dir: "/another/.git".into(),
+                    git_dir: "/another/.git".into(),
+                },
+                root: Some(folder.clone()),
+            };
+            browser.apply_ownership(browser.git_generation, folder.clone(), repository.clone());
+            let screen = render(&browser, &view);
+            assert!(screen.contains("Loading Git preview"));
+            assert!(!screen.contains("Selected commit"));
+            // Refresh retains effective ownership, including transient discovery failures.
+            browser.invalidate_git();
+            assert!(render(&browser, &view).contains("Loading Git preview"));
+            browser.apply_ownership(
+                browser.git_generation,
+                folder.clone(),
+                Outcome::Unavailable("offline".into()),
+            );
+            assert!(render(&browser, &view).contains("Loading Git preview"));
+            // Returning to a confirmed matching repository exposes its history.
+            browser.apply_ownership(
+                browser.git_generation,
+                folder.clone(),
+                Outcome::Repository {
+                    repository: crate::git::Directory {
+                        common_dir: "/project/.git".into(),
+                        git_dir: "/project/.git".into(),
+                    },
+                    root: Some(folder.clone()),
+                },
+            );
+            assert!(render(&browser, &view).contains("Selected commit"));
+            view.folder_navigation.observe(
+                KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+                true,
+                std::time::Instant::now(),
+            );
+            let screen = render(&browser, &view);
+            assert!(screen.contains("Selected commit"));
+            assert!(!screen.contains("Loading Git preview"));
+            browser.apply_ownership(
+                browser.git_generation,
+                folder.clone(),
+                Outcome::NotRepository,
+            );
+            assert!(!render(&browser, &view).contains("Loading Git preview"));
+            browser.folder = FolderFilter::Path("/unseen".into());
+            assert!(!render(&browser, &view).contains("Loading Git preview"));
+        }
+    }
+
+    #[tokio::test]
+    async fn git_navigation_retains_original_snapshot_until_ready() {
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
+        select_git_fixture(&mut browser, "/project/.git");
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(180, 40)).unwrap();
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        let original = view.git_preview.borrow().clone().unwrap();
+        view.folder_navigation.observe(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            true,
+            std::time::Instant::now(),
+        );
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        assert_eq!(*view.git_preview.borrow(), Some(original.clone()));
+        // Loading continues after debounce, including within the same repository.
+        view.folder_navigation.finish();
+        view.git_navigation_loading = true;
+        view.history.rows[0].subject = "Destination commit".into();
+        for (width, height) in [(180, 40), (80, 24), (80, 10), (200, 50)] {
+            terminal.backend_mut().resize(width, height);
+            terminal.resize(Rect::new(0, 0, width, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(text.contains("Selected commit"));
+            assert!(!text.contains("Destination commit"));
+            assert!(!text.contains("Loading Git"));
+            let (_, footer) = browser_footer(Rect::new(0, 0, width, height), &browser, &view);
+            let panels = panel_layout(Rect::new(0, 0, width, height - footer), height, &view, true);
+            let inner = pane_block("Git Worktrees", view.git_focus).inner(panels.git.unwrap());
+            for y in 0..inner.height.min(original.area.height) {
+                for x in 0..inner.width.min(original.area.width) {
+                    // Preserve symbols and all styling, including colored graph
+                    // spans, backgrounds, and the previous selection highlight.
+                    assert_eq!(buffer[(inner.x + x, inner.y + y)], original[(x, y)]);
+                }
+            }
+            assert_eq!(*view.git_preview.borrow(), Some(original.clone()));
+        }
+        for command in [
+            Command::GitSelectWorktree,
+            Command::CommitInfo,
+            Command::CreateWorktree,
+            Command::GitDown,
+        ] {
+            assert_eq!(
+                execute_command(command, &mut browser, &mut view),
+                Action::Continue
+            );
+        }
+        assert!(
+            view.commit_info.is_none()
+                && view.worktree_create.is_none()
+                && view.worktree_picker.is_none()
+        );
+        assert!(selected_commit(&browser, &view).is_none());
+        assert!(selected_git_session(&browser, &view).is_none());
+        // A fast move to another repository and back must not recapture intermediate rows.
+        select_git_fixture(&mut browser, "/other/.git");
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        assert_eq!(*view.git_preview.borrow(), Some(original.clone()));
+        select_git_fixture(&mut browser, "/project/.git");
+        view.git_navigation_loading = false;
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Destination commit"));
+        assert!(!text.contains("Selected commit"));
+        // Failure replaces the stale preview and cannot enable actions on old rows.
+        view.git_navigation_loading = true;
+        view.history.error = Some("destination unavailable".into());
+        finish_git_navigation(&mut view);
+        assert!(!view.git_navigation_loading && view.git_navigation_error);
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("destination unavailable"));
+        assert!(!text.contains("Destination commit"));
+        assert!(selected_commit(&browser, &view).is_none());
+    }
+
+    #[tokio::test]
+    async fn cached_preview_preserves_sessions_and_crops_wide_characters() {
+        let (mut browser, history) = crate::git_sessions::tests::fixture().await;
+        crate::git_sessions::tests::add_session(
+            &mut browser,
+            "Previous session 界",
+            "/worktree",
+            "/worktree",
+            "/repo/.git",
+            crate::domain::RuntimeStatus::Idle,
+            1,
+        );
+        select_git_fixture(&mut browser, "/repo/.git");
+        let mut view = View {
+            history,
+            ..folder_view()
+        };
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(180, 40)).unwrap();
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        let snapshot = view.git_preview.borrow().clone().unwrap();
+        assert!(
+            snapshot
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+                .contains("Previous session 界")
+        );
+        view.git_navigation_loading = true;
+        view.history.rows.clear();
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+                .contains("Previous session 界")
+        );
+        // Clip a wide character at the right edge of the cached body.
+        let mut narrow = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 4, 1));
+        narrow[(2, 0)].set_symbol("界");
+        *view.git_preview.borrow_mut() = Some(narrow);
+        terminal
+            .draw(|frame| draw_git_preview(frame, Rect::new(0, 0, 5, 3), &view))
+            .unwrap();
+        assert!(
+            !terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .any(|c| c.symbol() == "界")
+        );
     }
 
     #[test]
@@ -5487,6 +5866,7 @@ mod cleanup_tests {
     async fn git_session_rows_render_and_enter_relinks_missing_folder() {
         use crate::git_sessions::tests::{add_session, fixture};
         let (mut browser, history) = fixture().await;
+        select_git_fixture(&mut browser, "/repo/.git");
         let key = add_session(
             &mut browser,
             "Implement login 界",
@@ -7596,7 +7976,8 @@ mod action_discovery_tests {
 
     #[tokio::test]
     async fn hints_follow_focus_without_footer_rows_and_status_is_conditional() {
-        let browser = Browser::new(vec![]);
+        let mut browser = Browser::new(vec![]);
+        select_git_fixture(&mut browser, "/synthetic/repo");
         let mut view = View::default();
         view.history
             .tick(Some("/synthetic/repo".into()), 0, false, 1)

@@ -559,6 +559,16 @@ impl History {
     pub fn loading(&self) -> bool {
         self.task.is_some() || self.build.is_some() || self.head_task.is_some()
     }
+    /// A navigation target is settled only after HEAD, history and graph installation.
+    pub(crate) fn navigation_ready(&self) -> bool {
+        self.error.is_some()
+            || (self.loaded
+                && !self.restart
+                && !self.refresh
+                && !self.resolve_head
+                && !self.loading()
+                && (!self.seeking() || self.exhausted))
+    }
     pub fn notice(&self) -> Option<String> {
         if let Some(error) = &self.error {
             return Some(format!(
@@ -1651,6 +1661,7 @@ mod tests {
             ..View::default()
         };
         let mut browser = crate::browser::Browser::new(vec![]);
+        crate::tui::select_git_fixture(&mut browser, "/repo");
         tick(&mut view.history).await;
         let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
         let text = |terminal: &Terminal<TestBackend>| -> String {
@@ -1766,6 +1777,30 @@ mod tests {
         .unwrap();
     }
     #[tokio::test]
+    async fn navigation_readiness_includes_empty_and_failed_destinations() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut h = History::with_backend(Arc::new(Controlled(tx)));
+        assert!(!h.navigation_ready());
+        tick(&mut h).await;
+        rx.recv().await.unwrap().1.send(Ok(vec![])).unwrap();
+        finish(&mut h).await;
+        assert!(h.navigation_ready());
+        assert!(h.rows.is_empty());
+        h.tick(Some("/destination".into()), 0, true, 20).await;
+        assert!(!h.navigation_ready());
+        rx.recv()
+            .await
+            .unwrap()
+            .1
+            .send(Err("unavailable".into()))
+            .unwrap();
+        tokio::task::yield_now().await;
+        h.tick(Some("/destination".into()), 0, true, 20).await;
+        assert!(h.navigation_ready());
+        assert!(h.error.is_some());
+    }
+
+    #[tokio::test]
     async fn follows_old_head_manual_refresh_and_resume() {
         let (htx, mut heads) = mpsc::unbounded_channel();
         let (rtx, mut reads) = mpsc::unbounded_channel();
@@ -1780,6 +1815,7 @@ mod tests {
         };
         h.checkout(Some("/checkout".into()), false).await;
         tick(&mut h).await;
+        assert!(!h.navigation_ready());
         heads.recv().await.unwrap().send(Ok(head.clone())).unwrap();
         pump(&mut h).await;
         let (limit, pin, reply) = reads.recv().await.unwrap();
@@ -1790,8 +1826,10 @@ mod tests {
         let (limit, _, reply) = reads.recv().await.unwrap();
         assert_eq!(limit, 256);
         assert!(h.notice().unwrap().contains("locating HEAD"));
+        assert!(!h.navigation_ready());
         reply.send(Ok(rows(220))).unwrap();
         finish(&mut h).await;
+        assert!(h.navigation_ready());
         assert_eq!(h.selected, 180);
         assert!(h.is_head(&h.rows[180]));
         h.navigate(Movement::Up);
@@ -2361,7 +2399,8 @@ mod tests {
             history: History::with_backend(Arc::new(Controlled(tx))),
             ..View::default()
         };
-        let browser = crate::browser::Browser::new(vec![]);
+        let mut browser = crate::browser::Browser::new(vec![]);
+        crate::tui::select_git_fixture(&mut browser, "/repo");
         tick(&mut view.history).await;
         rx.recv().await.unwrap().1.send(Ok(rows(80))).unwrap();
         finish(&mut view.history).await;

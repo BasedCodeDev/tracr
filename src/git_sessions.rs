@@ -418,6 +418,7 @@ pub(crate) mod tests {
         };
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let (mut browser, mut history) = fixture().await;
+        crate::tui::select_git_fixture(&mut browser, "/repo/.git");
         history.replace_records_for_test(vec![
             CommitRecord {
                 stash: None,
