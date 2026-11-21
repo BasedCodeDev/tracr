@@ -1457,8 +1457,10 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             );
         } else if expanded {
             use crate::git_sessions::Row;
+            let inner = pane_block("Git Worktrees", view.git_focus).inner(git_area);
+            let height = usize::from(inner.height);
+            view.history.page.set(height.max(1));
             let mut presentation = view.git_sessions.borrow_mut();
-            let height = usize::from(git_area.height.saturating_sub(3));
             let mut width = usize::from(git_area.width.saturating_sub(4));
             presentation.width = Some(width);
             presentation.sync(browser, &view.history);
@@ -1577,7 +1579,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             }
             scrollbar::draw(
                 frame,
-                scrollbar::inside_border_track(git_area, pane_block("", false).inner(git_area)),
+                scrollbar::inside_border_track(git_area, inner),
                 presentation.rows.len(),
                 range.len(),
                 range.start,
@@ -5521,9 +5523,10 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn git_page_keys_move_through_session_rows_before_the_end() {
+    async fn git_page_keys_use_the_rendered_height() {
         use crate::git_sessions::tests::{add_session, fixture};
         let (mut browser, history) = fixture().await;
+        select_git_fixture(&mut browser, "/repo/.git");
         for i in 0..12 {
             add_session(
                 &mut browser,
@@ -5543,20 +5546,28 @@ mod cleanup_tests {
             dialog_area: true,
             ..View::default()
         };
-        view.history.page.set(2);
-        press(&mut browser, &mut view, KeyCode::Home);
-        press(&mut browser, &mut view, KeyCode::PageDown);
-        assert_eq!(view.git_sessions.borrow().selected, 2);
-        assert!(view.git_sessions.borrow().session().is_some());
-        press(&mut browser, &mut view, KeyCode::PageUp);
-        assert_eq!(view.history.selected, 0);
-        assert_eq!(view.git_sessions.borrow().selected, 0);
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 10)).unwrap();
+        // The compact drawer gives Git the full height minus its borders and top padding.
+        for (height, step) in [(10, 7), (8, 5)] {
+            terminal.backend_mut().resize(100, height);
+            terminal.resize(Rect::new(0, 0, 100, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            press(&mut browser, &mut view, KeyCode::PageDown);
+            assert_eq!(view.git_sessions.borrow().selected, step);
+            assert!(view.git_sessions.borrow().session().is_some());
+            press(&mut browser, &mut view, KeyCode::PageUp);
+            assert_eq!(view.history.selected, 0);
+            assert_eq!(view.git_sessions.borrow().selected, 0);
+        }
         press(&mut browser, &mut view, KeyCode::End);
         assert_eq!(view.history.selected, 1);
         assert_eq!(
             view.git_sessions.borrow().selected,
             view.git_sessions.borrow().rows.len() - 1
         );
+        press(&mut browser, &mut view, KeyCode::Home);
+        assert_eq!(view.history.selected, 0);
+        assert_eq!(view.git_sessions.borrow().selected, 0);
     }
 
     #[test]
