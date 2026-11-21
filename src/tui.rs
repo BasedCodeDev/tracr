@@ -1152,20 +1152,27 @@ fn git_session_status(status: crate::domain::RuntimeStatus) -> &'static str {
     }
 }
 
-fn git_session_name_width(presentation: &crate::git_sessions::Presentation) -> usize {
-    presentation
-        .rows
-        .iter()
-        .filter_map(|row| match row {
-            crate::git_sessions::Row::Session { annotation, .. } => {
-                Some(unicode_width::UnicodeWidthStr::width(
-                    safe_text(&presentation.annotations[*annotation].session.title).as_str(),
-                ))
-            }
-            _ => None,
-        })
-        .max()
-        .unwrap_or(0)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct GitSessionWidths {
+    status: usize,
+    title: usize,
+}
+
+fn git_session_widths(presentation: &crate::git_sessions::Presentation) -> GitSessionWidths {
+    use unicode_width::UnicodeWidthStr;
+    let mut widths = GitSessionWidths::default();
+    for row in &presentation.rows {
+        if let crate::git_sessions::Row::Session { annotation, .. } = row {
+            let annotation = &presentation.annotations[*annotation];
+            widths.status = widths
+                .status
+                .max(git_session_status(annotation.status).width());
+            widths.title = widths
+                .title
+                .max(safe_text(&annotation.session.title).width());
+        }
+    }
+    widths
 }
 
 fn git_session_spans(
@@ -1175,21 +1182,22 @@ fn git_session_spans(
     annotation: &crate::git_sessions::Annotation,
     last: bool,
     grouped: bool,
-    name_width: usize,
+    widths: GitSessionWidths,
 ) -> Vec<Span<'static>> {
     let mut spans = view.history.session_spans(anchor, connector);
-    // Reserve the longest status label even when no session currently uses it,
-    // so names stay aligned as live statuses change.
     let status = git_session_status(annotation.status);
-    let status_width: usize = 8;
     let connector = if last { " └─ " } else { " ├─ " };
     let connector_style = Style::default().fg(Color::White);
     if grouped {
         spans.push(Span::styled(connector.trim_start(), connector_style));
     }
-    spans.push(Span::raw(" ".repeat(
-        status_width.saturating_sub(unicode_width::UnicodeWidthStr::width(status)),
-    )));
+    spans.push(Span::raw(
+        " ".repeat(
+            widths
+                .status
+                .saturating_sub(unicode_width::UnicodeWidthStr::width(status)),
+        ),
+    ));
     spans.push(Span::styled(
         status.to_owned(),
         activity_color(annotation.status)
@@ -1201,7 +1209,9 @@ fn git_session_spans(
         spans.push(Span::styled(connector, connector_style));
     }
     let title = safe_text(&annotation.session.title);
-    let padding = name_width.saturating_sub(unicode_width::UnicodeWidthStr::width(title.as_str()));
+    let padding = widths
+        .title
+        .saturating_sub(unicode_width::UnicodeWidthStr::width(title.as_str()));
     spans.push(Span::styled(
         title,
         Style::default().add_modifier(Modifier::BOLD),
@@ -1317,8 +1327,8 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             let more_below = range.end < presentation.rows.len()
                 || (!view.history.exhausted && !presentation.rows.is_empty());
             let selected = presentation.cursor().saturating_sub(range.start);
-            // Use all loaded rows, so scrolling does not shift the provider column.
-            let name_width = git_session_name_width(&presentation);
+            // Use all loaded rows, so scrolling does not shift the columns.
+            let session_widths = git_session_widths(&presentation);
             // Commit subjects, session annotations, and labels in very narrow panes can pan.
             let requested = view.history.horizontal.get();
             view.history.clamp_horizontal(width);
@@ -1345,7 +1355,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                             &presentation.annotations[*annotation],
                             *last,
                             heading.is_some(),
-                            name_width,
+                            session_widths,
                         )
                         .iter()
                         .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
@@ -1385,7 +1395,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                             &presentation.annotations[*annotation],
                             *last,
                             heading.is_some(),
-                            name_width,
+                            session_widths,
                         ),
                     };
                     let item =
@@ -5950,6 +5960,10 @@ mod cleanup_tests {
         );
         let mut annotation = selected_git_session(&browser, &view).unwrap();
         let mut name_column = None;
+        let widths = GitSessionWidths {
+            status: 8,
+            title: 0,
+        };
         for status in [
             crate::domain::RuntimeStatus::Idle,
             crate::domain::RuntimeStatus::Running,
@@ -5968,7 +5982,7 @@ mod cleanup_tests {
             },
         ] {
             annotation.status = status;
-            let spans = git_session_spans(&view, 0, None, &annotation, true, false, 0);
+            let spans = git_session_spans(&view, 0, None, &annotation, true, false, widths);
             assert_eq!(
                 spans
                     .iter()
@@ -5994,7 +6008,7 @@ mod cleanup_tests {
             };
             assert!(line[..title_start].ends_with(&format!("{expected:>8} └─ ")));
             let continuing: String =
-                git_session_spans(&view, 0, None, &annotation, false, false, 0)
+                git_session_spans(&view, 0, None, &annotation, false, false, widths)
                     .iter()
                     .map(|span| span.content.as_ref())
                     .collect();
@@ -6202,24 +6216,36 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn git_session_provider_column_aligns_unicode_names_across_commits_and_scroll() {
+    async fn git_session_columns_follow_live_widths_and_stay_aligned_across_scroll() {
+        use crate::domain::RuntimeStatus;
+        use crate::git::{RefKind, RefLabel};
         use crate::git_sessions::tests::{add_session, fixture};
-        let (mut browser, history) = fixture().await;
-        for (title, root) in [
+        use crate::git_sessions::{Presentation, Row};
+        use unicode_width::UnicodeWidthStr;
+        let (mut browser, mut history) = fixture().await;
+        let [_, changing, _] = [
             ("Short", "/repo"),
             ("Longer 界界 name", "/worktree"),
             ("e\u{301} task", "/repo"),
-        ] {
+        ]
+        .map(|(title, root)| {
             add_session(
                 &mut browser,
                 title,
                 root,
                 root,
                 "/repo/.git",
-                crate::domain::RuntimeStatus::Running,
+                RuntimeStatus::Idle,
                 1,
-            );
-        }
+            )
+        });
+        history.set_references(std::collections::BTreeMap::from([(
+            "head".into(),
+            vec![RefLabel {
+                kind: RefKind::Local,
+                name: "main".into(),
+            }],
+        )]));
         browser
             .repositories
             .get_mut(std::path::Path::new("/repo/.git"))
@@ -6232,39 +6258,81 @@ mod cleanup_tests {
         };
         let mut presentation = view.git_sessions.borrow_mut();
         presentation.sync(&browser, &view.history);
-        let width = git_session_name_width(&presentation);
-        assert_eq!(
-            width,
-            unicode_width::UnicodeWidthStr::width("Longer 界界 name")
-        );
-        let mut provider_column = None;
-        for row in &presentation.rows {
-            if let crate::git_sessions::Row::Session {
-                anchor,
-                annotation,
-                connector,
-                heading,
-                last,
-            } = row
-            {
-                let spans = git_session_spans(
-                    &view,
-                    *anchor,
-                    *connector,
-                    &presentation.annotations[*annotation],
-                    *last,
-                    heading.is_some(),
-                    width,
-                );
-                let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-                let column =
-                    unicode_width::UnicodeWidthStr::width(&text[..text.find("codex").unwrap()]);
-                assert_eq!(*provider_column.get_or_insert(column), column);
+        let provider_column = |presentation: &Presentation, widths| {
+            let mut aligned = None;
+            for row in &presentation.rows {
+                if let Row::Session {
+                    anchor,
+                    annotation,
+                    connector,
+                    heading,
+                    last,
+                } = row
+                {
+                    let spans = git_session_spans(
+                        &view,
+                        *anchor,
+                        *connector,
+                        &presentation.annotations[*annotation],
+                        *last,
+                        heading.is_some(),
+                        widths,
+                    );
+                    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+                    let column = text[..text.find("codex").unwrap()].width();
+                    assert_eq!(*aligned.get_or_insert(column), column);
+                }
             }
-        }
-        presentation.selected = presentation.rows.len() - 1;
-        presentation.range(1);
-        assert_eq!(git_session_name_width(&presentation), width);
+            aligned.unwrap()
+        };
+        let idle = git_session_widths(&presentation);
+        assert_eq!(idle.status, 4);
+        assert_eq!(idle.title, "Longer 界界 name".width());
+        let idle_column = provider_column(&presentation, idle);
+        assert!(
+            presentation
+                .rows
+                .iter()
+                .any(|row| matches!(row, Row::Session { heading: None, .. }))
+        );
+
+        browser.sources[0]
+            .live
+            .insert(changing.clone(), RuntimeStatus::Running);
+        presentation.sync(&browser, &view.history);
+        let mixed = git_session_widths(&presentation);
+        assert_eq!(mixed.status, 7);
+        assert_eq!(provider_column(&presentation, mixed), idle_column + 3);
+
+        presentation.selected = presentation
+            .rows
+            .iter()
+            .position(|row| {
+                matches!(
+                    row,
+                    Row::Session {
+                        heading: Some(_),
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        let visible = presentation.range(1);
+        let Row::Session { annotation, .. } = presentation.rows[visible.start] else {
+            panic!("expected an idle branch session to be visible");
+        };
+        assert_eq!(
+            presentation.annotations[annotation].status,
+            RuntimeStatus::Idle
+        );
+        assert_eq!(git_session_widths(&presentation), mixed);
+
+        browser.sources[0]
+            .live
+            .insert(changing, RuntimeStatus::Idle);
+        presentation.sync(&browser, &view.history);
+        assert_eq!(git_session_widths(&presentation), idle);
+        assert_eq!(provider_column(&presentation, idle), idle_column);
     }
 
     #[tokio::test]
