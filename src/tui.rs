@@ -3744,6 +3744,8 @@ pub enum Action {
     OpenDiscard,
     RecoverDiscard,
     ApplyDiscard,
+    RetryDiscard,
+    ReleaseDiscardIdle,
     CloseDiscard,
     PreviewFolderMove,
     ApplyFolderMove,
@@ -5384,16 +5386,20 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                                 continue;
                             }
                             let Some(root) = journal.as_ref().map(|journal| journal.root()).or(selected) else { continue };
-                            if view.terminals.borrow().has_worktree_terminal(root) {
-                                view.message = Some("Close Tracr terminals in this worktree before discarding.".into());
-                                continue;
-                            }
+                            let local = view.terminals.borrow().worktree_terminals(root);
                             let sources = crate::folder_move_ui::sources(&browser);
-                            view.discard = Some(crate::worktree_discard_ui::Modal::new(state, sources, selected.map(ToOwned::to_owned), journal));
+                            view.discard = Some(crate::worktree_discard_ui::Modal::new(state, sources, selected.map(ToOwned::to_owned), journal, local));
                         }
                         Action::CloseDiscard => view.discard = None,
-                        Action::ApplyDiscard => {
-                            if let Some(modal) = view.discard.as_mut() { modal.start(); }
+                        Action::RetryDiscard | Action::ReleaseDiscardIdle | Action::ApplyDiscard => {
+                            if let Some(modal) = view.discard.as_mut() {
+                                let local = modal.root().map(|root| view.terminals.borrow().worktree_terminals(root)).unwrap_or_default();
+                                if matches!(action, Action::ApplyDiscard) && local.is_empty() {
+                                    modal.start();
+                                } else {
+                                    modal.refresh(local, matches!(action, Action::ReleaseDiscardIdle));
+                                }
+                            }
                         }
                         Action::OpenFolderMove=>{
                             if let Some(reason)=crate::folder_move_ui::unavailable(&browser){view.message=Some(reason);continue;}

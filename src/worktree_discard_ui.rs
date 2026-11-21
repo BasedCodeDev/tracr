@@ -3,7 +3,7 @@ use crate::{
     folder_move::Source,
     modal::{self, Button, CachedBody},
     tui::Action,
-    worktree_discard::{self as discard, Journal, Plan},
+    worktree_discard::{self as discard, Blocker, Journal, Plan, Preview},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
@@ -53,7 +53,10 @@ pub(crate) fn unavailable(browser: &Browser) -> Option<&'static str> {
 }
 
 enum Task {
-    Review(JoinHandle<Result<(Plan, String), String>>),
+    Review {
+        task: JoinHandle<Result<(Preview, String), String>>,
+        releasing: bool,
+    },
     Discard(JoinHandle<Result<PathBuf, String>>),
 }
 
@@ -61,6 +64,8 @@ pub struct Modal {
     state: PathBuf,
     sources: Vec<Source>,
     previous: Option<Journal>,
+    selected: Option<PathBuf>,
+    blocked: Option<(Vec<Blocker>, CachedBody)>,
     review: Option<(Plan, CachedBody)>,
     task: Option<Task>,
     error: Option<String>,
@@ -78,23 +83,16 @@ impl Modal {
         sources: Vec<Source>,
         selected: Option<PathBuf>,
         previous: Option<Journal>,
+        local_terminals: Vec<String>,
     ) -> Self {
-        let task = tokio::spawn({
-            let sources = sources.clone();
-            let state = state.clone();
-            let previous = previous.clone();
-            async move {
-                let plan = discard::preview(&state, &sources, selected, previous.as_ref()).await?;
-                let text = plan.review();
-                Ok((plan, text))
-            }
-        });
-        Self {
+        let mut modal = Self {
             state,
             sources,
             previous,
+            selected,
+            blocked: None,
             review: None,
-            task: Some(Task::Review(task)),
+            task: None,
             error: None,
             input: String::new(),
             caret: 0,
@@ -102,19 +100,105 @@ impl Modal {
             scroll: 0,
             limit: Cell::default(),
             fits: Cell::default(),
+        };
+        modal.refresh(local_terminals, false);
+        modal
+    }
+
+    pub(crate) fn root(&self) -> Option<&Path> {
+        self.previous
+            .as_ref()
+            .map(Journal::root)
+            .or(self.selected.as_deref())
+    }
+
+    pub(crate) fn refresh(&mut self, local_terminals: Vec<String>, release: bool) {
+        if local_terminals.is_empty() {
+            self.check(release);
+        } else if self.task.is_none() {
+            self.reset_review();
+            let text = format!(
+                "Close these terminals in Tracr, then retry.\nPress Esc to return and use the Terminals menu.\n\n{}",
+                local_terminals.join("\n\n")
+            );
+            self.blocked = Some((Vec::new(), CachedBody::new(text)));
         }
+    }
+
+    fn reset_review(&mut self) {
+        self.review = None;
+        self.error = None;
+        self.scroll = 0;
+        self.limit.set(0);
+        self.input.clear();
+        self.caret = 0;
+        self.focus = 1;
+    }
+
+    fn check(&mut self, release: bool) {
+        if self.task.is_some() {
+            return;
+        }
+        if release && !self.blocker_buttons(false)[2].enabled {
+            return;
+        }
+        let approved = self
+            .blocked
+            .take()
+            .map(|(blockers, _)| blockers)
+            .unwrap_or_default();
+        self.reset_review();
+        let state = self.state.clone();
+        let sources = self.sources.clone();
+        let selected = self.selected.clone();
+        let previous = self.previous.clone();
+        let task = tokio::spawn(async move {
+            let (preview, report) = if release {
+                discard::release_idle(&state, &sources, selected, previous.as_ref(), approved)
+                    .await?
+            } else {
+                (
+                    discard::preview(&state, &sources, selected, previous.as_ref()).await?,
+                    String::new(),
+                )
+            };
+            let text = match &preview {
+                Preview::Ready(plan) => plan.review(),
+                Preview::Blocked(blockers) => {
+                    let mut text = Blocker::review(blockers);
+                    if !report.is_empty() {
+                        text = format!("Release results\n{report}\n{text}");
+                    }
+                    text
+                }
+            };
+            Ok((preview, text))
+        });
+        self.task = Some(Task::Review {
+            task,
+            releasing: release,
+        });
     }
 
     pub(crate) fn ready(&self) -> bool {
         match &self.task {
-            Some(Task::Review(task)) => task.is_finished(),
+            Some(Task::Review { task, .. }) => task.is_finished(),
             Some(Task::Discard(task)) => task.is_finished(),
             None => false,
         }
     }
 
     pub(crate) fn executing(&self) -> bool {
-        matches!(self.task, Some(Task::Discard(_)))
+        matches!(
+            self.task,
+            Some(
+                Task::Discard(_)
+                    | Task::Review {
+                        releasing: true,
+                        ..
+                    }
+            )
+        )
     }
 
     pub(crate) fn start(&mut self) {
@@ -135,9 +219,14 @@ impl Modal {
             return None;
         }
         match self.task.take().expect("ready task") {
-            Task::Review(task) => {
+            Task::Review { task, .. } => {
                 match task.await.unwrap_or_else(|e| Err(e.to_string())) {
-                    Ok((plan, text)) => self.review = Some((plan, CachedBody::new(text))),
+                    Ok((Preview::Ready(plan), text)) => {
+                        self.review = Some((*plan, CachedBody::new(text)))
+                    }
+                    Ok((Preview::Blocked(blockers), text)) => {
+                        self.blocked = Some((blockers, CachedBody::new(text)))
+                    }
                     Err(error) => self.error = Some(error),
                 }
                 None
@@ -171,6 +260,36 @@ impl Modal {
         ]
     }
 
+    fn blocker_buttons(&self, compact: bool) -> [Button<Action>; 3] {
+        [
+            Button {
+                action: Action::CloseDiscard,
+                label: "Cancel",
+                enabled: true,
+                primary: false,
+            },
+            Button {
+                action: Action::RetryDiscard,
+                label: "Retry",
+                enabled: true,
+                primary: true,
+            },
+            Button {
+                action: Action::ReleaseDiscardIdle,
+                label: if compact {
+                    "Release"
+                } else {
+                    "Release idle conversations"
+                },
+                enabled: self
+                    .blocked
+                    .as_ref()
+                    .is_some_and(|(blockers, _)| blockers.iter().any(Blocker::can_release)),
+                primary: false,
+            },
+        ]
+    }
+
     pub(crate) fn key(&mut self, key: KeyEvent) -> Action {
         if self.executing() || key.kind == KeyEventKind::Release {
             return Action::Continue;
@@ -192,6 +311,25 @@ impl Modal {
             } else {
                 self.scroll.saturating_add(amount).min(self.limit.get())
             };
+            return Action::Continue;
+        }
+        if self.blocked.is_some() {
+            if !self.fits.get() {
+                return Action::Continue;
+            }
+            let buttons = self.blocker_buttons(false);
+            let selected = self.focus - 1;
+            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+                let mut selected = selected;
+                modal::cycle(
+                    &mut selected,
+                    &buttons.map(|button| button.enabled),
+                    key.code == KeyCode::BackTab,
+                );
+                self.focus = selected + 1;
+            } else if let Some(action) = modal::activate(key, &buttons, selected) {
+                return action;
+            }
             return Action::Continue;
         }
         if self.review.is_none() {
@@ -275,9 +413,44 @@ impl Modal {
                     .style(Style::default().fg(Color::DarkGray)),
                 regions.hints,
             );
+        } else if let Some((_, body)) = &self.blocked {
+            let fits = inner.width >= 35 && inner.height >= 8;
+            self.fits.set(fits);
+            if !fits {
+                frame.render_widget(
+                    Paragraph::new("Enlarge terminal for actions. Esc cancels.")
+                        .wrap(Wrap { trim: true }),
+                    inner,
+                );
+                return;
+            }
+            self.limit.set(body.draw(frame, regions.body, self.scroll));
+            frame.render_widget(
+                Paragraph::new(progress).wrap(Wrap { trim: true }),
+                regions.status,
+            );
+            modal::buttons(
+                frame,
+                regions.actions,
+                &self.blocker_buttons(inner.width < 54),
+                self.focus.checked_sub(1),
+            );
+            frame.render_widget(
+                Paragraph::new("↑↓ Scroll  •  Tab Focus  •  Esc Cancel")
+                    .style(Style::default().fg(Color::DarkGray)),
+                regions.hints,
+            );
         } else {
             let message = if let Some(error) = &self.error {
                 format!("{}\n\n{progress}", safe_text(error))
+            } else if matches!(
+                self.task,
+                Some(Task::Review {
+                    releasing: true,
+                    ..
+                })
+            ) {
+                "Releasing reviewed idle conversations and checking again…".into()
             } else if self.executing() {
                 "Deleting reviewed conversations and checking Git cleanup…".into()
             } else {
@@ -301,7 +474,7 @@ impl Modal {
 
 impl Drop for Modal {
     fn drop(&mut self) {
-        if let Some(Task::Review(task)) = self.task.take() {
+        if let Some(Task::Review { task, .. }) = self.task.take() {
             task.abort();
         }
     }

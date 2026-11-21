@@ -248,11 +248,27 @@ impl Manager {
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
-    pub(crate) fn has_worktree_terminal(&self, root: &std::path::Path) -> bool {
-        self.sessions.iter().any(|session| {
-            session.folder.starts_with(root)
-                || std::fs::canonicalize(&session.folder).is_ok_and(|path| path.starts_with(root))
-        })
+    pub(crate) fn worktree_terminals(&self, root: &std::path::Path) -> Vec<String> {
+        self.sessions
+            .iter()
+            .filter(|session| {
+                session.folder.starts_with(root)
+                    || std::fs::canonicalize(&session.folder)
+                        .is_ok_and(|path| path.starts_with(root))
+            })
+            .map(|session| {
+                let title = crate::browser::safe_text(&session.title);
+                let folder = crate::browser::safe_text(&session.folder.display().to_string());
+                let mut description = format!("{title}  ·  Open in Tracr\nFolder  {folder}");
+                if let Some(key) = &session.key {
+                    description.push_str(&format!(
+                        "\nSession  {}",
+                        crate::browser::safe_text(&key.native_id)
+                    ));
+                }
+                description
+            })
+            .collect()
     }
 
     pub fn owns(&self, key: &SessionKey) -> bool {

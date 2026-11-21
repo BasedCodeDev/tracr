@@ -1,5 +1,7 @@
 //! Permanent feature discard, with a journal outside the checkout and native Codex deletion.
 use crate::{
+    config::SourceConfig,
+    domain::{RuntimeStatus, SessionSummary},
     folder_move::Source,
     git,
     providers::codex::{Rpc, SOURCE_KINDS},
@@ -94,6 +96,59 @@ pub(crate) struct Plan {
     main_tip: String,
     unique_commits: u64,
     conversations: Vec<Conversations>,
+}
+
+pub(crate) enum Preview {
+    Ready(Box<Plan>),
+    Blocked(Vec<Blocker>),
+}
+
+impl Preview {
+    fn require_clear(self) -> Result<Plan> {
+        match self {
+            Self::Ready(plan) => Ok(*plan),
+            Self::Blocked(blockers) => Err(Blocker::review(&blockers)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Blocker {
+    source: Source,
+    home_identity: (u64, u64),
+    id: String,
+    title: String,
+    cwd: PathBuf,
+    status: RuntimeStatus,
+    archive: bool,
+    release: Option<SessionSummary>,
+}
+
+impl Blocker {
+    pub(crate) fn review(blockers: &[Self]) -> String {
+        use std::fmt::Write;
+
+        let mut text = String::from(
+            "Codex still has these conversations loaded.\nClose any open client using them, or finish the active turn, then retry. Codex may keep idle conversations loaded briefly after closing.\n",
+        );
+        for blocker in blockers {
+            let label = blocker.status.label().unwrap_or("Status unknown");
+            let archive = if blocker.archive { " · Archived" } else { "" };
+            let _ = writeln!(
+                text,
+                "\n{}  ·  {label}{archive}\nFolder  {}\nSession  {}\nCodex home  {}",
+                crate::browser::safe_text(&blocker.title),
+                crate::browser::safe_text(&blocker.cwd.display().to_string()),
+                blocker.id,
+                crate::browser::safe_text(&blocker.source.home.display().to_string()),
+            );
+        }
+        text
+    }
+
+    pub(crate) fn can_release(&self) -> bool {
+        self.release.is_some()
+    }
 }
 
 impl Plan {
@@ -862,19 +917,39 @@ async fn select_chats(
     Ok(ordered)
 }
 
-async fn source_chats(source: &Source, root: &Path) -> Result<Vec<Chat>> {
+async fn source_chats(
+    source: &Source,
+    root: &Path,
+    home_identity: (u64, u64),
+) -> Result<(Vec<Chat>, Vec<Blocker>)> {
     let mut rpc = Rpc::start(&source.binary, &source.home)
         .await
         .map_err(error)?;
     let all = catalog(&mut rpc, &source.home).await?;
     let selected = select_chats(&mut rpc, &all, root).await?;
+    let mut blockers = BTreeMap::new();
     for chat in &selected {
-        ensure_unloaded(&mut rpc, chat).await?;
+        let status = read_status(&mut rpc, chat).await?;
+        if status != RuntimeStatus::Unloaded {
+            blockers.insert(
+                chat.id.clone(),
+                Blocker {
+                    source: source.clone(),
+                    home_identity,
+                    id: chat.id.clone(),
+                    title: chat.title.clone(),
+                    cwd: chat.cwd.clone(),
+                    status,
+                    archive: chat.archived,
+                    release: None,
+                },
+            );
+        }
     }
     rpc.close().await;
-    // The independent app-server's native writer locks protect other servers.
-    // Also check the shared daemon when reachable, including its unsaved threads.
-    let config = crate::config::SourceConfig {
+    // Independent app-servers still have to acquire Codex's native writer locks.
+    // The shared daemon can also know about conversations with no saved rollout.
+    let config = SourceConfig {
         id: source.id.clone(),
         home: source.home.clone(),
     };
@@ -882,22 +957,56 @@ async fn source_chats(source: &Source, root: &Path) -> Result<Vec<Chat>> {
         crate::providers::codex_live::LiveClient::connect(&source.binary, config).await
     {
         for (key, session) in live.session_snapshot().await? {
-            let matches_path = match session.cwd {
-                Some(cwd) => under(&cwd, root)?,
-                None => return Err("A loaded Codex conversation has no reported worktree.".into()),
-            };
-            if matches_path || selected.iter().any(|chat| chat.id == key.native_id) {
-                return Err(format!(
-                    "Close loaded Codex conversation {} before discarding.",
-                    key.native_id
-                ));
+            let cwd = session
+                .cwd
+                .ok_or("A loaded Codex conversation has no reported worktree.")?;
+            let saved = selected.iter().find(|chat| chat.id == key.native_id);
+            if !under(&cwd, root)? && saved.is_none() {
+                continue;
             }
+            let status = match blockers.get(&key.native_id) {
+                Some(previous) if previous.status != RuntimeStatus::Idle => previous.status,
+                _ => session.status,
+            };
+            let release = saved
+                .filter(|chat| {
+                    status == RuntimeStatus::Idle
+                        && session.status == RuntimeStatus::Idle
+                        && !chat.archived
+                        && chat.attached_to.is_none()
+                        && chat.spawned_by.is_none()
+                        && chat.cwd == cwd
+                })
+                .map(|chat| SessionSummary {
+                    key: key.clone(),
+                    title: chat.title.clone(),
+                    cwd: Some(chat.cwd.clone()),
+                    created_at: chat.created,
+                    updated_at: chat.updated,
+                    archived: false,
+                    can_accept_direct_input: None,
+                    source_kind: None,
+                    git: None,
+                });
+            blockers.insert(
+                key.native_id.clone(),
+                Blocker {
+                    source: source.clone(),
+                    home_identity,
+                    id: key.native_id,
+                    title: session.title,
+                    cwd,
+                    status,
+                    archive: saved.is_some_and(|chat| chat.archived),
+                    release,
+                },
+            );
         }
     }
-    Ok(selected)
+    Ok((selected, blockers.into_values().collect()))
 }
 
-async fn ensure_unloaded(rpc: &mut Rpc, chat: &Chat) -> Result<()> {
+async fn read_status(rpc: &mut Rpc, chat: &Chat) -> Result<RuntimeStatus> {
     let record = rpc
         .call(
             "thread/read",
@@ -919,10 +1028,16 @@ async fn ensure_unloaded(rpc: &mut Rpc, chat: &Chat) -> Result<()> {
             chat.id
         ));
     }
-    if thread["status"]["type"].as_str() != Some("notLoaded") {
+    Ok(RuntimeStatus::from_codex(thread.get("status")))
+}
+
+async fn ensure_unloaded(rpc: &mut Rpc, chat: &Chat) -> Result<()> {
+    let status = read_status(rpc, chat).await?;
+    if status != RuntimeStatus::Unloaded {
         return Err(format!(
-            "Close loaded Codex conversation {} before discarding.",
-            chat.id
+            "Codex conversation {} became loaded ({}). Close it or review discard again.",
+            crate::browser::safe_text(&chat.title),
+            status.label().unwrap_or("Status unknown")
         ));
     }
     Ok(())
@@ -943,32 +1058,40 @@ fn directory_identity(path: &Path) -> Result<(u64, u64)> {
     Ok((metadata.dev(), metadata.ino()))
 }
 
-async fn conversations(sources: &[Source], root: &Path) -> Result<Vec<Conversations>> {
+async fn conversations(
+    sources: &[Source],
+    root: &Path,
+) -> Result<(Vec<Conversations>, Vec<Blocker>)> {
     if sources.is_empty() {
         return Err("No local Codex sources are configured for verification.".into());
     }
     let mut homes = BTreeSet::new();
     let mut groups = Vec::new();
+    let mut blockers = Vec::new();
     for source in sources {
         let home = fs::canonicalize(&source.home).map_err(error)?;
         let home_identity = directory_identity(&home)?;
         if !homes.insert(home_identity) {
             return Err("Multiple Codex sources refer to the same home.".into());
         }
-        let chats = tokio::time::timeout(Duration::from_secs(60), source_chats(source, root))
-            .await
-            .map_err(|_| format!("Codex inventory timed out for {}.", source.home.display()))?
-            .map_err(|err| format!("{}: {err}", source.home.display()))?;
+        let (chats, loaded) = tokio::time::timeout(
+            Duration::from_secs(60),
+            source_chats(source, root, home_identity),
+        )
+        .await
+        .map_err(|_| format!("Codex inventory timed out for {}.", source.home.display()))?
+        .map_err(|err| format!("{}: {err}", source.home.display()))?;
         if directory_identity(&source.home)? != home_identity {
             return Err("A configured Codex home changed during inventory.".into());
         }
+        blockers.extend(loaded);
         groups.push(Conversations {
             source: source.clone(),
             home_identity,
             chats,
         });
     }
-    Ok(groups)
+    Ok((groups, blockers))
 }
 
 async fn inspect(
@@ -976,7 +1099,7 @@ async fn inspect(
     sources: &[Source],
     target: Target,
     previous: Option<&Journal>,
-) -> Result<Plan> {
+) -> Result<Preview> {
     relocation_clear(state)?;
     for location in [&target.common_dir, &target.main, state]
         .into_iter()
@@ -1045,7 +1168,7 @@ async fn inspect(
     .await?
     .parse()
     .map_err(error)?;
-    let conversations = conversations(sources, &target.path).await?;
+    let (conversations, blockers) = conversations(sources, &target.path).await?;
     if previous.is_some_and(|journal| {
         !journal
             .approved
@@ -1061,13 +1184,16 @@ async fn inspect(
             "A conversation now refers to the removed worktree. Branch cleanup stopped.".into(),
         );
     }
-    Ok(Plan {
+    if !blockers.is_empty() {
+        return Ok(Preview::Blocked(blockers));
+    }
+    Ok(Preview::Ready(Box::new(Plan {
         target,
         checkout,
         main_tip,
         unique_commits,
         conversations,
-    })
+    })))
 }
 
 async fn git_text(path: &Path, args: &[&str]) -> Result<String> {
@@ -1106,7 +1232,7 @@ pub(crate) async fn preview(
     sources: &[Source],
     selected: Option<PathBuf>,
     previous: Option<&Journal>,
-) -> Result<Plan> {
+) -> Result<Preview> {
     let journal = pending(state)?;
     if journal.as_ref() != previous {
         return Err("Discard recovery changed. Reopen it to review the current state.".into());
@@ -1130,6 +1256,81 @@ pub(crate) async fn preview(
         None => identify(selected.ok_or("Select a linked feature worktree.")?).await?,
     };
     inspect(state, sources, target, previous).await
+}
+
+/// Release only the idle records the user reviewed. A fresh preview verifies
+/// both worktree eligibility and the conversation set before any release.
+pub(crate) async fn release_idle(
+    state: &Path,
+    sources: &[Source],
+    selected: Option<PathBuf>,
+    previous: Option<&Journal>,
+    approved: Vec<Blocker>,
+) -> Result<(Preview, String)> {
+    use crate::providers::codex_release::ReleaseOutcome;
+    use std::fmt::Write;
+
+    let _lock = crate::folder_move::lock(state)?;
+    let fresh = preview(state, sources, selected.clone(), previous).await?;
+    let Preview::Blocked(blockers) = fresh else {
+        return Ok((fresh, String::new()));
+    };
+    let mut report = String::new();
+    for blocker in &approved {
+        let Some(session) = &blocker.release else {
+            continue;
+        };
+        if !blockers.contains(blocker) {
+            let _ = writeln!(
+                report,
+                "{} changed. Review its current status before releasing.",
+                session.title
+            );
+            continue;
+        }
+        let source = &blocker.source;
+        if directory_identity(&source.home)? != blocker.home_identity {
+            return Err("A configured Codex home was replaced.".into());
+        }
+        let config = SourceConfig {
+            id: source.id.clone(),
+            home: source.home.clone(),
+        };
+        let message = match crate::providers::codex_release::release_discard_idle(
+            &source.binary,
+            &config,
+            session,
+        )
+        .await
+        {
+            Ok(ReleaseOutcome::Released | ReleaseOutcome::AlreadyUnloaded) => continue,
+            Ok(ReleaseOutcome::StillLoaded) => {
+                "Still loaded. Close any Codex client using this conversation and retry.".into()
+            }
+            Ok(ReleaseOutcome::Busy) => {
+                "Conversation became active or its status could not be verified.".into()
+            }
+            Ok(ReleaseOutcome::Terminals(
+                crate::providers::codex_terminals::Blocker::Commands(_),
+            )) => "Background terminals are still running. Close them in Codex before retrying."
+                .into(),
+            Ok(ReleaseOutcome::Terminals(
+                crate::providers::codex_terminals::Blocker::Unavailable(err),
+            )) => format!("Could not verify background terminals. {err}"),
+            Ok(ReleaseOutcome::Unavailable) => {
+                "Could not connect to the shared Codex server.".into()
+            }
+            Err(error) => error,
+        };
+        let _ = writeln!(
+            report,
+            "{}  ·  {}",
+            crate::browser::safe_text(&session.title),
+            crate::browser::safe_text(&message)
+        );
+    }
+    let fresh = preview(state, sources, selected, previous).await?;
+    Ok((fresh, report))
 }
 
 async fn verify_deleted(source: &Source, chat: &Chat) -> Result<()> {
@@ -1175,7 +1376,9 @@ pub(crate) async fn execute(
 ) -> Result<PathBuf> {
     let _lock = crate::folder_move::lock(state)?;
     let target = &plan.target;
-    let fresh = preview(state, sources, Some(target.path.clone()), previous.as_ref()).await?;
+    let fresh = preview(state, sources, Some(target.path.clone()), previous.as_ref())
+        .await?
+        .require_clear()?;
     if fresh != plan {
         return Err(
             "The reviewed worktree or its conversations changed. Open a new preview.".into(),
@@ -1216,12 +1419,15 @@ pub(crate) async fn execute(
 
     for group in &plan.conversations {
         for (index, chat) in group.chats.iter().enumerate() {
-            let current = tokio::time::timeout(
+            let (current, blockers) = tokio::time::timeout(
                 Duration::from_secs(60),
-                source_chats(&group.source, &target.path),
+                source_chats(&group.source, &target.path, group.home_identity),
             )
             .await
             .map_err(|_| "Codex revalidation timed out.")??;
+            if !blockers.is_empty() {
+                return Err(Blocker::review(&blockers));
+            }
             if current != group.chats[index..] {
                 return Err(
                     "The reviewed conversation set changed. Review the remaining discard.".into(),
@@ -1243,7 +1449,9 @@ pub(crate) async fn execute(
         }
     }
 
-    let verified = inspect(state, sources, target.clone(), Some(&journal)).await?;
+    let verified = inspect(state, sources, target.clone(), Some(&journal))
+        .await?
+        .require_clear()?;
     if verified
         .conversations
         .iter()

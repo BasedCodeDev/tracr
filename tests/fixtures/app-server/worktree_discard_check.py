@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Exercise the discard dialog and recovery against a faultable or real Codex."""
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -12,10 +15,79 @@ from uuid import UUID
 from pty_support import Terminal
 
 
-def fake():
-    if 'proxy' in sys.argv:
+def fake_proxy(store):
+    if not json.loads(store.read_text()).get('shared'):
         return
+    stream, output = sys.stdin.buffer, sys.stdout.buffer
+    stream.readline()
+    headers = {}
+    while line := stream.readline().strip():
+        name, value = line.split(b':', 1)
+        headers[name.lower()] = value.strip()
+    accept = base64.b64encode(hashlib.sha1(headers[b'sec-websocket-key']
+                              + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
+    output.write(b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                 b'Sec-WebSocket-Accept: ' + accept + b'\r\n\r\n')
+    output.flush()
+    while header := stream.read(2):
+        opcode, size = header[0] & 15, header[1] & 127
+        if size in (126, 127):
+            size = int.from_bytes(stream.read(2 if size == 126 else 8), 'big')
+        mask = stream.read(4) if header[1] & 128 else None
+        payload = stream.read(size)
+        if opcode == 8:
+            return
+        if opcode != 1:
+            continue
+        if mask:
+            payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+        request = json.loads(payload)
+        if 'id' not in request:
+            continue
+        state = json.loads(store.read_text())
+        shared = state.get('shared', {})
+        method = request['method']
+        params = request.get('params', {})
+        tid = params.get('threadId')
+        result = {}
+        if method == 'initialize':
+            result = {'codexHome': str(store.parent)}
+        elif method == 'thread/loaded/list':
+            result = {'data': list(shared.get('loaded', {})), 'nextCursor': None}
+        elif method == 'thread/read':
+            result = {'thread': dict(state['chats'][tid], status=shared['loaded'][tid])}
+        elif method == 'thread/backgroundTerminals/list':
+            result = {'data': shared.get('terminals', []), 'nextCursor': None}
+        elif method in ('thread/resume', 'thread/unsubscribe'):
+            assert tid in shared['loaded'], request
+            assert shared['loaded'][tid] == {'type': 'idle'}, request
+            with (store.parent / 'release.log').open('a') as log:
+                print(method, file=log)
+            if method == 'thread/resume':
+                assert params['config'] == {'thread_unload_delay_secs': 0}, request
+                cwd = state['chats'][tid]['cwd']
+                result = {'thread': state['chats'][tid], 'cwd': cwd, 'runtimeWorkspaceRoots': [cwd],
+                          'sandbox': {'type': 'readOnly', 'networkAccess': False},
+                          'model': 'probe', 'modelProvider': 'probe', 'approvalPolicy': 'never',
+                          'activePermissionProfile': None}
+            elif not shared.get('attached'):
+                del shared['loaded'][tid]
+                replacement = store.with_suffix('.replacement')
+                replacement.write_text(json.dumps(state))
+                replacement.replace(store)
+        else:
+            raise AssertionError(request)
+        response = json.dumps({'id': request['id'], 'result': result}).encode()
+        prefix = bytes([129, len(response)]) if len(response) < 126 else bytes([129, 126]) + struct.pack('!H', len(response))
+        output.write(prefix + response)
+        output.flush()
+
+
+def fake():
     store = Path(os.environ['CODEX_HOME']) / 'threads.json'
+    if 'proxy' in sys.argv:
+        fake_proxy(store)
+        return
     for line in sys.stdin:
         request = json.loads(line)
         if 'id' not in request:
@@ -150,7 +222,7 @@ def check_fake(root, binary):
         for scenario, change, expected in [
             ('unsupported', {'unsupported': True}, 'did not honor the side chat filter'),
             ('outside', {'cwd': str(main)}, 'outside this worktree'),
-            ('busy', {'status': {'type': 'idle'}}, 'Close loaded Codex'),
+            ('busy', {'status': {'type': 'idle'}}, 'Saved side chat · Idle'),
         ]:
             incident = json.loads(store.read_text())
             if scenario == 'unsupported':
@@ -165,6 +237,78 @@ def check_fake(root, binary):
             t.send(b'\x1b')
             t.wait(lambda: expected not in t.text())
             store.write_text(json.dumps(state))
+
+        sessions = home / 'sessions'
+        sessions.mkdir()
+        metadata = sessions / 'release-fixture.jsonl'
+        metadata.write_text(json.dumps({'type': 'session_meta', 'payload': {'id': parent[0]}}) + '\n'
+                            + json.dumps({'type': 'turn_context', 'payload': {'active_permission_profile': None}}) + '\n')
+        state['chats'][parent[0]]['path'] = str(metadata)
+        idle = {'type': 'idle'}
+        running = {'type': 'active', 'activeFlags': []}
+        waiting = {'type': 'active', 'activeFlags': ['waitingOnUserInput']}
+        release_log = home / 'release.log'
+
+        def shared(loaded, **flags):
+            store.write_text(json.dumps({**state, 'shared': {'loaded': loaded, **flags}}))
+
+        def retry():
+            t.send(b'\t')
+            t.expect('>[ Retry ]')
+            t.send(b'\r')
+            t.expect('>[ Cancel ]')
+
+        def release():
+            t.send(b'\t\t')
+            t.expect('>[ Release idle conversations ]')
+            t.send(b'\r')
+
+        shared({parent[0]: running, side[0]: waiting, spawned[0]: idle})
+        t.send(b'\x1b[3~')
+        t.expect('Feature conversation · Running')
+        t.expect('Saved side chat · Waiting for input')
+        t.send(b'\x1b[6~')
+        t.expect('Archived child · Idle · Archived')
+        assert not release_log.exists()
+        t.send(b'\x1b[Z')
+        t.expect('>[ Retry ]')  # Release is disabled for all three blockers.
+        t.send(b'\t')
+        t.expect('>[ Cancel ]')
+        shared({})
+        retry()
+        t.expect('Type the branch name')
+        t.send(b'\x1b')
+        t.wait(lambda: 'Type the branch name' not in t.text())
+        shared({parent[0]: idle}, terminals=[{'processId': 'p1', 'itemId': 'i1', 'command': 'probe', 'cwd': str(worktree)}])
+        t.send(b'\x1b[3~')
+        t.expect('Feature conversation · Idle')
+        assert not release_log.exists()
+        release()
+        t.expect('Background terminals are still running')
+        assert not release_log.exists()
+
+        shared({parent[0]: idle}, attached=True)
+        retry()
+        t.expect('Feature conversation · Idle')
+        release()
+        t.expect('Still loaded. Close any Codex client')
+        assert release_log.read_text().splitlines() == ['thread/resume', 'thread/unsubscribe']
+        shared({parent[0]: idle})
+        retry()
+        t.expect('Feature conversation · Idle')
+        release()
+        t.expect('Type the branch name')
+        assert release_log.read_text().splitlines() == ['thread/resume', 'thread/unsubscribe'] * 2
+        assert worktree.exists() and not json.loads(store.read_text())['deleted']
+
+        # Reattachment after review invalidates confirmation before any deletion.
+        shared({parent[0]: running})
+        confirm(t)
+        t.expect('Feature conversation · Running')
+        assert worktree.exists() and not json.loads(store.read_text())['deleted']
+        t.send(b'\x1b')
+        t.wait(lambda: 'Discard stopped' not in t.text())
+        store.write_text(json.dumps(state))
 
         bare = worktree / '.tmp/real3/paginated/codex/.tmp/git-fixture'
         bare.mkdir(parents=True)
