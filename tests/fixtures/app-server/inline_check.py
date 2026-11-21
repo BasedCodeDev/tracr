@@ -28,8 +28,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         assert 'Alt+F' not in terminal.text()
         assert 'Ctrl+B Browser' not in terminal.text()
         assert os.tcgetpgrp(terminal.master) == terminal.child.pid
-        def size():
-            return json.loads((home/'terminal-size.json').read_text())
+        def size(pid=first['pid']):
+            return json.loads((home/f'terminal-size-{pid}.json').read_text())
         terminal.wait(lambda: (home/'terminal-size.json').exists() and size()['columns'] == 240)
         initial_columns = 240
         terminal.resize(40, 160)
@@ -40,7 +40,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         # Ctrl+B works while drawer navigation owns input and keeps it open.
         terminal.send(b'\x02')
         terminal.expect('Open here')
-        terminal.expect_focus('Folders')
+        # Mouse-mode updates can follow the frame's cursor-visibility escape.
+        terminal.expect('┏Folders')
         assert terminal.line(0).startswith('┏Folders')
         assert 'FAKE CODING SESSION' not in terminal.text()
         os.kill(first['pid'], 0)
@@ -53,7 +54,8 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         terminal.expect_action('Background session')
         assert 'FAKE CODING SESSION' not in terminal.text()
         terminal.send(b'\x02')
-        terminal.expect_focus('Folders')
+        # Mouse-mode updates can follow the frame's cursor-visibility escape.
+        terminal.expect('┏Folders')
         terminal.send(b'\x1b`')
         terminal.expect('Open here')
         terminal.send(b'\r')
@@ -69,18 +71,46 @@ with tempfile.TemporaryDirectory(prefix='tracr-inline-') as directory:
         other = Terminal(command)
         other.inspect('ID: first')
         other.send(b'\r')
-        other.expect('open in another tracr')
+        other.expect('FAKE CODING SESSION')
+        other.wait(lambda: json.loads((home/'launch.json').read_text())['pid'] != first['pid'])
+        shared = json.loads((home/'launch.json').read_text())
+        assert shared['args'] == first['args']
+        assert shared['home'] == first['home']
+        assert len(list(home.glob('launch-*.json'))) == 2
+        other.resize(35, 120)
+        other.wait(lambda: size(shared['pid'])['columns'] == 120)
+        assert size()['columns'] == initial_columns
+        other.send(b'\x02')
+        other.expect('Open here')
+        other.send(b'\r')
+        other.expect('FAKE CODING SESSION')
+        assert len(list(home.glob('launch-*.json'))) == 2
+        other.send(b'\x02')
+        other.expect('Open here')
         other.send(b'q')
+        other.expect('Close all owned terminals and quit?')
+        other.send(b'y')
         other.wait(lambda: other.child.poll() is not None)
+        try: os.kill(shared['pid'], 0)
+        except ProcessLookupError: pass
+        else: raise AssertionError('second instance terminal survived quit')
         os.kill(first['pid'], 0)
+        terminal.send(b'\r')
+        terminal.expect('FAKE CODING SESSION')
+        terminal.resize(70, 220)
+        terminal.wait(lambda: size()['columns'] == 220)
+        terminal.resize(80, 240)
+        terminal.wait(lambda: size()['columns'] == initial_columns)
+        terminal.send(b'\x02')
+        terminal.expect('Open here')
         # Start another session, leaving the first terminal running.
         terminal.send(b'/second\r')
         terminal.expect('> Task second')
         terminal.inspect('ID: second')
         terminal.send(b'\r')
-        terminal.wait(lambda: json.loads((home/'launch.json').read_text())['pid'] != first['pid'])
+        terminal.wait(lambda: json.loads((home/'launch.json').read_text())['pid'] not in (first['pid'], shared['pid']))
         second = json.loads((home/'launch.json').read_text())
-        terminal.wait(lambda: size()['pid'] == second['pid'] and size()['columns'] == initial_columns)
+        terminal.wait(lambda: size(second['pid'])['pid'] == second['pid'] and size(second['pid'])['columns'] == initial_columns)
         terminal.expect('FAKE CODING SESSION')
         terminal.send(b'\x02')
         terminal.expect('Open here')

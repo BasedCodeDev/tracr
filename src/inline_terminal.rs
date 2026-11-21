@@ -13,13 +13,8 @@ use ratatui::{
     },
 };
 use std::{
-    fs::{File, OpenOptions},
-    hash::{Hash, Hasher},
     io::{self, Read, Write},
-    os::{
-        fd::AsRawFd,
-        unix::fs::{DirBuilderExt, OpenOptionsExt},
-    },
+    os::fd::AsRawFd,
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -63,7 +58,6 @@ struct Session {
     exit: Option<Instant>,
     io_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     output_closed: bool,
-    _lock: Option<SessionLock>,
 }
 impl Session {
     fn signal(&self, signal: i32) {
@@ -112,92 +106,6 @@ impl Drop for Session {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
-}
-
-fn ownership_path(home: Option<std::path::PathBuf>, key: &SessionKey) -> std::path::PathBuf {
-    let mut hash = std::collections::hash_map::DefaultHasher::new();
-    home.hash(&mut hash);
-    key.provider.hash(&mut hash);
-    key.native_id.hash(&mut hash);
-    // SAFETY: getuid has no preconditions.
-    std::path::PathBuf::from("/tmp")
-        .join(format!("tracr-terminals-{}", unsafe { libc::getuid() }))
-        .join(format!("{:016x}.lock", hash.finish()))
-}
-
-/// Read-only ownership hint. Launch still acquires the lock atomically.
-pub fn open_elsewhere(home: &std::path::Path, key: &SessionKey) -> bool {
-    let Ok(home) = std::fs::canonicalize(home) else {
-        return false;
-    };
-    let Ok(file) = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(ownership_path(Some(home), key))
-    else {
-        return false;
-    };
-    // SAFETY: descriptor is live. Never unlock another owner's file description.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-        drop(SessionLock(file));
-        false
-    } else {
-        io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK)
-    }
-}
-
-struct SessionLock(File);
-impl Drop for SessionLock {
-    fn drop(&mut self) {
-        // SAFETY: the file remains live. Explicit unlock also releases references
-        // briefly inherited by concurrent forks before their close-on-exec.
-        unsafe {
-            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
-        }
-    }
-}
-
-/// Kernel locks survive neither process exit nor exec into the child. Never unlink
-/// lock files: unlinking would allow two owners to lock different inodes.
-fn session_lock(command: &LaunchCommand, key: &SessionKey) -> io::Result<SessionLock> {
-    let home = command
-        .env
-        .iter()
-        .find(|(k, _)| k == "CODEX_HOME")
-        .map(|(_, v)| std::path::PathBuf::from(v));
-    let home = home.map(std::fs::canonicalize).transpose()?;
-    let path = ownership_path(home, key);
-    let root = path.parent().expect("ownership directory");
-    match std::fs::DirBuilder::new().mode(0o700).create(root) {
-        Ok(()) => (),
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => (),
-        Err(e) => return Err(e),
-    }
-    use std::os::unix::fs::MetadataExt;
-    let metadata = std::fs::symlink_metadata(root)?;
-    if !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::getuid() }
-        || metadata.mode() & 0o077 != 0
-    {
-        return Err(io::Error::other("Unsafe terminal ownership directory"));
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    // SAFETY: descriptor is live and owned by file.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err(io::Error::other(
-            "Session is open in another tracr instance. Return to that instance to use or close its terminal.",
-        ));
-    }
-    file.set_len(0)?;
-    write!(file, "{}", std::process::id())?;
-    Ok(SessionLock(file))
 }
 
 #[derive(Default)]
@@ -286,7 +194,6 @@ impl Manager {
         key: Option<SessionKey>,
         title: String,
     ) -> Result<()> {
-        let lock = key.as_ref().map(|k| session_lock(command, k)).transpose()?;
         let rows = self.area.height.max(1);
         let cols = self.area.width.max(1);
         let pair = portable_pty::native_pty_system().openpty(PtySize {
@@ -421,7 +328,6 @@ impl Manager {
             exit: None,
             io_stop,
             output_closed: false,
-            _lock: lock,
         });
         Ok(())
     }
@@ -2325,24 +2231,61 @@ time.sleep(60)
     }
 
     #[test]
-    fn ownership_lock_and_failed_spawn_release() {
+    fn independent_managers_can_open_the_same_session() {
         let key = SessionKey {
             provider: crate::domain::ProviderId("test".into()),
             source_id: crate::domain::SourceId("test".into()),
-            native_id: format!("lock-{}", std::process::id()),
+            native_id: "shared-session".into(),
         };
-        let cmd = command("pass");
-        let lock = session_lock(&cmd, &key).unwrap();
-        assert!(session_lock(&cmd, &key).is_err());
-        drop(lock);
-        assert!(session_lock(&cmd, &key).is_ok());
+        let cmd =
+            command("print('READY', flush=True); input(); print('ALIVE', flush=True); input()");
+        let mut first = Manager::default();
+        let mut second = Manager::default();
+        for manager in [&mut first, &mut second] {
+            manager.area = Rect::new(0, 0, 80, 24);
+            manager
+                .launch(&cmd, Some(key.clone()), "shared".into())
+                .unwrap();
+            wait(manager, |m| {
+                m.sessions[0].parser.screen().contents().contains("READY")
+            });
+        }
+        assert_ne!(first.sessions[0].pid, second.sessions[0].pid);
+        let pid = first.sessions[0].pid;
+        assert!(first.attach(&key));
+        assert_eq!(first.sessions.len(), 1);
+        assert_eq!(first.sessions[0].pid, pid);
+        drop(second);
+        first.sessions[0].write(b"\r".to_vec()).unwrap();
+        wait(&mut first, |m| {
+            m.sessions[0].parser.screen().contents().contains("ALIVE")
+        });
+    }
+
+    #[test]
+    fn failed_spawn_does_not_prevent_retry() {
+        let key = SessionKey {
+            provider: crate::domain::ProviderId("test".into()),
+            source_id: crate::domain::SourceId("test".into()),
+            native_id: "retry-session".into(),
+        };
+        let cmd = command("print('READY', flush=True); input()");
         let mut missing = cmd.clone();
         missing.executable = "/no-such-tracr-test-program".into();
+        let mut manager = Manager {
+            area: Rect::new(0, 0, 80, 24),
+            ..Manager::default()
+        };
         assert!(
-            Manager::default()
+            manager
                 .launch(&missing, Some(key.clone()), "missing".into())
                 .is_err()
         );
-        assert!(session_lock(&cmd, &key).is_ok());
+        assert!(manager.is_empty());
+        assert!(manager.active.is_none());
+        manager.launch(&cmd, Some(key), "retry".into()).unwrap();
+        wait(&mut manager, |m| {
+            m.sessions[0].parser.screen().contents().contains("READY")
+        });
     }
 }

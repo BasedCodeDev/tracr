@@ -2891,8 +2891,6 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                         ),
                         if view.terminals.borrow().owns(&s.key) {
                             Line::from("Open here · Enter Open · x Close terminal")
-                        } else if browser.specs.iter().any(|spec| matches!(spec, crate::browser::SourceSpec::Codex { source, .. } if source.id == s.key.source_id && crate::inline_terminal::open_elsewhere(&source.home, &s.key))) {
-                            Line::from("Open in another tracr")
                         } else {
                             session_metadata(browser, s, now)
                         },
