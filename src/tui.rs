@@ -840,10 +840,19 @@ fn panel_layout(area: Rect, terminal_height: u16, view: &View, present: bool) ->
         graph_visible: false,
     };
     if view.git_zoomed && view.drawer_open && view.drawer_git && present {
-        let halves = Layout::horizontal([Constraint::Ratio(1, 2); 2]).split(area);
-        result.git = Some(halves[0]);
-        result.details = Some(halves[1]);
-        result.graph_visible = halves[0].height >= 4 && halves[0].width >= 12;
+        // Details need 32 content columns plus six for borders and padding.
+        let details_width = (area.width / 3).clamp(38, 50).min(area.width / 2);
+        let git = Rect {
+            width: area.width - details_width,
+            ..area
+        };
+        result.git = Some(git);
+        result.details = Some(Rect {
+            x: git.right(),
+            width: details_width,
+            ..area
+        });
+        result.graph_visible = git.height >= 4 && git.width >= 12;
         return result;
     }
     if !view.drawer_visible() {
@@ -8591,7 +8600,16 @@ mod cleanup_tests {
     async fn git_zoom_geometry_survives_resize_and_restores_panels() {
         let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
         select_git_fixture(&mut browser, "/project/.git");
-        for (width, height) in [(240, 80), (119, 30), (40, 10), (12, 4), (8, 3)] {
+        for (width, height, details_width) in [
+            (240, 80, 50),
+            (119, 30, 39),
+            (90, 30, 38),
+            (76, 24, 38),
+            (75, 24, 37),
+            (40, 10, 20),
+            (12, 4, 6),
+            (8, 3, 4),
+        ] {
             let area = Rect::new(0, 0, width, height - 2);
             view.git_zoomed = false;
             let normal = panel_layout(area, height, &view, true);
@@ -8602,7 +8620,7 @@ mod cleanup_tests {
             assert_eq!(left.x, area.x);
             assert_eq!(left.right(), right.x);
             assert_eq!(right.right(), area.right());
-            assert!(left.width.abs_diff(right.width) <= 1);
+            assert_eq!(right.width, details_width, "terminal width {width}");
             assert!(zoomed.folders.is_none());
             assert!(zoomed.sessions.is_none());
             assert_eq!(zoomed.graph_visible, left.width >= 12 && area.height >= 4);
