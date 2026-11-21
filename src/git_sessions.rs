@@ -277,6 +277,7 @@ pub struct Presentation {
     pub annotations: Vec<Annotation>,
     pub selected: usize,
     selectable: Vec<usize>,
+    commit_positions: Vec<usize>,
     positions: BTreeMap<Selection, usize>,
     pub top: usize,
     selection: Option<Selection>,
@@ -356,6 +357,19 @@ impl Presentation {
                 .enumerate()
                 .filter_map(|(i, row)| self.key(row, history).map(|_| i))
                 .collect();
+            self.commit_positions = self
+                .rows
+                .iter()
+                .enumerate()
+                .filter_map(|(position, row)| match row {
+                    Row::Graph(i)
+                        if history.rows[*i].oid.is_some() && history.rows[*i].stash.is_none() =>
+                    {
+                        Some(position)
+                    }
+                    _ => None,
+                })
+                .collect();
             self.geometry = geometry;
             self.reference_layout = reference_layout;
             self.repository = repository;
@@ -427,6 +441,15 @@ impl Presentation {
             .count()
             + self.selected
     }
+
+    /// Count real commits strictly above the final composed viewport, not sessions or routing.
+    pub(crate) fn commits_above(&self, start: usize) -> Option<usize> {
+        (!self.commit_positions.is_empty()).then(|| {
+            self.commit_positions
+                .partition_point(|position| *position < start)
+        })
+    }
+
     pub fn range(&mut self, height: usize) -> std::ops::Range<usize> {
         self.height = height;
         self.top = self.top.min(self.rows.len().saturating_sub(height));
@@ -624,6 +647,49 @@ pub(crate) mod tests {
             .collect();
         history.exhausted = true;
         (browser, history)
+    }
+
+    #[tokio::test]
+    async fn counter_excludes_sessions_connectors_and_stashes_and_refreshes() {
+        let (mut browser, mut history) = fixture().await;
+        add_session(
+            &mut browser,
+            "active",
+            "/repo",
+            "/repo",
+            "/repo/.git",
+            RuntimeStatus::Idle,
+            1,
+        );
+        let mut connector = history.rows[0].clone();
+        connector.oid = None;
+        let mut stash = history.rows[0].clone();
+        stash.oid = Some("stash".into());
+        stash.stash = Some(crate::git::Stash {
+            selectors: vec!["stash@{0}".into()],
+            base: "head".into(),
+        });
+        history.rows.insert(1, connector);
+        history.rows.insert(2, stash);
+        let mut presentation = Presentation::default();
+        presentation.sync(&browser, &history);
+        // head, session, connector, stash, older
+        assert_eq!(presentation.rows.len(), 5);
+        for (start, expected) in [0, 1, 1, 1, 1, 2].into_iter().enumerate() {
+            assert_eq!(presentation.commits_above(start), Some(expected));
+        }
+        presentation.selected = 4;
+        let range = presentation.range(2);
+        assert_eq!(range, 3..5);
+        assert_eq!(presentation.commits_above(range.start), Some(1));
+        assert_eq!(presentation.range(10), 0..5);
+        assert_eq!(presentation.commits_above(presentation.top), Some(0));
+        let positions = presentation.commit_positions.as_ptr();
+        presentation.sync(&browser, &history);
+        assert_eq!(positions, presentation.commit_positions.as_ptr());
+        history.rows.clear();
+        presentation.sync(&browser, &history);
+        assert_eq!(presentation.commits_above(0), None);
     }
 
     #[tokio::test]

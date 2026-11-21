@@ -79,3 +79,36 @@ The history borders now show bold cyan arrows at the right edge: `↑` for off-s
 Validation passed: all 15 history-controller/rendering tests, all-target Clippy with warnings denied, formatting and whitespace checks, and the native Git lifecycle, watcher and four-scenario idle PTY helpers. Added assertions cover boundary transitions, empty/initial loading, unknown exhaustion, retained errors, connector-only tails, middle/older-HEAD views, long Unicode titles, focused/unfocused styling, widths 140/100/40, resizing and clearing markers. Cached snapshot construction and selected commit remain unchanged by rendering indicators. Idle views issued no commands or redraw output.
 
 Logs: `/tmp/tracr-arrows-tests.log`, `/tmp/tracr-arrows-clippy.log`, `/tmp/tracr-arrows-lifecycle.log`, `/tmp/tracr-arrows-watch.log`, `/tmp/tracr-arrows-idle.log`.
+
+## Commits above the viewport (2026-11-21)
+
+The top border shows the number of real commits strictly above the visible
+viewport, immediately left of the upward arrow. At the beginning it shows `0`
+without an arrow. Session annotations, routing rows and stash entries do not
+contribute. The count refers to the start of displayed history, not checkout HEAD
+or the number of navigation keystrokes. Empty history has no counter.
+
+Composed commit positions are cached with the presentation and counted with a
+binary search after viewport clamping. Rendering adds no Git reads or history
+expansion. The title reserves the counter's width and preserves border corners.
+
+A one-column visual scrollbar was prototyped using only cached row counts.
+Alternating release-mode runs of `cached_scroll_render_cost` against a 30,000-row
+history measured median times of 155.99 ms per 1,000 frames for the original arrows
+and 158.40 ms for the counter plus scrollbar (32 warmed samples each). These are
+local TestBackend measurements, not terminal latency guarantees. Because the
+combined prototype was consistently slower, the delivered implementation retains
+the arrows, as requested. The manual ignored test remains available for future
+comparisons; timing is not a CI threshold.
+
+Validation: 189 library tests passed (three manual tests ignored), all-target
+Clippy with warnings denied, formatting and whitespace checks passed. The four
+terminal idle scenarios issued no Git commands or redraw output. Test scratch
+directories were confined to `.tmp/`, with `GIT_CEILING_DIRECTORIES` preventing
+negative-discovery fixtures from inheriting this checkout and the stale inherited
+`TRACR_DEV_CONTROL` removed from terminal-test environments.
+
+The supplemental `git_sessions_check.py` terminal script fails while searching
+for “Select worktree folder”; the same failure was reproduced on the unmodified
+base binary. This pre-existing fixture/action mismatch is outside the counter
+change. Library session-navigation tests pass.

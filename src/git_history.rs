@@ -2553,8 +2553,35 @@ mod tests {
         assert_eq!(h.scroll_availability(&(0..5)), (false, false));
     }
 
+    #[test]
+    #[ignore = "manual cached scrolling performance comparison"]
+    fn cached_scroll_render_cost() {
+        use crate::tui::{View, draw};
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut view = View {
+            drawer_open: true,
+            drawer_git: true,
+            dialog_area: true,
+            ..View::default()
+        };
+        view.history.path = Some("/repo".into());
+        view.history.replace(rows(30_000), 30_001);
+        view.history.following = false;
+        let mut browser = crate::browser::Browser::new(vec![]);
+        crate::tui::select_git_fixture(&mut browser, "/repo");
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        for sample in 0..9 {
+            let start = std::time::Instant::now();
+            for step in 0..1000 {
+                view.history.selected = 10_000 + if step < 500 { step } else { 1000 - step };
+                terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+            }
+            eprintln!("cached scroll sample {sample}: {:?}", start.elapsed());
+        }
+    }
+
     #[tokio::test]
-    async fn border_arrows_survive_long_titles_resize_and_clear_at_boundaries() {
+    async fn border_counter_and_arrows_survive_resize_and_clear_at_boundaries() {
         use crate::tui::{View, draw};
         use ratatui::{
             Terminal,
@@ -2634,6 +2661,27 @@ mod tests {
                         " "
                     );
                 }
+                let top = view.git_sessions.borrow().top;
+                let expected_counter = if top > 0 {
+                    format!(" {top} ↑ ")
+                } else {
+                    " 0 ".into()
+                };
+                let expected_width = expected_counter.chars().count();
+                let right = if width >= 120 {
+                    (width * 2 / 5).min(60)
+                } else {
+                    width
+                };
+                let counter_found = (0..height).any(|y| {
+                    let text: String = (right - 1 - expected_width as u16..right - 1)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect();
+                    text == expected_counter
+                        && buffer[(right - 2, y)].fg == Color::Cyan
+                        && buffer[(right - 2, y)].modifier.contains(Modifier::BOLD)
+                });
+                assert!(counter_found, "missing counter {expected_counter:?}");
                 assert_eq!(view.history.selected, selected);
                 assert!(view.history.following);
             }
@@ -2650,6 +2698,10 @@ mod tests {
                     && c.fg == Color::Cyan
                     && c.modifier.contains(Modifier::BOLD))
         );
+        assert_eq!(view.git_sessions.borrow().commits_above(0), Some(0));
+        view.history.replace(vec![], 128);
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        assert_eq!(view.git_sessions.borrow().commits_above(0), None);
         assert_eq!(view.history.builds_started, 1);
         assert!(rx.try_recv().is_err());
     }
