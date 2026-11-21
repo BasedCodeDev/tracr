@@ -238,6 +238,18 @@ def check_fake(root, binary):
             t.wait(lambda: expected not in t.text())
             store.write_text(json.dumps(state))
 
+        # A standalone view can report idle without a verified shared runtime.
+        incident = json.loads(store.read_text())
+        incident['chats'][parent[0]]['status'] = {'type': 'idle'}
+        store.write_text(json.dumps(incident))
+        t.send(b'\x1b[3~')
+        t.expect('No loaded conversation can be released from Tracr right now.')
+        t.expect('The shared Codex server could not confirm that this conversation is idle.')
+        assert '[ Release idle conversations ]' not in t.text()
+        t.send(b'\x1b')
+        t.wait(lambda: 'No loaded conversation' not in t.text())
+        store.write_text(json.dumps(state))
+
         sessions = home / 'sessions'
         sessions.mkdir()
         metadata = sessions / 'release-fixture.jsonl'
@@ -266,9 +278,12 @@ def check_fake(root, binary):
         shared({parent[0]: running, side[0]: waiting, spawned[0]: idle})
         t.send(b'\x1b[3~')
         t.expect('Feature conversation · Running')
+        assert '[ Release idle conversations ]' not in t.text()
+        t.send(b'\x1b[6~')
         t.expect('Saved side chat · Waiting for input')
         t.send(b'\x1b[6~')
         t.expect('Archived child · Idle · Archived')
+        t.expect('Tracr can release only unarchived conversations.')
         assert not release_log.exists()
         t.send(b'\x1b[Z')
         t.expect('>[ Retry ]')  # Release is disabled for all three blockers.

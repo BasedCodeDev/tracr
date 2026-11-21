@@ -121,23 +121,32 @@ pub(crate) struct Blocker {
     cwd: PathBuf,
     status: RuntimeStatus,
     archive: bool,
-    release: Option<SessionSummary>,
+    release: std::result::Result<SessionSummary, &'static str>,
 }
 
 impl Blocker {
     pub(crate) fn review(blockers: &[Self]) -> String {
         use std::fmt::Write;
 
-        let mut text = String::from(
-            "Codex still has these conversations loaded.\nClose any open client using them, or finish the active turn, then retry. Codex may keep idle conversations loaded briefly after closing.\n",
-        );
+        let mut text = String::from("Codex still has these conversations loaded.\n");
+        if !blockers.iter().any(Self::can_release) {
+            text.push_str("No loaded conversation can be released from Tracr right now.\n");
+        }
+        text.push_str("Close the client or finish the active turn, then choose Retry. Codex may keep idle conversations loaded briefly after closing.\n");
         for blocker in blockers {
             let label = blocker.status.label().unwrap_or("Status unknown");
             let archive = if blocker.archive { " · Archived" } else { "" };
             let _ = writeln!(
                 text,
-                "\n{}  ·  {label}{archive}\nFolder  {}\nSession  {}\nCodex home  {}",
+                "\n{}  ·  {label}{archive}",
                 crate::browser::safe_text(&blocker.title),
+            );
+            if let Err(reason) = blocker.release {
+                let _ = writeln!(text, "{reason}");
+            }
+            let _ = writeln!(
+                text,
+                "Folder  {}\nSession  {}\nCodex home  {}",
                 crate::browser::safe_text(&blocker.cwd.display().to_string()),
                 blocker.id,
                 crate::browser::safe_text(&blocker.source.home.display().to_string()),
@@ -147,7 +156,7 @@ impl Blocker {
     }
 
     pub(crate) fn can_release(&self) -> bool {
-        self.release.is_some()
+        self.release.is_ok()
     }
 }
 
@@ -917,6 +926,33 @@ async fn select_chats(
     Ok(ordered)
 }
 
+fn release_candidate<'a>(
+    saved: Option<&'a Chat>,
+    status: RuntimeStatus,
+    shared_idle_folder: Option<&Path>,
+) -> std::result::Result<&'a Chat, &'static str> {
+    match status {
+        RuntimeStatus::Idle => {}
+        RuntimeStatus::Running | RuntimeStatus::Waiting { .. } => {
+            return Err("Finish the turn or close its Codex client.");
+        }
+        _ => return Err("Tracr could not verify that this conversation is idle."),
+    }
+    let chat = saved.ok_or("This conversation has no saved record to verify.")?;
+    if chat.archived {
+        return Err("Tracr can release only unarchived conversations.");
+    }
+    if chat.attached_to.is_some() || chat.spawned_by.is_some() {
+        return Err("Tracr cannot release side chats or spawned conversations.");
+    }
+    let cwd = shared_idle_folder
+        .ok_or("The shared Codex server could not confirm that this conversation is idle.")?;
+    if chat.cwd != cwd {
+        return Err("The loaded folder differs from the saved folder. Close the client and retry.");
+    }
+    Ok(chat)
+}
+
 async fn source_chats(
     source: &Source,
     root: &Path,
@@ -941,7 +977,8 @@ async fn source_chats(
                     cwd: chat.cwd.clone(),
                     status,
                     archive: chat.archived,
-                    release: None,
+                    release: Err(release_candidate(Some(chat), status, None)
+                        .expect_err("the shared server has not been checked")),
                 },
             );
         }
@@ -968,16 +1005,10 @@ async fn source_chats(
                 Some(previous) if previous.status != RuntimeStatus::Idle => previous.status,
                 _ => session.status,
             };
-            let release = saved
-                .filter(|chat| {
-                    status == RuntimeStatus::Idle
-                        && session.status == RuntimeStatus::Idle
-                        && !chat.archived
-                        && chat.attached_to.is_none()
-                        && chat.spawned_by.is_none()
-                        && chat.cwd == cwd
-                })
-                .map(|chat| SessionSummary {
+            let shared_idle_folder =
+                (session.status == RuntimeStatus::Idle).then_some(cwd.as_path());
+            let release =
+                release_candidate(saved, status, shared_idle_folder).map(|chat| SessionSummary {
                     key: key.clone(),
                     title: chat.title.clone(),
                     cwd: Some(chat.cwd.clone()),
@@ -1277,7 +1308,7 @@ pub(crate) async fn release_idle(
     };
     let mut report = String::new();
     for blocker in &approved {
-        let Some(session) = &blocker.release else {
+        let Ok(session) = &blocker.release else {
             continue;
         };
         if !blockers.contains(blocker) {

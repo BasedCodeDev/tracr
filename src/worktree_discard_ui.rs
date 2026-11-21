@@ -139,7 +139,7 @@ impl Modal {
         if self.task.is_some() {
             return;
         }
-        if release && !self.blocker_buttons(false)[2].enabled {
+        if release && !self.can_release() {
             return;
         }
         let approved = self
@@ -260,6 +260,12 @@ impl Modal {
         ]
     }
 
+    fn can_release(&self) -> bool {
+        self.blocked
+            .as_ref()
+            .is_some_and(|(blockers, _)| blockers.iter().any(Blocker::can_release))
+    }
+
     fn blocker_buttons(&self, compact: bool) -> [Button<Action>; 3] {
         [
             Button {
@@ -281,10 +287,7 @@ impl Modal {
                 } else {
                     "Release idle conversations"
                 },
-                enabled: self
-                    .blocked
-                    .as_ref()
-                    .is_some_and(|(blockers, _)| blockers.iter().any(Blocker::can_release)),
+                enabled: self.can_release(),
                 primary: false,
             },
         ]
@@ -318,16 +321,17 @@ impl Modal {
                 return Action::Continue;
             }
             let buttons = self.blocker_buttons(false);
+            let buttons = &buttons[..2 + usize::from(self.can_release())];
             let selected = self.focus - 1;
             if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
                 let mut selected = selected;
                 modal::cycle(
                     &mut selected,
-                    &buttons.map(|button| button.enabled),
+                    &[true; 3][..buttons.len()],
                     key.code == KeyCode::BackTab,
                 );
                 self.focus = selected + 1;
-            } else if let Some(action) = modal::activate(key, &buttons, selected) {
+            } else if let Some(action) = modal::activate(key, buttons, selected) {
                 return action;
             }
             return Action::Continue;
@@ -414,7 +418,9 @@ impl Modal {
                 regions.hints,
             );
         } else if let Some((_, body)) = &self.blocked {
-            let fits = inner.width >= 35 && inner.height >= 8;
+            let can_release = self.can_release();
+            let min_width = if can_release { 35 } else { 22 };
+            let fits = inner.width >= min_width && inner.height >= 8;
             self.fits.set(fits);
             if !fits {
                 frame.render_widget(
@@ -429,10 +435,11 @@ impl Modal {
                 Paragraph::new(progress).wrap(Wrap { trim: true }),
                 regions.status,
             );
+            let buttons = self.blocker_buttons(inner.width < 54);
             modal::buttons(
                 frame,
                 regions.actions,
-                &self.blocker_buttons(inner.width < 54),
+                &buttons[..2 + usize::from(can_release)],
                 self.focus.checked_sub(1),
             );
             frame.render_widget(
