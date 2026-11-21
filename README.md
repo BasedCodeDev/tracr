@@ -836,6 +836,18 @@ links. This does not update Codex session paths after a move outside tracr. Use
 or relink affected sessions after an external move. Existing absolute-linked
 worktrees are not converted or repaired by creating a new one.
 
+## Delete a Codex session
+
+Select a row in **Sessions** and press **Delete**, or choose **Delete session…**
+from `?`. Review the conversation and confirm **Delete session**. This
+permanently deletes the selected Codex conversation and preserves its folder,
+Git worktree, and other sessions. Use **a** to show archived sessions.
+
+If the session is open, the dialog offers to close its Tracr terminal or
+release an eligible idle Codex client. For other loaded sessions, close the
+client and choose **Retry**. Tracr blocks deletion while the session has
+attached side chats or spawned conversations.
+
 ## Discard a Git worktree and its conversations
 
 Select a linked feature worktree in **Folders** and press **Delete**, or choose

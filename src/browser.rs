@@ -548,6 +548,24 @@ impl Browser {
             source.provider = None;
         }
     }
+
+    pub(crate) fn remove_session(&mut self, key: &SessionKey) {
+        let old_index = self
+            .visible()
+            .iter()
+            .position(|session| Some(&session.key) == self.selected.as_ref())
+            .unwrap_or(0);
+        for source in &mut self.sources {
+            source.committed.remove(key);
+            source.staging.remove(key);
+            source.live.remove(key);
+        }
+        self.details.remove(key);
+        self.search_cache.remove(key);
+        self.remembered_sessions.retain(|_, saved| saved != key);
+        self.reconcile(old_index);
+    }
+
     pub fn resume_provider(&self, key: &SessionKey) -> Result<Arc<Provider>, String> {
         let source = self
             .sources

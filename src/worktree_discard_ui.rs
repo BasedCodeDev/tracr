@@ -1,10 +1,13 @@
 use crate::{
     browser::{Browser, FolderFilter, SourceSpec, safe_text},
+    domain::SessionKey,
     folder_move::Source,
-    inline_terminal::{ExitNotice, Manager, WorktreeTerminal},
+    inline_terminal::{DiscardTerminal, ExitNotice, Manager},
     modal::{self, Button, CachedBody},
     tui::Action,
-    worktree_discard::{self as discard, Blocker, Journal, Plan, Preview},
+    worktree_discard::{
+        self as discard, Blocker, Journal, Plan, Preview, SessionPlan, SessionTarget,
+    },
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
@@ -54,12 +57,34 @@ pub(crate) fn unavailable(browser: &Browser) -> Option<&'static str> {
     }
 }
 
+#[derive(Clone)]
+enum Target {
+    Worktree {
+        sources: Vec<Source>,
+        selected: Option<PathBuf>,
+        previous: Option<Box<Journal>>,
+    },
+    Session(Box<SessionTarget>),
+}
+
+enum Review {
+    Worktree(Box<Plan>),
+    Session(Box<SessionPlan>),
+}
+
+pub(crate) enum Discarded {
+    Worktree(PathBuf),
+    Session(SessionKey),
+}
+
+type ReviewResult = Result<(Result<Review, Vec<Blocker>>, String), String>;
+
 enum Task {
     Review {
-        task: JoinHandle<Result<(Preview, String), String>>,
+        task: JoinHandle<ReviewResult>,
         releasing: bool,
     },
-    Discard(JoinHandle<Result<PathBuf, String>>),
+    Discard(JoinHandle<Result<Discarded, String>>),
 }
 
 #[derive(Clone, Copy)]
@@ -74,14 +99,14 @@ enum TerminalPhase {
 }
 
 struct TerminalBlock {
-    terminals: Vec<WorktreeTerminal>,
+    terminals: Vec<DiscardTerminal>,
     phase: TerminalPhase,
     list_changed: bool,
     body: CachedBody,
 }
 
 impl TerminalBlock {
-    fn new(terminals: Vec<WorktreeTerminal>, phase: TerminalPhase, list_changed: bool) -> Self {
+    fn new(terminals: Vec<DiscardTerminal>, phase: TerminalPhase, list_changed: bool) -> Self {
         let mut block = Self {
             terminals,
             phase,
@@ -92,7 +117,7 @@ impl TerminalBlock {
         block
     }
 
-    fn shown_terminals(&self) -> impl Iterator<Item = &WorktreeTerminal> {
+    fn shown_terminals(&self) -> impl Iterator<Item = &DiscardTerminal> {
         self.terminals
             .iter()
             .filter(|terminal| !matches!(self.phase, TerminalPhase::Confirm) || terminal.owned)
@@ -195,12 +220,10 @@ impl TerminalBlock {
 
 pub struct Modal {
     state: PathBuf,
-    sources: Vec<Source>,
-    previous: Option<Journal>,
-    selected: Option<PathBuf>,
+    target: Target,
     blocked: Option<(Vec<Blocker>, CachedBody)>,
     local: Option<TerminalBlock>,
-    review: Option<(Plan, CachedBody)>,
+    review: Option<(Review, CachedBody)>,
     task: Option<Task>,
     error: Option<String>,
     input: String,
@@ -217,13 +240,31 @@ impl Modal {
         sources: Vec<Source>,
         selected: Option<PathBuf>,
         previous: Option<Journal>,
-        local_terminals: Vec<WorktreeTerminal>,
+        local_terminals: Vec<DiscardTerminal>,
     ) -> Self {
+        Self::open(
+            state,
+            Target::Worktree {
+                sources,
+                selected,
+                previous: previous.map(Box::new),
+            },
+            local_terminals,
+        )
+    }
+
+    pub(crate) fn for_session(
+        state: PathBuf,
+        target: SessionTarget,
+        local_terminals: Vec<DiscardTerminal>,
+    ) -> Self {
+        Self::open(state, Target::Session(Box::new(target)), local_terminals)
+    }
+
+    fn open(state: PathBuf, target: Target, local_terminals: Vec<DiscardTerminal>) -> Self {
         let mut modal = Self {
             state,
-            sources,
-            previous,
-            selected,
+            target,
             blocked: None,
             local: None,
             review: None,
@@ -240,14 +281,28 @@ impl Modal {
         modal
     }
 
-    pub(crate) fn root(&self) -> Option<&Path> {
-        self.previous
-            .as_ref()
-            .map(Journal::root)
-            .or(self.selected.as_deref())
+    pub(crate) fn session_key(&self) -> Option<&SessionKey> {
+        match &self.target {
+            Target::Session(target) => Some(&target.session.key),
+            Target::Worktree { .. } => None,
+        }
     }
 
-    pub(crate) fn refresh(&mut self, terminals: Vec<WorktreeTerminal>, release: bool) {
+    pub(crate) fn terminals(&self, manager: &Manager) -> Vec<DiscardTerminal> {
+        match &self.target {
+            Target::Session(target) => manager.session_terminals(&target.session.key),
+            Target::Worktree {
+                selected, previous, ..
+            } => previous
+                .as_deref()
+                .map(Journal::root)
+                .or(selected.as_deref())
+                .map(|root| manager.worktree_terminals(root))
+                .unwrap_or_default(),
+        }
+    }
+
+    pub(crate) fn refresh(&mut self, terminals: Vec<DiscardTerminal>, release: bool) {
         if self.task.is_some() || self.is_closing_terminals() {
             return;
         }
@@ -259,7 +314,7 @@ impl Modal {
         }
     }
 
-    fn show_local(&mut self, terminals: Vec<WorktreeTerminal>, list_changed: bool) {
+    fn show_local(&mut self, terminals: Vec<DiscardTerminal>, list_changed: bool) {
         self.reset_review();
         self.blocked = None;
         self.local = Some(TerminalBlock::new(
@@ -296,10 +351,26 @@ impl Modal {
         else {
             return;
         };
-        let Some(root) = self.root() else { return };
-        match manager.close_worktree_terminals(root, &local.terminals) {
+        let closing = match &self.target {
+            Target::Session(target) => {
+                manager.close_session_terminals(&target.session.key, &local.terminals)
+            }
+            Target::Worktree {
+                selected, previous, ..
+            } => {
+                let Some(root) = previous
+                    .as_deref()
+                    .map(Journal::root)
+                    .or(selected.as_deref())
+                else {
+                    return;
+                };
+                manager.close_worktree_terminals(root, &local.terminals)
+            }
+        };
+        match closing {
             Ok(closing) if closing.is_empty() => {
-                let remaining = manager.worktree_terminals(root);
+                let remaining = self.terminals(manager);
                 self.refresh(remaining, false);
             }
             Ok(closing) => {
@@ -366,10 +437,7 @@ impl Modal {
         );
         if remaining.is_empty() {
             self.local = None;
-            let current = self
-                .root()
-                .map(|root| manager.worktree_terminals(root))
-                .unwrap_or_default();
+            let current = self.terminals(manager);
             self.refresh(current, false);
             return true;
         }
@@ -409,30 +477,68 @@ impl Modal {
             .unwrap_or_default();
         self.reset_review();
         let state = self.state.clone();
-        let sources = self.sources.clone();
-        let selected = self.selected.clone();
-        let previous = self.previous.clone();
+        let target = self.target.clone();
         let task = tokio::spawn(async move {
-            let (preview, report) = if release {
-                discard::release_idle(&state, &sources, selected, previous.as_ref(), approved)
-                    .await?
-            } else {
-                (
-                    discard::preview(&state, &sources, selected, previous.as_ref()).await?,
-                    String::new(),
-                )
+            let (review, report) = match target {
+                Target::Worktree {
+                    sources,
+                    selected,
+                    previous,
+                } => {
+                    let (preview, report) = if release {
+                        discard::release_idle(
+                            &state,
+                            &sources,
+                            selected,
+                            previous.as_deref(),
+                            approved,
+                        )
+                        .await?
+                    } else {
+                        (
+                            discard::preview(&state, &sources, selected, previous.as_deref())
+                                .await?,
+                            String::new(),
+                        )
+                    };
+                    let review = match preview {
+                        Preview::Ready(plan) => {
+                            let body = plan.review();
+                            Ok((Review::Worktree(plan), body))
+                        }
+                        Preview::Blocked(blockers) => Err(blockers),
+                    };
+                    (review, report)
+                }
+                Target::Session(target) => {
+                    let (preview, report) = if release {
+                        discard::release_session(&state, &target, &approved).await?
+                    } else {
+                        (
+                            discard::preview_session(&state, &target).await?,
+                            String::new(),
+                        )
+                    };
+                    let review = match preview {
+                        Ok(plan) => {
+                            let body = plan.review(&target);
+                            Ok((Review::Session(Box::new(plan)), body))
+                        }
+                        Err(blocker) => Err(vec![blocker]),
+                    };
+                    (review, report)
+                }
             };
-            let text = match &preview {
-                Preview::Ready(plan) => plan.review(),
-                Preview::Blocked(blockers) => {
-                    let mut text = Blocker::review(blockers);
+            match review {
+                Ok((plan, body)) => Ok((Ok(plan), body)),
+                Err(blockers) => {
+                    let mut text = Blocker::review(&blockers);
                     if !report.is_empty() {
                         text = format!("Release results\n{report}\n{text}");
                     }
-                    text
+                    Ok((Err(blockers), text))
                 }
-            };
-            Ok((preview, text))
+            }
         });
         self.task = Some(Task::Review {
             task,
@@ -467,24 +573,36 @@ impl Modal {
         }
         let (plan, _) = self.review.take().expect("confirmed plan");
         let state = self.state.clone();
-        let sources = self.sources.clone();
-        let previous = self.previous.clone();
+        let target = self.target.clone();
         self.task = Some(Task::Discard(tokio::spawn(async move {
-            discard::execute(&state, &sources, plan, previous).await
+            match (target, plan) {
+                (
+                    Target::Worktree {
+                        sources, previous, ..
+                    },
+                    Review::Worktree(plan),
+                ) => discard::execute(&state, &sources, *plan, previous.map(|journal| *journal))
+                    .await
+                    .map(Discarded::Worktree),
+                (Target::Session(target), Review::Session(plan)) => {
+                    discard::execute_session(&state, &target, *plan)
+                        .await
+                        .map(|()| Discarded::Session(target.session.key))
+                }
+                _ => unreachable!("review and discard target must match"),
+            }
         })));
     }
 
-    pub(crate) async fn tick(&mut self) -> Option<Result<PathBuf, String>> {
+    pub(crate) async fn tick(&mut self) -> Option<Result<Discarded, String>> {
         if !self.ready() {
             return None;
         }
         match self.task.take().expect("ready task") {
             Task::Review { task, .. } => {
                 match task.await.unwrap_or_else(|e| Err(e.to_string())) {
-                    Ok((Preview::Ready(plan), text)) => {
-                        self.review = Some((*plan, CachedBody::new(text)))
-                    }
-                    Ok((Preview::Blocked(blockers), text)) => {
+                    Ok((Ok(plan), text)) => self.review = Some((plan, CachedBody::new(text))),
+                    Ok((Err(blockers), text)) => {
                         self.blocked = Some((blockers, CachedBody::new(text)))
                     }
                     Err(error) => self.error = Some(error),
@@ -497,10 +615,10 @@ impl Modal {
 
     fn confirmed(&self) -> bool {
         self.fits.get()
-            && self
-                .review
-                .as_ref()
-                .is_some_and(|(plan, _)| self.input == plan.branch())
+            && self.review.as_ref().is_some_and(|(plan, _)| match plan {
+                Review::Worktree(plan) => self.input == plan.branch(),
+                Review::Session(_) => true,
+            })
     }
 
     fn buttons(&self) -> [Button<Action>; 2] {
@@ -513,7 +631,11 @@ impl Modal {
             },
             Button {
                 action: Action::ApplyDiscard,
-                label: "Discard worktree",
+                label: if self.session_key().is_some() {
+                    "Delete session"
+                } else {
+                    "Discard worktree"
+                },
                 enabled: self.confirmed(),
                 primary: true,
             },
@@ -640,7 +762,7 @@ impl Modal {
         }
         match key.code {
             KeyCode::Tab | KeyCode::BackTab => {
-                let enabled = [true, true, self.confirmed()];
+                let enabled = [self.session_key().is_none(), true, self.confirmed()];
                 modal::cycle(&mut self.focus, &enabled, key.code == KeyCode::BackTab);
             }
             _ if self.focus == 0 => {
@@ -664,15 +786,23 @@ impl Modal {
     }
 
     pub(crate) fn draw(&self, frame: &mut Frame<'_>) {
-        let inner = modal::shell(frame, "Discard worktree", 84, 27);
+        let session = self.session_key().is_some();
+        let title = if session {
+            "Delete session"
+        } else {
+            "Discard worktree"
+        };
+        let inner = modal::shell(frame, title, 84, 27);
         let regions = modal::regions(inner);
         let fits = inner.width >= 33 && inner.height >= 10;
         self.fits.set(fits);
-        let progress = self
-            .previous
-            .as_ref()
-            .map(Journal::progress)
-            .unwrap_or_default();
+        let progress = match &self.target {
+            Target::Worktree {
+                previous: Some(journal),
+                ..
+            } => journal.progress(),
+            _ => String::new(),
+        };
         if let Some(local) = &self.local {
             self.draw_local(frame, inner, regions, local);
         } else if let Some((_, body)) = &self.review {
@@ -684,18 +814,23 @@ impl Modal {
                 );
                 return;
             }
-            let parts =
-                Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).split(regions.body);
-            self.limit.set(body.draw(frame, parts[0], self.scroll));
-            modal::text_field(
-                frame,
-                parts[1],
-                "Type the branch name",
-                &self.input,
-                self.caret,
-                self.focus == 0,
-                true,
-            );
+            let body_area = if session {
+                regions.body
+            } else {
+                let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(3)])
+                    .split(regions.body);
+                modal::text_field(
+                    frame,
+                    parts[1],
+                    "Type the branch name",
+                    &self.input,
+                    self.caret,
+                    self.focus == 0,
+                    true,
+                );
+                parts[0]
+            };
+            self.limit.set(body.draw(frame, body_area, self.scroll));
             frame.render_widget(
                 Paragraph::new(progress).wrap(Wrap { trim: true }),
                 regions.status,
@@ -752,8 +887,12 @@ impl Modal {
                 })
             ) {
                 "Releasing reviewed idle conversations and checking again…".into()
+            } else if self.executing() && session {
+                "Deleting the reviewed Codex session…".into()
             } else if self.executing() {
                 "Deleting reviewed conversations and checking Git cleanup…".into()
+            } else if session {
+                "Checking the selected Codex session…".into()
             } else {
                 format!("Checking worktree files and local Codex sources…\n\n{progress}")
             };
@@ -852,7 +991,7 @@ mod tests {
 
     #[test]
     fn delayed_or_unverified_terminal_exit_keeps_discard_blocked() {
-        let terminal = WorktreeTerminal {
+        let terminal = DiscardTerminal {
             id: 1,
             title: "Terminal".into(),
             folder: "/feature".into(),

@@ -17,6 +17,12 @@ from uuid import UUID
 from pty_support import Terminal
 
 
+def save_state(store, state):
+    replacement = store.with_suffix('.replacement')
+    replacement.write_text(json.dumps(state))
+    replacement.replace(store)
+
+
 def fake_proxy(store):
     if not json.loads(store.read_text()).get('shared'):
         return
@@ -74,9 +80,7 @@ def fake_proxy(store):
                           'activePermissionProfile': None}
             elif not shared.get('attached'):
                 del shared['loaded'][tid]
-                replacement = store.with_suffix('.replacement')
-                replacement.write_text(json.dumps(state))
-                replacement.replace(store)
+                save_state(store, state)
         else:
             raise AssertionError(request)
         response = json.dumps({'id': request['id'], 'result': result}).encode()
@@ -122,6 +126,8 @@ def fake():
         elif method == 'thread/read':
             if tid in chats:
                 result = {'thread': chats[tid]}
+            elif state.get('unverified') == tid:
+                error = 'injected readback failure'
             else:
                 error = f'thread not loaded: {tid}'
         elif method == 'thread/delete':
@@ -134,7 +140,7 @@ def fake():
                 assert Path(state['worktree']).is_dir(), 'Git cleanup ran before Codex deletion'
                 state['deleted'].append(tid)
                 del chats[tid]
-                store.write_text(json.dumps(state))
+                save_state(store, state)
         elif method != 'initialize':
             error = f'unsupported: {method}'
         reply = {'id': request['id']}
@@ -523,6 +529,7 @@ def check_fake(root, binary):
     finally:
         t.close()
 
+
     state = json.loads(store.read_text())
     state.pop('fail')
     store.write_text(json.dumps(state))
@@ -566,11 +573,166 @@ def check_fake(root, binary):
     assert git('rev-parse', 'feature') == git('rev-parse', 'main')
 
 
+def check_selected_sessions(root, binary):
+    root.mkdir()
+    env = {**os.environ, 'XDG_STATE_HOME': str(root / 'state'),
+           'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_CONFIG_NOSYSTEM': '1'}
+    env.pop('TRACR_DEV_CONTROL', None)
+    main, worktree, git = setup(root, env)
+    before = git('status', '--porcelain', '--ignored', cwd=worktree)
+    branch = git('rev-parse', 'feature')
+    home, other_home = root / 'codex', root / 'other-codex'
+    home.mkdir()
+    other_home.mkdir()
+    store, other_store = home / 'threads.json', other_home / 'threads.json'
+
+    def chat(n, title, **fields):
+        tid = str(UUID(int=n))
+        return dict(id=tid, cwd=str(worktree), name=title, preview=title,
+                    createdAt=n, updatedAt=n, source='cli',
+                    **{'archived': False, 'status': {'type': 'notLoaded'}, **fields})
+
+    selected = chat(8, 'Selected conversation', canAcceptDirectInput=True)
+    parent = chat(7, 'Parent conversation')
+    child = chat(6, 'Side chat', attachedToThreadId=parent['id'])
+    archived = chat(9, 'Archived conversation', archived=True)
+    uncertain = chat(5, 'Uncertain deletion')
+    tid = selected['id']
+    other = {**selected, 'cwd': str(main), 'name': 'Same ID in another Codex home'}
+    state = dict(chats={c['id']: c for c in [selected, parent, child, archived, uncertain]},
+                 deleted=[], worktree=str(worktree))
+    other_state = dict(chats={tid: other}, deleted=[], worktree=str(worktree))
+    save_state(store, state)
+    save_state(other_store, other_state)
+    fake_codex = str(Path(__file__).resolve())
+    t = Terminal([binary, '--codex-home', str(home), '--codex-home', str(other_home),
+                  '--codex-bin', fake_codex, str(worktree)], env)
+
+    def review():
+        t.expect('Permanently delete this Codex session?')
+        t.expect('>[ Cancel ]')
+
+    def confirm_session():
+        t.send(b'\t')
+        t.expect('>[ Delete session ]')
+        t.send(b'\r\r')
+
+    def deleted():
+        return json.loads(store.read_text())['deleted']
+
+    try:
+        t.inspect('ID: ' + tid)
+        t.expect_action('Delete session')
+        t.send(b'\x1b[3~')
+        review()
+        t.expect('Selected conversation')
+        t.send(b'\r')
+        t.wait(lambda: 'Permanently delete this Codex session?' not in t.text())
+        assert deleted() == []
+
+        t.action('Delete session')
+        review()
+        selected['updatedAt'] += 1
+        save_state(store, state)
+        confirm_session()
+        t.expect('The reviewed session changed')
+        assert deleted() == []
+        t.send(b'\x1b')
+        t.wait(lambda: 'Session deletion stopped' not in t.text())
+
+        t.inspect('ID: ' + tid)
+        t.send(b'\r')
+        t.expect('DISPOSABLE CODING TERMINAL')
+        t.send(b'\x02')
+        t.expect('Open here')
+        t.send(b'\x1b[3~')
+        t.expect('1 terminal in Tracr')
+
+        sessions = home / 'sessions'
+        sessions.mkdir()
+        metadata = sessions / 'release-fixture.jsonl'
+        metadata.write_text(json.dumps({'type': 'session_meta', 'payload': {'id': tid}}) + '\n'
+                            + json.dumps({'type': 'turn_context', 'payload': {'active_permission_profile': None}}) + '\n')
+        selected['path'] = str(metadata)
+        state['shared'] = {'loaded': {tid: {'type': 'idle'}}}
+        save_state(store, state)
+        t.send(b'\x1b[Z\r')
+        t.expect('Close 1 terminal?')
+        t.send(b'\t\r')
+        t.expect('Selected conversation · Idle')
+        t.send(b'\t\t')
+        t.expect('>[ Release idle conversations ]')
+        t.send(b'\r')
+        review()
+        assert (home / 'release.log').read_text().splitlines() == ['thread/resume', 'thread/unsubscribe']
+        assert deleted() == []
+
+        confirm_session()
+        t.expect('Codex session deleted.')
+        assert deleted() == [tid]
+        assert json.loads(other_store.read_text()) == other_state
+        t.inspect('ID: ' + parent['id'])
+        t.send(b'\x1b[3~')
+        t.expect('This session has a side chat.')
+        assert deleted() == [tid]
+        t.send(b'\x1b')
+        t.wait(lambda: 'This session has a side chat.' not in t.text())
+
+        t.send(b'a\x1b[H')
+        t.inspect('ID: ' + archived['id'])
+        t.send(b'\x1b[3~')
+        review()
+        t.expect('Status Archived')
+        confirm_session()
+        t.wait(lambda: 'Delete session' not in t.text() and 'Archived conversation' not in t.text())
+        assert deleted() == [tid, archived['id']]
+
+        t.send(b'j')
+        t.inspect('ID: ' + uncertain['id'])
+        incident = json.loads(store.read_text())
+        incident['unverified'] = uncertain['id']
+        save_state(store, incident)
+        t.send(b'\x1b[3~')
+        review()
+        confirm_session()
+        t.expect('Codex deletion could not be verified.')
+        assert deleted() == [tid, archived['id'], uncertain['id']]
+        assert set(json.loads(store.read_text())['chats']) == {parent['id'], child['id']}
+        assert git('status', '--porcelain', '--ignored', cwd=worktree) == before
+        assert git('rev-parse', 'feature') == branch
+        assert str(worktree) in git('worktree', 'list', '--porcelain')
+        t.send(b'\x1b')
+        t.wait(lambda: 'Session deletion stopped' not in t.text())
+        t.finish()
+    finally:
+        t.close()
+
+
 def check_native(root, binary, codex):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'scripts'))
     import probe_codex_relocation as probe
 
     probe.ALLOWED_METHODS |= {'thread/fork'}
+
+    fixture_root = root / 'session-delete'
+    fixture = probe.prepare_fixture(codex, fixture_root, 'legacy')
+    session_env = fixture['env']
+    tid = fixture['baseline']['id']
+    folder = Path(fixture['baseline']['cwd'])
+    t = Terminal([binary, '--codex-home', session_env['CODEX_HOME'], '--codex-bin', codex,
+                  str(folder)], session_env)
+    try:
+        t.inspect('ID: ' + tid)
+        t.send(b'\x1b[3~')
+        t.expect('Permanently delete this Codex session?')
+        t.send(b'\t')
+        t.expect('>[ Delete session ]')
+        t.send(b'\r')
+        t.expect('Codex session deleted.')
+        assert folder.is_dir()
+        t.finish()
+    finally:
+        t.close()
 
     env = probe.environment(root)
     env.update(GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1')
@@ -644,5 +806,6 @@ if __name__ == '__main__':
                 check_native(root, binary, str(Path(sys.argv[2]).resolve()))
             else:
                 check_local_terminals(root / 'local-terminals', binary)
+                check_selected_sessions(root / 'selected-sessions', binary)
                 check_fake(root, binary)
         print('worktree discard: passed')
