@@ -282,6 +282,15 @@ impl Dialog {
             copied_hash: false,
         }
     }
+    pub fn selected_tab(&self) -> usize {
+        self.tab
+    }
+
+    pub fn with_tab(mut self, tab: usize) -> Self {
+        self.tab = tab.min(2);
+        self
+    }
+
     pub fn ready(&self) -> bool {
         self.task.as_ref().is_some_and(|task| task.is_finished())
             || self
@@ -389,20 +398,11 @@ impl Dialog {
 
     pub fn draw_panel(&self, frame: &mut Frame<'_>, inner: Rect) {
         if inner.width < 32 || inner.height < 14 {
-            let message =
-                Paragraph::new("Enlarge terminal to view details.\nEsc history · y copy hash")
-                    .wrap(ratatui::widgets::Wrap { trim: false })
-                    .alignment(ratatui::layout::Alignment::Center);
-            let height = message
-                .line_count(inner.width.max(1))
-                .min(usize::from(inner.height)) as u16;
-            let area = Rect::new(
-                inner.x,
-                inner.y + (inner.height - height) / 2,
-                inner.width,
-                height,
+            draw_placeholder(
+                frame,
+                inner,
+                "Enlarge terminal to view details.\nEsc history · y copy hash",
             );
-            frame.render_widget(message, area);
             return;
         }
         self.draw_content(frame, inner, true);
@@ -607,6 +607,22 @@ impl Dialog {
         );
     }
 }
+pub fn draw_placeholder(frame: &mut Frame<'_>, inner: Rect, text: &str) {
+    let message = Paragraph::new(text)
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .alignment(ratatui::layout::Alignment::Center);
+    let height = message
+        .line_count(inner.width.max(1))
+        .min(usize::from(inner.height)) as u16;
+    let area = Rect::new(
+        inner.x,
+        inner.y + (inner.height - height) / 2,
+        inner.width,
+        height,
+    );
+    frame.render_widget(message, area);
+}
+
 impl Drop for Dialog {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {

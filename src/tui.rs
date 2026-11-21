@@ -404,6 +404,7 @@ pub struct View {
     pub git_details: Option<crate::commit_info::Dialog>,
     pub git_details_key: Option<(std::path::PathBuf, String)>,
     pub git_details_focused: bool,
+    pub git_details_tab: usize,
     pub folders_hidden: bool,
     pub git_size_limited: bool,
     pub git_watch_error: Option<String>,
@@ -470,6 +471,7 @@ impl Default for View {
             git_details: None,
             git_details_key: None,
             git_details_focused: false,
+            git_details_tab: 0,
             folders_hidden: Default::default(),
             git_size_limited: Default::default(),
             git_watch_error: Default::default(),
@@ -622,6 +624,7 @@ impl View {
             self.git_details = None;
             self.git_details_key = None;
             self.git_details_focused = false;
+            self.git_details_tab = 0;
         }
         self.focus = if self.drawer_open { 0 } else { 1 };
         self.folders_hidden = false;
@@ -1514,10 +1517,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         if let Some(info) = &view.git_details {
             info.draw_panel(frame, inner);
         } else {
-            frame.render_widget(
-                Paragraph::new("Select a commit to view details").wrap(Wrap { trim: false }),
-                inner,
-            );
+            crate::commit_info::draw_placeholder(frame, inner, "Select a commit to view details");
         }
     }
     let git_area = panels.git;
@@ -2689,6 +2689,9 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
 }
 
 fn sync_git_details(browser: &Browser, view: &mut View) {
+    if let Some(info) = &view.git_details {
+        view.git_details_tab = info.selected_tab();
+    }
     let selected = view
         .git_zoomed
         .then(|| selected_commit(browser, view))
@@ -2696,6 +2699,7 @@ fn sync_git_details(browser: &Browser, view: &mut View) {
     if selected != view.git_details_key {
         view.git_details = selected.as_ref().map(|(repository, oid)| {
             crate::commit_info::Dialog::new(repository.clone(), oid.clone())
+                .with_tab(view.git_details_tab)
         });
         view.git_details_key = selected;
     }
@@ -4859,6 +4863,9 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             view.search_selected = None;
         }
         Command::Refresh => {
+            if let Some(info) = &view.git_details {
+                view.git_details_tab = info.selected_tab();
+            }
             view.git_details_key = None;
             view.git_details = None;
             return Action::Refresh;
@@ -7381,6 +7388,32 @@ mod cleanup_tests {
         sync_git_details(&browser, &mut view);
         assert!(view.git_details.is_none());
         assert!(view.git_details_key.is_none());
+    }
+
+    #[tokio::test]
+    async fn zoom_details_remember_tab_across_commits_empty_rows_and_refresh() {
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
+        view.git_zoomed = true;
+        sync_git_details(&browser, &mut view);
+        for (code, tab) in [('2', 1), ('3', 2)] {
+            press(&mut browser, &mut view, KeyCode::Tab);
+            press(&mut browser, &mut view, KeyCode::Char(code));
+            press(&mut browser, &mut view, KeyCode::Tab);
+            view.git_details.as_mut().unwrap().dialog.scroll = 7;
+            view.history.rows[0].oid = Some(format!("commit-{tab}"));
+            sync_git_details(&browser, &mut view);
+            assert_eq!(view.git_details.as_ref().unwrap().selected_tab(), tab);
+            assert_eq!(view.git_details.as_ref().unwrap().dialog.scroll, 0);
+            view.history.rows[0].oid = None;
+            sync_git_details(&browser, &mut view);
+            assert!(view.git_details.is_none());
+            view.history.rows[0].oid = Some(format!("next-{tab}"));
+            sync_git_details(&browser, &mut view);
+            assert_eq!(view.git_details.as_ref().unwrap().selected_tab(), tab);
+            execute_command(Command::Refresh, &mut browser, &mut view);
+            sync_git_details(&browser, &mut view);
+            assert_eq!(view.git_details.as_ref().unwrap().selected_tab(), tab);
+        }
     }
 
     #[tokio::test]
