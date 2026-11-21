@@ -286,6 +286,9 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
 
 - Input belongs to the focused area. **Tab / Shift+Tab** switch between
   Folders and Git; Alt+Up/Left selects Folders and Alt+Down/Right selects Git.
+  From Sessions with no active terminal, Tab / Shift+Tab returns to the remembered
+  drawer panel, then cycles only between Folders and Git. Outside a repository,
+  focus stays on Folders. Active terminals receive Tab normally.
 - **Right Arrow** from either drawer panel focuses the session area.
 - **Escape** closes a dialog or search first, then focuses Sessions. The drawer stays
   visible beside the session list on wide screens.

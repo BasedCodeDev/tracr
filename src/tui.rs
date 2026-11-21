@@ -2243,9 +2243,9 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             None,
         ));
     }
-    if !view.drawer_open {
+    if !view.drawer_open && view.terminals.borrow().active.is_some() {
         entries.retain(|entry| !matches!(entry.0, CyclePane | CyclePaneBack));
-    } else if view.history.present() {
+    } else if view.drawer_open && view.history.present() {
         entries.push((
             PaneUp,
             "Navigation",
@@ -4136,12 +4136,17 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         }
         Command::Refresh => return Action::Refresh,
         Command::Archives => browser.include_archived = !browser.include_archived,
-        Command::PaneUp
-        | Command::PaneDown
-        | Command::PaneLeft
-        | Command::PaneRight
-        | Command::CyclePane
-        | Command::CyclePaneBack => {
+        Command::CyclePane | Command::CyclePaneBack => {
+            if view.drawer_open {
+                if view.history.present() {
+                    view.drawer_git = !view.drawer_git;
+                    view.normalize_focus();
+                }
+            } else if view.terminals.borrow().active.is_none() {
+                view.toggle_drawer();
+            }
+        }
+        Command::PaneUp | Command::PaneDown | Command::PaneLeft | Command::PaneRight => {
             if view.drawer_open && view.history.present() {
                 view.drawer_git = match command {
                     Command::PaneUp | Command::PaneLeft => false,
@@ -6604,11 +6609,89 @@ mod cleanup_tests {
         press(&mut browser, &mut view, KeyCode::Esc);
         assert!(!view.drawer_open);
         press(&mut browser, &mut view, KeyCode::Tab);
-        assert_eq!(view.context(), 1);
+        assert_eq!(view.context(), 0);
         view.history.tick(None, 1, false, 1).await;
-        view.toggle_drawer();
         press(&mut browser, &mut view, KeyCode::Tab);
         assert_eq!(view.context(), 0);
+    }
+
+    #[tokio::test]
+    async fn tab_returns_inactive_sessions_to_drawer() {
+        for count in [0, 2] {
+            for (width, height) in [(160, 40), (80, 24)] {
+                for present in [false, true] {
+                    for remembered_git in [false, true] {
+                        for key in [
+                            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+                            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
+                            KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT),
+                        ] {
+                            let mut browser = entry_fixture(count, 1);
+                            let mut view = View::default();
+                            if present {
+                                view.history
+                                    .tick(Some("/synthetic/repo".into()), 0, false, 1)
+                                    .await;
+                            }
+                            view.drawer_git = remembered_git;
+                            let mut terminal =
+                                Terminal::new(ratatui::backend::TestBackend::new(width, height))
+                                    .unwrap();
+                            terminal.draw(|f| draw(f, &browser, &view)).unwrap();
+                            assert!(
+                                menu_entries(&browser, &view)
+                                    .iter()
+                                    .any(|entry| entry.command == Command::CyclePane)
+                            );
+                            assert_eq!(handle_key(&mut browser, &mut view, key), Action::Continue);
+                            let expected = if present && remembered_git { 2 } else { 0 };
+                            assert_eq!(view.context(), expected);
+                            assert!(view.drawer_open);
+                            terminal.draw(|f| draw(f, &browser, &view)).unwrap();
+                            for index in 0..4 {
+                                handle_key(&mut browser, &mut view, key);
+                                assert_eq!(
+                                    view.context(),
+                                    if present && index % 2 == 0 {
+                                        2 - expected
+                                    } else {
+                                        expected
+                                    }
+                                );
+                                assert!(view.drawer_open);
+                            }
+                            press(&mut browser, &mut view, KeyCode::Right);
+                            assert_eq!(view.context(), 1);
+                            assert!(!view.drawer_open);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tab_keeps_active_sessions_and_search_focus() {
+        let mut browser = Browser::new(vec![]);
+        let mut view = View::default();
+        view.terminals.borrow_mut().active = Some(1);
+        for code in [KeyCode::Tab, KeyCode::BackTab] {
+            press(&mut browser, &mut view, code);
+            assert!(!view.drawer_open);
+            assert_eq!(view.context(), 1);
+        }
+        assert!(
+            !menu_entries(&browser, &view)
+                .iter()
+                .any(|entry| entry.command == Command::CyclePane)
+        );
+        view.terminals.borrow_mut().active = None;
+        view.editing = true;
+        press(&mut browser, &mut view, KeyCode::Tab);
+        assert!(!view.drawer_open);
+        assert_ne!(view.search_control, 0);
+        press(&mut browser, &mut view, KeyCode::BackTab);
+        assert_eq!(view.search_control, 0);
     }
 
     #[test]
