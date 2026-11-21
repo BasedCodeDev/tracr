@@ -39,6 +39,7 @@ pub struct WorktreeView {
     pub loading: bool,
     pub error: Option<String>,
     pub list_state: std::cell::RefCell<ratatui::widgets::ListState>,
+    pub(crate) page: std::cell::RefCell<crate::tui::ListPage>,
     origin: PathBuf,
     folder_draft: String,
     folder_caret: usize,
@@ -94,6 +95,7 @@ pub struct Picker {
     pub focus: usize, // path, tree, button
     pub worktrees: Option<WorktreeView>,
     pub list_state: std::cell::RefCell<ratatui::widgets::ListState>,
+    pub(crate) page: std::cell::RefCell<crate::tui::ListPage>,
     pub caret: usize, // UTF-8 byte boundary
     pub rows: Vec<Row>,
     pub selected: Option<PathBuf>,
@@ -118,6 +120,7 @@ impl Picker {
             focus: 1,
             worktrees: None,
             list_state: Default::default(),
+            page: Default::default(),
             caret: 0,
             rows: vec![],
             selected: None,
@@ -145,6 +148,7 @@ impl Picker {
             loading: false,
             error: None,
             list_state: Default::default(),
+            page: Default::default(),
             origin: origin.unwrap_or_default(),
             folder_draft: String::new(),
             folder_caret: 0,
@@ -248,24 +252,23 @@ impl Picker {
             }
             return false;
         }
-        if self.worktrees_active()
-            && matches!(
-                key.code,
-                KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown
-            )
-        {
+        let list_key = matches!(
+            key.code,
+            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown
+        ) || (self.focus == 1 && matches!(key.code, KeyCode::Home | KeyCode::End));
+        if self.worktrees_active() && list_key {
             let w = self.worktrees.as_mut().unwrap();
             if !w.loading && !w.entries.is_empty() {
                 let current = w
                     .entries
                     .iter()
                     .position(|r| Some(&r.path) == w.selected.as_ref());
-                let index = match (current, key.code) {
-                    (_, KeyCode::PageUp) => 0,
-                    (_, KeyCode::PageDown) => w.entries.len() - 1,
-                    (Some(i), KeyCode::Up) => i.saturating_sub(1),
-                    (Some(i), _) => (i + 1).min(w.entries.len() - 1),
-                    _ => 0,
+                let index = if current.is_none() && key.code == KeyCode::Down {
+                    0
+                } else {
+                    w.page
+                        .borrow()
+                        .select(key.code, current.unwrap_or(0), w.entries.len())
                 };
                 w.selected = Some(w.entries[index].path.clone());
                 if w.fill(input) {
@@ -298,19 +301,14 @@ impl Picker {
                     _ => 0,
                 }
             }
-            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
+            _ if list_key => {
                 if !self.rows.is_empty() {
                     let index = self
                         .rows
                         .iter()
                         .position(|r| Some(&r.path) == self.selected.as_ref())
                         .unwrap_or(0);
-                    let next = match key.code {
-                        KeyCode::PageUp => 0,
-                        KeyCode::PageDown => self.rows.len() - 1,
-                        KeyCode::Up => index.saturating_sub(1),
-                        _ => (index + 1).min(self.rows.len() - 1),
-                    };
+                    let next = self.page.borrow().select(key.code, index, self.rows.len());
                     let path = self.rows[next].path.clone();
                     self.selected = Some(path.clone());
                     self.changed();
@@ -648,6 +646,36 @@ mod tests {
         );
         assert!(empty.valid);
     }
+    #[test]
+    fn paging_selects_paths_and_endpoints_respect_input_focus() {
+        let mut picker = Picker::new("/".into());
+        picker.rows = (0..6)
+            .map(|index| Row {
+                path: PathBuf::from(format!("/folder{index}")),
+                depth: 0,
+                expanded: false,
+                error: None,
+            })
+            .collect();
+        picker.page.borrow_mut().set(2, (0..6).collect());
+        let mut input = String::new();
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        picker.key(&mut input, key(KeyCode::PageDown));
+        assert_eq!(input, "/folder2");
+        picker.key(&mut input, key(KeyCode::End));
+        assert_eq!(input, "/folder5");
+        picker.key(&mut input, key(KeyCode::PageUp));
+        assert_eq!(input, "/folder3");
+        picker.key(&mut input, key(KeyCode::Home));
+        assert_eq!(input, "/folder0");
+        picker.focus = 0;
+        picker.key(&mut input, key(KeyCode::Home));
+        assert_eq!(picker.caret, 0);
+        picker.key(&mut input, key(KeyCode::End));
+        assert_eq!(picker.caret, input.len());
+        assert_eq!(input, "/folder0");
+    }
+
     #[test]
     fn unicode_editing_arrows_and_confirmation_are_separate() {
         let root = tempfile::tempdir().unwrap();

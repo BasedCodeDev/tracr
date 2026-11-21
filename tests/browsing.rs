@@ -780,18 +780,23 @@ async fn action_menu_navigates_cancels_and_dispatches_without_changing_context()
     let mut browser = loaded().await;
     let mut view = View {
         focus: 1,
-        help_page_size: 4,
         ..View::default()
     };
     let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
     let selected = browser.selected.clone();
     handle_key(&mut browser, &mut view, key(KeyCode::Char('?')));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(50, 20)).unwrap();
+    terminal
+        .draw(|frame| tracr::tui::draw(frame, &browser, &view))
+        .unwrap();
+    let last = view.help_entries.as_ref().unwrap().len() - 1;
     handle_key(&mut browser, &mut view, key(KeyCode::PageDown));
-    assert_eq!(
-        view.help_selected,
-        view.help_entries.as_ref().unwrap().len() - 1
-    );
+    assert!(view.help_selected > 1 && view.help_selected < last);
     handle_key(&mut browser, &mut view, key(KeyCode::PageUp));
+    assert_eq!(view.help_selected, 0);
+    handle_key(&mut browser, &mut view, key(KeyCode::End));
+    assert_eq!(view.help_selected, last);
+    handle_key(&mut browser, &mut view, key(KeyCode::Home));
     handle_key(&mut browser, &mut view, key(KeyCode::Down));
     assert_eq!(view.help_selected, 1);
     view.help_selected = view

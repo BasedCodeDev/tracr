@@ -304,7 +304,8 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   Dialogs belong to the area that opened them: toggling preserves unfinished
   forms in both areas. Background operations continue and their results return
   to the originating area.
-- Page Up / Page Down select the first / last item in lists, search results, and pickers.
+- Page Up / Page Down move by one visible page in lists, search results, and pickers.
+  Home / End select the first / last item.
 - Git Worktrees anchors the default branch's first-parent history in the leftmost
   graph lane and colors that lane and its branch label cyan. Other graph lanes use
   the remaining colors. Detection prefers local `main`, then `master`, then
@@ -312,9 +313,10 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   local branch takes precedence over its remote-tracking ref. This uses local Git
   metadata without fetching. If no default is identifiable, the usual graph layout
   remains. Commit order and checkout HEAD following are unchanged.
-- In Git history, Page Up / Page Down (or Home / End) selects the first / last loaded commit or session; approaching
-  the end loads more history. Left or `h` scrolls left; `l` scrolls right. Manual movement
-  stops HEAD following; `f` resumes it. Selecting another worktree or its checkout
+- In Git history, Page Up / Page Down move by a page of commit and session rows.
+  Home / End select the first / last loaded item. Approaching the end loads more
+  history. Left or `h` scrolls left; `l` scrolls right. Manual movement stops HEAD
+  following; `f` resumes it. Selecting another worktree or its checkout
   root follows HEAD automatically. Escape focuses Sessions; returning to the drawer
   restores the selected drawer panel.
   The top-right `↑` border marker indicates rows above the preview; the
@@ -365,8 +367,8 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
 - `a`: include archived sessions; `r`: refresh.
 - `?`: open the grouped action menu. Up/Down or `j/k` selects a command; Enter
   closes the menu and runs it. Unavailable commands show a reason and remain
-  disabled. Esc or `?` closes without changing the browser. PageUp/PageDown and
-  Home/End select the first/last command; the selection scrolls into view automatically.
+  disabled. Esc or `?` closes without changing the browser. Page Up / Page Down move
+  one page in the menu. Home / End select the first / last command.
 - `q` or Ctrl-C: quit. While editing search, `q` is text.
 
 By default, search requires every whitespace-separated term to match a metadata field:

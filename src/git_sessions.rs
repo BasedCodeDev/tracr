@@ -488,6 +488,7 @@ impl Presentation {
         let current = selectable
             .partition_point(|i| *i < self.selected)
             .min(selectable.len() - 1);
+        let page = history.page.get().max(1);
         let end = self.reference_end();
         let reading_refs = match movement {
             Movement::Down
@@ -513,12 +514,12 @@ impl Presentation {
                 Movement::End => *selectable.last().unwrap(),
                 Movement::PageUp => {
                     selectable[selectable
-                        .partition_point(|i| *i < self.selected.saturating_sub(history.page.get()))
-                        .min(selectable.len() - 1)]
+                        .partition_point(|i| *i <= self.selected.saturating_sub(page))
+                        .saturating_sub(1)]
                 }
                 Movement::PageDown => {
                     selectable[selectable
-                        .partition_point(|i| *i < self.selected.saturating_add(history.page.get()))
+                        .partition_point(|i| *i < self.selected.saturating_add(page))
                         .min(selectable.len() - 1)]
                 }
             };
