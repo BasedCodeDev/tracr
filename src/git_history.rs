@@ -1,9 +1,15 @@
 //! Demand-driven replacement of complete Git graph prefixes.
 use crate::git::{CommitRecord, GraphRow};
 use crate::git_discovery::BackendFuture;
+use ratatui::{
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{cell::Cell, path::PathBuf, sync::Arc};
 use tokio::task::JoinHandle;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 pub trait Backend: Send + Sync {
     fn mainline(
@@ -182,6 +188,7 @@ pub struct History {
     mainline: Option<Arc<crate::git::Mainline>>,
     pub(crate) tails: std::collections::BTreeMap<usize, std::ops::Range<usize>>,
     revision: u64,
+    pub(crate) reference_revision: u64,
     build: Option<BuildTask>,
     #[cfg(test)]
     builds_started: usize,
@@ -198,7 +205,7 @@ pub struct History {
     cancel_seek: bool,
     head_task: Option<JoinHandle<Result<crate::git::Head, String>>>,
     pub rows: Vec<GraphRow>,
-    pub references: crate::git::References,
+    references: crate::git::References,
     linked_branches: std::collections::BTreeSet<String>,
     dirty_branches: std::collections::BTreeSet<String>,
     pub reference_error: Option<String>,
@@ -245,6 +252,7 @@ impl History {
             head_task: None,
             rows: vec![],
             revision: 0,
+            reference_revision: 0,
             tails: Default::default(),
             references: crate::git::References::new(),
             linked_branches: Default::default(),
@@ -338,6 +346,12 @@ impl History {
             self.horizontal.get().saturating_sub(4)
         });
     }
+    pub(crate) fn set_references(&mut self, references: crate::git::References) {
+        if self.references != references {
+            self.references = references;
+            self.reference_revision = self.reference_revision.wrapping_add(1);
+        }
+    }
     /// Synchronize decoration from the displayed repository's discovery snapshot.
     pub(crate) fn set_worktrees(&mut self, repository: Option<&crate::git::Repository>) {
         let branches = repository
@@ -348,7 +362,7 @@ impl History {
             .collect();
         if self.linked_branches != branches {
             self.linked_branches = branches;
-            self.max_width.set(None);
+            self.reference_revision = self.reference_revision.wrapping_add(1);
         }
     }
 
@@ -369,7 +383,7 @@ impl History {
             .collect();
         if self.dirty_branches != branches {
             self.dirty_branches = branches;
-            self.max_width.set(None);
+            self.reference_revision = self.reference_revision.wrapping_add(1);
         }
     }
     fn is_dirty(&self, label: &crate::git::RefLabel) -> bool {
@@ -403,11 +417,7 @@ impl History {
         }
     }
 
-    pub fn row_spans(&self, row: &GraphRow) -> Vec<ratatui::text::Span<'static>> {
-        use ratatui::{
-            style::{Color, Modifier, Style},
-            text::Span,
-        };
+    fn graph_spans(&self, row: &GraphRow) -> Vec<Span<'static>> {
         let mut spans = Vec::new();
         for span in &row.graph_spans {
             let color = match span.color {
@@ -438,7 +448,6 @@ impl History {
                 spans.push(Span::styled(span.text.clone(), Style::default().fg(color)));
             }
         }
-        use unicode_width::UnicodeWidthStr;
         let background = self
             .row_background(row)
             .unwrap_or(crate::git_render::GRAPH_BACKGROUND);
@@ -450,7 +459,12 @@ impl History {
             Style::default().bg(background),
         ));
         spans.push(Span::raw("  "));
-        if let Some(oid) = &row.oid {
+        spans
+    }
+
+    pub fn row_spans(&self, row: &GraphRow) -> Vec<Span<'static>> {
+        let mut spans = self.graph_spans(row);
+        if row.oid.is_some() {
             if let Some(stash) = &row.stash {
                 spans.push(Span::styled(
                     format!("[{}] ", stash.selectors.join(", ")),
@@ -465,53 +479,140 @@ impl History {
                         .add_modifier(Modifier::BOLD),
                 ));
             }
-            if let Some(labels) = self.references.get(oid) {
-                for label in labels {
-                    let (prefix, color) = match label.kind {
-                        crate::git::RefKind::Local => ("", crate::git_render::BRANCH_COLOR),
-                        crate::git::RefKind::Remote => ("remote: ", Color::Cyan),
-                        crate::git::RefKind::Tag => ("tag: ", Color::Yellow),
-                    };
-                    let main_label = self.mainline.as_ref().is_some_and(|main| {
-                        let prefix = match label.kind {
-                            crate::git::RefKind::Local => "refs/heads/",
-                            crate::git::RefKind::Remote => "refs/remotes/",
-                            crate::git::RefKind::Tag => return false,
-                        };
-                        main.reference
-                            .strip_prefix(prefix)
-                            .is_some_and(|name| crate::browser::safe_text(name) == label.name)
-                    });
-                    let style = Style::default().fg(if main_label { Color::Cyan } else { color });
-                    if self.worktree_prefix(label).is_empty() && !self.is_dirty(label) {
-                        spans.push(Span::styled(format!("[{prefix}{}] ", label.name), style));
-                    } else {
-                        spans.push(Span::styled(format!("[{prefix}"), style));
-                        if !self.worktree_prefix(label).is_empty() {
-                            spans.push(Span::styled(
-                                "◇",
-                                Style::default().fg(crate::git_render::WORKTREE_COLOR),
-                            ));
-                            spans.push(Span::styled(" ", style));
-                        }
-                        spans.push(Span::styled(label.name.clone(), style));
-                        if self.is_dirty(label) {
-                            spans.push(Span::styled(" ", style));
-                            spans.push(Span::styled(
-                                "*",
-                                Style::default().fg(crate::git_render::DIRTY_COLOR),
-                            ));
-                        }
-                        spans.push(Span::styled("] ", style));
-                    }
-                }
-            }
             spans.push(Span::raw(row.subject.clone()));
         }
         spans
     }
+
+    pub(crate) fn reference_label(
+        &self,
+        label: &crate::git::RefLabel,
+        activity: Option<Color>,
+    ) -> Line<'static> {
+        let mut spans = Vec::new();
+        let (prefix, color) = match label.kind {
+            crate::git::RefKind::Local => ("", crate::git_render::BRANCH_COLOR),
+            crate::git::RefKind::Remote => ("remote: ", Color::Cyan),
+            crate::git::RefKind::Tag => ("tag: ", Color::Yellow),
+        };
+        let main_label = self.mainline.as_ref().is_some_and(|main| {
+            let prefix = match label.kind {
+                crate::git::RefKind::Local => "refs/heads/",
+                crate::git::RefKind::Remote => "refs/remotes/",
+                crate::git::RefKind::Tag => return false,
+            };
+            main.reference
+                .strip_prefix(prefix)
+                .is_some_and(|name| crate::browser::safe_text(name) == label.name)
+        });
+        let style =
+            Style::default().fg(activity.unwrap_or(if main_label { Color::Cyan } else { color }));
+        let linked = !self.worktree_prefix(label).is_empty();
+        let dirty = self.is_dirty(label);
+        if !linked && !dirty {
+            spans.push(Span::styled(format!("[{prefix}{}]", label.name), style));
+        } else {
+            spans.push(Span::styled(format!("[{prefix}"), style));
+            if linked {
+                spans.push(Span::styled(
+                    "◇",
+                    Style::default().fg(crate::git_render::WORKTREE_COLOR),
+                ));
+                spans.push(Span::styled(" ", style));
+            }
+            spans.push(Span::styled(label.name.clone(), style));
+            if dirty {
+                spans.push(Span::styled(" ", style));
+                spans.push(Span::styled(
+                    "*",
+                    Style::default().fg(crate::git_render::DIRTY_COLOR),
+                ));
+            }
+            spans.push(Span::styled("]", style));
+        }
+        Line::from(spans)
+    }
+
+    pub(crate) fn reference_labels(&self, oid: &str) -> Vec<&crate::git::RefLabel> {
+        use crate::git::RefKind;
+
+        let mut labels: Vec<_> = self.references.get(oid).into_iter().flatten().collect();
+        labels.sort_by_key(|label| match (&label.kind, label.name.as_str()) {
+            (RefKind::Local, "main") => 0,
+            (RefKind::Local, "master") => 1,
+            _ => 2,
+        });
+        labels
+    }
+
+    pub(crate) fn wrap_reference_labels(
+        &self,
+        width: usize,
+        labels: impl IntoIterator<Item = Line<'static>>,
+    ) -> Vec<Line<'static>> {
+        // Leave room to display wide graphemes when the graph itself needs horizontal scrolling.
+        let capacity = width.saturating_sub(self.graph_width + 2).max(2);
+        let mut lines = Vec::new();
+        let mut line = Line::default();
+        let mut used = 0;
+        for label in labels {
+            let width = label.width();
+            if used > 0 && used + 1 + width > capacity {
+                lines.push(std::mem::take(&mut line));
+                used = 0;
+            }
+            if used > 0 {
+                line.spans.push(Span::raw(" "));
+                used += 1;
+            }
+            if width <= capacity {
+                line.spans.extend(label.spans);
+                used += width;
+                continue;
+            }
+            for span in label.spans {
+                let mut chunk = String::new();
+                for grapheme in span.content.graphemes(true) {
+                    let width = grapheme.width();
+                    if used > 0 && used + width > capacity {
+                        if !chunk.is_empty() {
+                            line.spans
+                                .push(Span::styled(std::mem::take(&mut chunk), span.style));
+                        }
+                        lines.push(std::mem::take(&mut line));
+                        used = 0;
+                    }
+                    chunk.push_str(grapheme);
+                    used += width;
+                }
+                if !chunk.is_empty() {
+                    line.spans.push(Span::styled(chunk, span.style));
+                }
+            }
+            lines.push(std::mem::take(&mut line));
+            used = 0;
+        }
+        if !line.spans.is_empty() {
+            lines.push(line);
+        }
+        lines
+    }
+
+    #[cfg(test)]
+    fn reference_lines(&self, oid: &str, width: usize) -> Vec<Line<'static>> {
+        self.wrap_reference_labels(
+            width,
+            self.reference_labels(oid)
+                .into_iter()
+                .map(|label| self.reference_label(label, None)),
+        )
+    }
+
+    pub(crate) fn reference_line_width(&self, line: &Line<'_>) -> usize {
+        self.graph_width + 2 + line.width()
+    }
+
     pub fn clamp_horizontal(&self, width: usize) {
-        use unicode_width::UnicodeWidthStr;
         let max = self
             .max_width
             .get()
@@ -521,23 +622,10 @@ impl History {
                     .iter()
                     .map(|row| {
                         let mut width = self.graph_width + 2;
-                        if let Some(oid) = &row.oid {
+                        if row.oid.is_some() {
                             width += row.subject.width() + if self.is_head(row) { 7 } else { 0 };
                             if let Some(stash) = &row.stash {
                                 width += stash.selectors.join(", ").width() + 3;
-                            }
-                            if let Some(labels) = self.references.get(oid) {
-                                for label in labels {
-                                    width += label.name.width()
-                                        + self.worktree_prefix(label).width()
-                                        + if self.is_dirty(label) { 2 } else { 0 }
-                                        + 3
-                                        + match label.kind {
-                                            crate::git::RefKind::Local => 0,
-                                            crate::git::RefKind::Remote => 8,
-                                            crate::git::RefKind::Tag => 5,
-                                        };
-                                }
                             }
                         }
                         width
@@ -675,15 +763,8 @@ impl History {
                 < self.page.get();
     }
 
-    pub fn session_spans(
-        &self,
-        anchor: usize,
-        connector: Option<usize>,
-    ) -> Vec<ratatui::text::Span<'static>> {
-        let spans = match connector {
-            Some(index) => self.rows[index].graph_spans.clone(),
-            None => crate::git_render::annotation_continuation(&self.rows[anchor]),
-        };
+    pub(crate) fn continuation_spans(&self, anchor: usize) -> Vec<Span<'static>> {
+        let spans = crate::git_render::annotation_continuation(&self.rows[anchor]);
         let graph: String = spans.iter().map(|s| s.text.as_str()).collect();
         let annotation = GraphRow {
             stash: None,
@@ -693,8 +774,15 @@ impl History {
             parents: vec![],
             subject: String::new(),
         };
-        let mut result = self.row_spans(&annotation);
-        result.push(ratatui::text::Span::raw("  "));
+        self.graph_spans(&annotation)
+    }
+
+    pub fn session_spans(&self, anchor: usize, connector: Option<usize>) -> Vec<Span<'static>> {
+        let mut result = match connector {
+            Some(index) => self.graph_spans(&self.rows[index]),
+            None => self.continuation_spans(anchor),
+        };
+        result.push(Span::raw("  "));
         result
     }
 
@@ -922,8 +1010,7 @@ impl History {
                     match references {
                         Ok((refs, resolved)) => {
                             mainline = resolved;
-                            self.references = refs;
-                            self.max_width.set(None);
+                            self.set_references(refs);
                             self.reference_error = None;
                         }
                         Err(error) => self.reference_error = Some(error),
@@ -1318,7 +1405,10 @@ mod tests {
         );
         h.linked_branches.insert("refs/heads/main".into());
         h.dirty_branches.insert("refs/heads/main".into());
-        let spans = h.row_spans(&h.rows[0]);
+        let spans = h
+            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
+            .remove(0)
+            .spans;
         assert!(
             spans
                 .iter()
@@ -1334,10 +1424,9 @@ mod tests {
                 .iter()
                 .any(|s| s.content == "*" && s.style.fg == Some(crate::git_render::DIRTY_COLOR))
         );
-        assert!(
-            spans.iter().any(|s| s.content == "[feature] "
-                && s.style.fg == Some(crate::git_render::BRANCH_COLOR))
-        );
+        assert!(spans.iter().any(
+            |s| s.content == "[feature]" && s.style.fg == Some(crate::git_render::BRANCH_COLOR)
+        ));
     }
 
     #[tokio::test]
@@ -2135,22 +2224,24 @@ mod tests {
                 },
             ],
         );
-        h.clamp_horizontal(1);
-        let original_width = h.max_width.get().unwrap();
-        h.set_worktrees(Some(&repo));
-        assert_eq!(h.max_width.get(), None);
-        let text = |h: &History| {
-            h.row_spans(&h.rows[0])
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>()
+        let refs = |h: &History| {
+            h.reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
+                .remove(0)
         };
+        let original_width = refs(&h).width();
+        let revision = h.reference_revision;
+        h.set_worktrees(Some(&repo));
+        assert_ne!(h.reference_revision, revision);
+        let text = |h: &History| refs(h).to_string();
         assert!(
             text(&h).contains(
                 "[main] [◇ feature/界] [ordinary] [remote: feature/界] [tag: feature/界]"
             )
         );
-        let spans = h.row_spans(&h.rows[0]);
+        let spans = h
+            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
+            .remove(0)
+            .spans;
         assert!(
             spans
                 .iter()
@@ -2160,16 +2251,14 @@ mod tests {
             spans.iter().any(|s| s.content == "feature/界"
                 && s.style.fg == Some(crate::git_render::BRANCH_COLOR))
         );
-        h.clamp_horizontal(1);
-        assert_eq!(h.max_width.get(), Some(original_width + 2));
+        assert_eq!(refs(&h).width(), original_width + 2);
         repo.worktrees[1].branch = Some("refs/heads/ordinary".into());
         h.set_worktrees(Some(&repo));
         assert!(text(&h).contains("[feature/界] [◇ ordinary]"));
         repo.worktrees.truncate(1);
         h.set_worktrees(Some(&repo));
         assert!(!text(&h).contains('◇'));
-        h.clamp_horizontal(1);
-        assert_eq!(h.max_width.get(), Some(original_width));
+        assert_eq!(refs(&h).width(), original_width);
         repo.worktrees.push(wt(Some("refs/heads/ordinary")));
         h.set_worktrees(Some(&repo));
         h.set_worktrees(None);
@@ -2206,8 +2295,11 @@ mod tests {
                 prunable: false,
             }],
         };
-        h.clamp_horizontal(1);
-        let clean_width = h.max_width.get().unwrap();
+        let refs = |h: &History| {
+            h.reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
+                .remove(0)
+        };
+        let clean_width = refs(&h).width();
         let statuses = std::collections::BTreeMap::from([(
             PathBuf::from("/main"),
             Ok(crate::worktree_status::Counts {
@@ -2216,7 +2308,10 @@ mod tests {
             }),
         )]);
         h.set_status(Some(&repository), &statuses);
-        let spans = h.row_spans(&h.rows[0]);
+        let spans = h
+            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
+            .remove(0)
+            .spans;
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("[main *] [remote: main]"));
         assert!(!text.contains('◇'));
@@ -2225,11 +2320,78 @@ mod tests {
                 .iter()
                 .any(|s| s.content == "*" && s.style.fg == Some(crate::git_render::DIRTY_COLOR))
         );
-        h.clamp_horizontal(1);
-        assert_eq!(h.max_width.get(), Some(clean_width + 2));
+        assert_eq!(refs(&h).width(), clean_width + 2);
         h.set_status(None, &statuses);
-        h.clamp_horizontal(1);
-        assert_eq!(h.max_width.get(), Some(clean_width));
+        assert_eq!(refs(&h).width(), clean_width);
+    }
+
+    #[test]
+    fn reference_wrapping_lists_local_main_and_master_first() {
+        use crate::git::{RefKind, RefLabel};
+        let mut h = History::default();
+        let labels: Vec<_> = [
+            (RefKind::Local, "alpha"),
+            (RefKind::Local, "master"),
+            (RefKind::Local, "main"),
+            (RefKind::Local, "zeta"),
+            (RefKind::Remote, "origin/main"),
+            (RefKind::Tag, "main"),
+        ]
+        .into_iter()
+        .map(|(kind, name)| RefLabel {
+            kind,
+            name: name.into(),
+        })
+        .collect();
+        h.set_references(std::collections::BTreeMap::from([
+            ("both".into(), labels.clone()),
+            (
+                "master-only".into(),
+                [&labels[0], &labels[1]].into_iter().cloned().collect(),
+            ),
+        ]));
+        let lines = |oid| {
+            h.reference_lines(oid, 17)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            lines("both"),
+            [
+                "[main] [master]",
+                "[alpha] [zeta]",
+                "[remote: origin",
+                "/main]",
+                "[tag: main]"
+            ]
+        );
+        assert_eq!(lines("master-only"), ["[master]", "[alpha]"]);
+    }
+
+    #[test]
+    fn reference_wrapping_keeps_labels_and_graphemes_together() {
+        use crate::git::{RefKind, RefLabel};
+        let mut h = History::default();
+        h.graph_width = 3;
+        assert!(h.reference_lines("commit", 20).is_empty());
+        let long_name = "long/界e\u{301}👩‍💻-branch";
+        h.set_references(std::collections::BTreeMap::from([(
+            "commit".into(),
+            ["a", "b", long_name, "c"]
+                .into_iter()
+                .map(|name| RefLabel {
+                    kind: RefKind::Local,
+                    name: name.into(),
+                })
+                .collect(),
+        )]));
+        let lines = h.reference_lines("commit", 13);
+        let contents: Vec<_> = lines.iter().map(ToString::to_string).collect();
+        assert_eq!(contents.first().unwrap(), "[a] [b]");
+        assert_eq!(contents[1..].concat(), format!("[{long_name}][c]"));
+        assert!(contents.iter().any(|part| part.contains("e\u{301}👩‍💻")));
+        assert!(lines.iter().all(|line| h.reference_line_width(line) <= 13));
     }
 
     #[test]
@@ -2260,13 +2422,22 @@ mod tests {
                 },
             ],
         );
-        let spans = h.row_spans(&h.rows[0]);
-        let text = spans.iter().map(|s| s.content.as_ref()).collect::<String>();
-        assert!(text.contains("[HEAD] [main] [remote: origin/main] [tag: v1]"));
+        let text: String = h
+            .row_spans(&h.rows[0])
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(text.contains("[HEAD] wide 界 text"));
+        let spans = h
+            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
+            .remove(0)
+            .spans;
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "[main] [remote: origin/main] [tag: v1]");
         assert!(
             spans
                 .iter()
-                .any(|s| s.content == "[main] "
+                .any(|s| s.content == "[main]"
                     && s.style.fg == Some(crate::git_render::BRANCH_COLOR))
         );
         h.scroll_horizontal(true);

@@ -2,9 +2,11 @@
 use crate::{
     browser::Browser,
     domain::{RuntimeStatus, SessionKey, SessionSummary},
+    git::{GraphRow, RefKind},
     git_discovery::Outcome,
     git_history::{History, Movement},
 };
+use ratatui::{style::Color, text::Line};
 use std::{collections::BTreeMap, path::PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -20,6 +22,7 @@ pub struct Annotation {
     pub oid: String,
     pub root: PathBuf,
     pub label: Option<String>,
+    branch: Option<String>,
 }
 
 fn priority(status: RuntimeStatus) -> u8 {
@@ -97,6 +100,11 @@ pub fn annotations(browser: &Browser, history: &History) -> Vec<Annotation> {
             oid: oid.clone(),
             root: root.clone(),
             label,
+            branch: worktree
+                .branch
+                .as_deref()
+                .and_then(|name| name.strip_prefix("refs/heads/"))
+                .map(crate::browser::safe_text),
         });
     }
     result.sort_by(|a, b| {
@@ -112,19 +120,35 @@ pub fn annotations(browser: &Browser, history: &History) -> Vec<Annotation> {
 #[derive(Clone, Debug)]
 pub enum Row {
     Graph(usize),
+    References {
+        anchor: usize,
+        line: Line<'static>,
+    },
     Session {
         anchor: usize,
         annotation: usize,
         connector: Option<usize>,
+        heading: Option<usize>,
+        last: bool,
     },
 }
 
+pub enum CommitSection {
+    References(Vec<Line<'static>>),
+    Branch {
+        heading: Vec<Line<'static>>,
+        sessions: Vec<usize>,
+    },
+    Sessions(Vec<usize>),
+}
+
 /// Share the first connector rows with the final sessions in each commit block.
-/// Unpaired sessions precede routing, where existing vertical continuations apply.
+/// Branch headings and earlier sessions extend the lanes before routing begins.
 pub fn compose_rows(
-    rows: &[crate::git::GraphRow],
+    rows: &[GraphRow],
     tails: &BTreeMap<usize, std::ops::Range<usize>>,
     session_oids: &[&str],
+    sections: impl Fn(&str, &[usize]) -> Vec<CommitSection>,
 ) -> Vec<Row> {
     let mut attached: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (index, oid) in session_oids.iter().enumerate() {
@@ -134,22 +158,117 @@ pub fn compose_rows(
     let mut i = 0;
     while i < rows.len() {
         result.push(Row::Graph(i));
-        if let Some(indices) = rows[i].oid.as_deref().and_then(|oid| attached.get(oid)) {
+        if let Some(oid) = rows[i].oid.as_deref() {
+            let indices = attached.get(oid).map_or(&[][..], Vec::as_slice);
+            for section in sections(oid, indices) {
+                let (heading, sessions) = match section {
+                    CommitSection::References(lines) => {
+                        result.extend(
+                            lines
+                                .into_iter()
+                                .map(|line| Row::References { anchor: i, line }),
+                        );
+                        continue;
+                    }
+                    CommitSection::Branch { heading, sessions } => {
+                        let start = result.len();
+                        result.extend(
+                            heading
+                                .into_iter()
+                                .map(|line| Row::References { anchor: i, line }),
+                        );
+                        (Some(start), sessions)
+                    }
+                    CommitSection::Sessions(sessions) => (None, sessions),
+                };
+                let len = sessions.len();
+                for (position, annotation) in sessions.into_iter().enumerate() {
+                    result.push(Row::Session {
+                        anchor: i,
+                        annotation,
+                        connector: None,
+                        heading,
+                        last: position + 1 == len,
+                    });
+                }
+            }
             let tail = tails.get(&i).cloned().unwrap_or(i + 1..i + 1);
-            let shared = indices.len().min(tail.len());
-            let extra = indices.len() - shared;
-            for (position, &annotation) in indices.iter().enumerate() {
-                result.push(Row::Session {
-                    anchor: i,
-                    annotation,
-                    connector: (position >= extra).then(|| tail.start + position - extra),
-                });
+            let shared = result
+                .iter()
+                .rev()
+                .take(tail.len())
+                .take_while(|row| matches!(row, Row::Session { .. }))
+                .count();
+            let start = result.len() - shared;
+            for (row, index) in result[start..].iter_mut().zip(tail) {
+                if let Row::Session { connector, .. } = row {
+                    *connector = Some(index);
+                }
             }
             i += shared;
         }
         i += 1;
     }
     result
+}
+
+fn commit_sections(
+    history: &History,
+    oid: &str,
+    width: usize,
+    indices: &[usize],
+    annotations: &[Annotation],
+    branch_colors: &BTreeMap<&str, (u8, Color)>,
+) -> Vec<CommitSection> {
+    let labels = history.reference_labels(oid);
+    let local_branches: std::collections::BTreeSet<_> = labels
+        .iter()
+        .filter(|label| label.kind == RefKind::Local)
+        .map(|label| label.name.as_str())
+        .collect();
+    let mut attached: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    let mut unmatched = Vec::new();
+    for &index in indices {
+        match annotations[index].branch.as_deref() {
+            Some(branch) if local_branches.contains(branch) => {
+                attached.entry(branch).or_default().push(index)
+            }
+            _ => unmatched.push(index),
+        }
+    }
+
+    let mut groups = Vec::new();
+    let mut references = Vec::new();
+    let mut other_refs = Vec::new();
+    for label in labels {
+        let local = (label.kind == RefKind::Local).then_some(label.name.as_str());
+        let color = local
+            .and_then(|name| branch_colors.get(name))
+            .map(|&(_, color)| color);
+        let line = history.reference_label(label, color);
+        let Some(sessions) = local.and_then(|name| attached.remove(name)) else {
+            if local.is_some() {
+                references.extend(history.wrap_reference_labels(width, [line]));
+            } else {
+                other_refs.push(line);
+            }
+            continue;
+        };
+        groups.push(CommitSection::Branch {
+            heading: history.wrap_reference_labels(width, [line]),
+            sessions,
+        });
+    }
+    references.extend(history.wrap_reference_labels(width, other_refs));
+    let mut sections = Vec::new();
+    if !references.is_empty() {
+        sections.push(CommitSection::References(references));
+    }
+    sections.extend(groups);
+    if !unmatched.is_empty() {
+        sections.push(CommitSection::Sessions(unmatched));
+    }
+    sections
 }
 
 #[derive(Default)]
@@ -165,6 +284,10 @@ pub struct Presentation {
     anchor_oid: Option<String>,
     repository: Option<PathBuf>,
     geometry: (u64, usize, usize),
+    pub width: Option<usize>,
+    reference_layout: (Option<usize>, u64),
+    reference_offset: usize,
+    height: usize,
 }
 impl Presentation {
     pub fn sync(&mut self, browser: &Browser, history: &History) {
@@ -179,7 +302,8 @@ impl Presentation {
             history.rows.len(),
         );
         let annotations = annotations(browser, history);
-        let old_offset = self.selected.saturating_sub(self.top);
+        let old_offset = self.cursor().saturating_sub(self.top);
+        let old_selection = self.selection.clone();
         let old_anchor = self.anchor_oid.clone();
         let repository_changed = self.repository != repository;
         if repository_changed
@@ -189,10 +313,37 @@ impl Presentation {
         {
             self.selection = history_oid.clone().map(Selection::Commit);
         }
-        if repository_changed || self.geometry != geometry || self.annotations != annotations {
+        let reference_layout = (self.width, history.reference_revision);
+        let rebuild = repository_changed
+            || self.geometry != geometry
+            || self.annotations != annotations
+            || self.reference_layout != reference_layout;
+        if rebuild {
             self.annotations = annotations;
             let oids: Vec<_> = self.annotations.iter().map(|a| a.oid.as_str()).collect();
-            self.rows = compose_rows(&history.rows, &history.tails, &oids);
+            let mut branch_colors = BTreeMap::new();
+            for annotation in &self.annotations {
+                if let (Some(branch), Some(color)) = (
+                    annotation.branch.as_deref(),
+                    crate::tui::activity_color(annotation.status),
+                ) {
+                    let rank = priority(annotation.status);
+                    let entry = branch_colors.entry(branch).or_insert((rank, color));
+                    if rank < entry.0 {
+                        *entry = (rank, color);
+                    }
+                }
+            }
+            self.rows = compose_rows(&history.rows, &history.tails, &oids, |oid, indices| {
+                commit_sections(
+                    history,
+                    oid,
+                    self.width.unwrap_or(usize::MAX),
+                    indices,
+                    &self.annotations,
+                    &branch_colors,
+                )
+            });
             self.positions = self
                 .rows
                 .iter()
@@ -206,6 +357,7 @@ impl Presentation {
                 .filter_map(|(i, row)| self.key(row, history).map(|_| i))
                 .collect();
             self.geometry = geometry;
+            self.reference_layout = reference_layout;
             self.repository = repository;
         }
         let locate = |key: &Selection| self.positions.get(key).copied();
@@ -228,7 +380,15 @@ impl Presentation {
             .rows
             .get(self.selected)
             .and_then(|row| self.key(row, history));
-        self.top = self.selected.saturating_sub(old_offset);
+        if rebuild || self.selection != old_selection {
+            self.reference_offset = if self.selection == old_selection {
+                self.reference_offset
+                    .min(self.reference_end() - self.selected)
+            } else {
+                0
+            };
+            self.top = self.cursor().saturating_sub(old_offset);
+        }
         self.anchor_oid = self
             .anchor()
             .and_then(|i| history.rows.get(i))
@@ -238,20 +398,12 @@ impl Presentation {
     fn key(&self, row: &Row, history: &History) -> Option<Selection> {
         match row {
             Row::Graph(i) => history.rows.get(*i)?.oid.clone().map(Selection::Commit),
+            Row::References { .. } => None,
             Row::Session { annotation, .. } => Some(Selection::Session(
                 self.annotations[*annotation].session.key.clone(),
             )),
         }
     }
-    /// Annotations are sorted by commit before presentation/viewport slicing.
-    pub fn is_last_session(&self, annotation: usize) -> bool {
-        self.annotations.get(annotation).is_some_and(|current| {
-            self.annotations
-                .get(annotation + 1)
-                .is_none_or(|next| next.oid != current.oid)
-        })
-    }
-
     pub fn session(&self) -> Option<&Annotation> {
         match self.rows.get(self.selected)? {
             Row::Session { annotation, .. } => self.annotations.get(*annotation),
@@ -261,17 +413,48 @@ impl Presentation {
     pub fn anchor(&self) -> Option<usize> {
         match self.rows.get(self.selected)? {
             Row::Graph(i) => Some(*i),
-            Row::Session { anchor, .. } => Some(*anchor),
+            Row::References { anchor, .. } | Row::Session { anchor, .. } => Some(*anchor),
         }
     }
+    pub fn cursor(&self) -> usize {
+        self.selected + self.reference_offset
+    }
+    fn reference_end(&self) -> usize {
+        self.rows
+            .iter()
+            .skip(self.selected + 1)
+            .take_while(|row| matches!(row, Row::References { .. }))
+            .count()
+            + self.selected
+    }
     pub fn range(&mut self, height: usize) -> std::ops::Range<usize> {
+        self.height = height;
         self.top = self.top.min(self.rows.len().saturating_sub(height));
-        if self.selected < self.top {
-            self.top = self.selected;
+        let cursor = self.cursor();
+        let mut first = cursor;
+        let mut bottom = cursor;
+        if self.reference_offset == 0 {
+            match self.rows.get(self.selected) {
+                Some(Row::Session {
+                    heading: Some(heading),
+                    ..
+                }) if cursor - heading < height => {
+                    first = *heading;
+                }
+                Some(Row::Graph(_)) => {
+                    // Keep the commit subject and its leading references together when they fit.
+                    let end = self.reference_end();
+                    if end - self.selected < height {
+                        bottom = end;
+                    }
+                }
+                _ => {}
+            }
         }
-        if self.selected >= self.top + height.max(1) {
-            self.top = self.selected + 1 - height.max(1);
-        }
+        self.top = self
+            .top
+            .min(first)
+            .max((bottom + 1).saturating_sub(height.max(1)));
         self.top..(self.top + height).min(self.rows.len())
     }
     pub fn navigate(&mut self, movement: Movement, history: &mut History) {
@@ -282,21 +465,44 @@ impl Presentation {
         let current = selectable
             .partition_point(|i| *i < self.selected)
             .min(selectable.len() - 1);
-        let target = match movement {
-            Movement::Up => selectable[current.saturating_sub(1)],
-            Movement::Down => selectable[(current + 1).min(selectable.len() - 1)],
-            Movement::Home => selectable[0],
-            Movement::End => *selectable.last().unwrap(),
-            Movement::PageUp => {
-                selectable[selectable
-                    .partition_point(|i| *i < self.selected.saturating_sub(history.page.get()))
-                    .min(selectable.len() - 1)]
+        let end = self.reference_end();
+        let reading_refs = match movement {
+            Movement::Down
+                if self.height > 0 && end > self.cursor() && end >= self.top + self.height =>
+            {
+                let next_page_end = self.top + self.height * 2 - 1;
+                self.reference_offset = end.min(next_page_end) - self.selected;
+                true
             }
-            Movement::PageDown => {
-                selectable[selectable
-                    .partition_point(|i| *i < self.selected.saturating_add(history.page.get()))
-                    .min(selectable.len() - 1)]
+            Movement::Up if self.reference_offset > 0 => {
+                self.reference_offset = 0;
+                true
             }
+            _ => false,
+        };
+        let target = if reading_refs {
+            self.selected
+        } else {
+            let target = match movement {
+                Movement::Up => selectable[current.saturating_sub(1)],
+                Movement::Down => selectable[(current + 1).min(selectable.len() - 1)],
+                Movement::Home => selectable[0],
+                Movement::End => *selectable.last().unwrap(),
+                Movement::PageUp => {
+                    selectable[selectable
+                        .partition_point(|i| *i < self.selected.saturating_sub(history.page.get()))
+                        .min(selectable.len() - 1)]
+                }
+                Movement::PageDown => {
+                    selectable[selectable
+                        .partition_point(|i| *i < self.selected.saturating_add(history.page.get()))
+                        .min(selectable.len() - 1)]
+                }
+            };
+            if target != self.selected || !matches!(movement, Movement::Down) {
+                self.reference_offset = 0;
+            }
+            target
         };
         self.selected = target;
         self.selection = self.key(&self.rows[target], history);
@@ -312,6 +518,7 @@ impl Presentation {
     pub fn follow(&mut self) {
         self.selection = None;
         self.history_oid = None;
+        self.reference_offset = 0;
     }
 }
 
@@ -323,6 +530,15 @@ pub(crate) mod tests {
         domain::{ProviderId, SourceId},
         git::{Directory, GraphRow, Repository, Worktree},
     };
+
+    fn is_last_session(view: &Presentation, index: usize) -> bool {
+        view.rows.iter().any(|row| {
+            matches!(
+                row,
+                Row::Session { annotation, last: true, .. } if *annotation == index
+            )
+        })
+    }
 
     pub fn add_session(
         browser: &mut Browser,
@@ -673,6 +889,166 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn branch_labels_follow_live_activity_in_their_worktrees() {
+        use crate::git::{RefKind, RefLabel};
+        use ratatui::style::Color;
+        let (mut browser, mut history) = fixture().await;
+        let running = add_session(
+            &mut browser,
+            "running",
+            "/repo",
+            "/repo",
+            "/repo/.git",
+            RuntimeStatus::Running,
+            1,
+        );
+        let waiting = add_session(
+            &mut browser,
+            "waiting",
+            "/repo/src",
+            "/repo",
+            "/repo/.git",
+            RuntimeStatus::Waiting {
+                input: true,
+                approval: false,
+            },
+            2,
+        );
+        add_session(
+            &mut browser,
+            "feature",
+            "/worktree",
+            "/worktree",
+            "/repo/.git",
+            RuntimeStatus::Running,
+            3,
+        );
+        history.set_worktrees(browser.repositories.get(std::path::Path::new("/repo/.git")));
+        history.set_references(BTreeMap::from([(
+            "head".into(),
+            [
+                (RefKind::Local, "main"),
+                (RefKind::Local, "feature"),
+                (RefKind::Local, "unattached"),
+                (RefKind::Remote, "origin/main"),
+                (RefKind::Tag, "main"),
+            ]
+            .into_iter()
+            .map(|(kind, name)| RefLabel {
+                kind,
+                name: name.into(),
+            })
+            .collect(),
+        )]));
+        let mut view = Presentation {
+            width: Some(80),
+            ..Default::default()
+        };
+        let color = |view: &Presentation, text: &str| {
+            view.rows
+                .iter()
+                .filter_map(|row| match row {
+                    Row::References { line, .. } => Some(&line.spans),
+                    _ => None,
+                })
+                .flatten()
+                .find(|span| span.content == text)
+                .and_then(|span| span.style.fg)
+        };
+        view.sync(&browser, &history);
+        assert_eq!(color(&view, "[main]"), Some(Color::Rgb(255, 165, 0)));
+        assert_eq!(color(&view, "feature"), Some(Color::Green));
+        assert_eq!(color(&view, "◇"), Some(crate::git_render::WORKTREE_COLOR));
+        assert_eq!(
+            color(&view, "[unattached]"),
+            Some(crate::git_render::BRANCH_COLOR)
+        );
+        assert_eq!(color(&view, "[remote: origin/main]"), Some(Color::Cyan));
+        assert_eq!(color(&view, "[tag: main]"), Some(Color::Yellow));
+
+        browser.sources[0]
+            .live
+            .insert(waiting, RuntimeStatus::Unloaded);
+        view.sync(&browser, &history);
+        assert_eq!(color(&view, "[main]"), Some(Color::Green));
+        browser.sources[0]
+            .live
+            .insert(running.clone(), RuntimeStatus::Idle);
+        view.sync(&browser, &history);
+        assert_eq!(color(&view, "[main]"), Some(Color::Rgb(255, 255, 170)));
+        browser.sources[0]
+            .live
+            .insert(running, RuntimeStatus::Unloaded);
+        view.sync(&browser, &history);
+        assert_eq!(
+            color(&view, "[main]"),
+            Some(crate::git_render::BRANCH_COLOR)
+        );
+    }
+
+    #[tokio::test]
+    async fn reference_reflow_preserves_sessions_and_graph_lanes() {
+        use crate::git::{RefKind, RefLabel};
+        let (mut browser, mut history) = fixture().await;
+        browser
+            .repositories
+            .get_mut(std::path::Path::new("/repo/.git"))
+            .unwrap()
+            .worktrees[0]
+            .branch = Some("refs/heads/feature/branch".into());
+        let key = add_session(
+            &mut browser,
+            "attached",
+            "/repo/src",
+            "/repo",
+            "/repo/.git",
+            RuntimeStatus::Idle,
+            1,
+        );
+        let mut view = Presentation {
+            width: Some(40),
+            ..Default::default()
+        };
+        view.sync(&browser, &history);
+        view.navigate(Movement::Down, &mut history);
+        assert_eq!(view.session().unwrap().session.key, key);
+
+        history.set_references(BTreeMap::from([(
+            "head".into(),
+            vec![RefLabel {
+                kind: RefKind::Local,
+                name: "feature/branch".into(),
+            }],
+        )]));
+        view.sync(&browser, &history);
+        assert_eq!(view.session().unwrap().session.key, key);
+        assert!(view.range(2).contains(&1));
+        assert!(
+            matches!(&view.rows[1], Row::References { anchor: 0, line } if line.to_string() == "[feature/branch]")
+        );
+        assert_eq!(history.continuation_spans(0)[0].content, "│");
+
+        view.width = Some(10);
+        view.sync(&browser, &history);
+        assert!(view.selected > 2);
+        assert_eq!(view.session().unwrap().session.key, key);
+
+        view.navigate(Movement::Home, &mut history);
+        let mut range = view.range(2);
+        for _ in 0..view.rows.len() {
+            view.navigate(Movement::Down, &mut history);
+            let next = view.range(2);
+            assert!(range.end >= next.start);
+            range = next;
+            if view.session().is_some() {
+                break;
+            }
+        }
+        assert_eq!(view.session().unwrap().session.key, key);
+        assert!(range.contains(&view.selected));
+    }
+
+    #[tokio::test]
     async fn live_reordering_head_movement_and_removal_preserve_identity_and_geometry() {
         let (mut browser, mut history) = fixture().await;
         let first = add_session(
@@ -698,8 +1074,8 @@ pub(crate) mod tests {
         let allocation = history.rows.as_ptr();
         let mut view = Presentation::default();
         view.sync(&browser, &history);
-        assert!(!view.is_last_session(0));
-        assert!(view.is_last_session(1));
+        assert!(!is_last_session(&view, 0));
+        assert!(is_last_session(&view, 1));
         view.navigate(Movement::Down, &mut history);
         assert_eq!(view.session().unwrap().session.key, first);
         view.top = view.selected;
@@ -716,7 +1092,7 @@ pub(crate) mod tests {
         let Row::Session { annotation, .. } = view.rows[view.selected] else {
             panic!("expected selected session")
         };
-        assert!(view.is_last_session(annotation));
+        assert!(is_last_session(&view, annotation));
         browser
             .repositories
             .get_mut(std::path::Path::new("/repo/.git"))
@@ -727,8 +1103,8 @@ pub(crate) mod tests {
         assert_eq!(view.session().unwrap().session.key, first);
         assert_eq!(view.anchor(), Some(1));
         // Each commit now owns a single session, so both branches terminate.
-        assert!(view.is_last_session(0));
-        assert!(view.is_last_session(1));
+        assert!(is_last_session(&view, 0));
+        assert!(is_last_session(&view, 1));
         browser.sources[0]
             .live
             .insert(first, RuntimeStatus::Unloaded);
@@ -769,8 +1145,8 @@ pub(crate) mod tests {
         let Row::Session { annotation, .. } = view.rows[range.end - 1] else {
             panic!("expected a clipped session group")
         };
-        assert!(!view.is_last_session(annotation));
-        assert!(view.is_last_session(11));
+        assert!(!is_last_session(&view, annotation));
+        assert!(is_last_session(&view, 11));
         view.navigate(Movement::End, &mut history);
         assert_eq!(view.selection, Some(Selection::Commit("older".into())));
         view.navigate(Movement::Up, &mut history);
