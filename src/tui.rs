@@ -693,7 +693,6 @@ fn draw_git_preview(frame: &mut Frame<'_>, area: Rect, view: &View) {
                 }
                 let target = &mut frame.buffer_mut()[(inner.x + x, inner.y + y)];
                 *target = cell.clone();
-                target.set_style(Style::reset().fg(Color::DarkGray));
             }
         }
     } else {
@@ -5363,7 +5362,7 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn git_navigation_retains_gray_snapshot_until_ready() {
+    async fn git_navigation_retains_original_snapshot_until_ready() {
         let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
         select_git_fixture(&mut browser, "/project/.git");
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(180, 40)).unwrap();
@@ -5389,21 +5388,15 @@ mod cleanup_tests {
             assert!(text.contains("Selected commit"));
             assert!(!text.contains("Destination commit"));
             assert!(!text.contains("Loading Git"));
-            let start = buffer
-                .content
-                .windows(8)
-                .position(|cells| {
-                    cells.iter().map(|c| c.symbol()).collect::<String>() == "Selected"
-                })
-                .unwrap();
-            for cell in &buffer.content[start..start + 8] {
-                assert_eq!(cell.fg, Color::DarkGray);
-                assert_eq!(cell.bg, Color::Reset);
-                assert!(
-                    !cell
-                        .modifier
-                        .intersects(Modifier::REVERSED | Modifier::BOLD)
-                );
+            let (_, footer) = browser_footer(Rect::new(0, 0, width, height), &browser, &view);
+            let panels = panel_layout(Rect::new(0, 0, width, height - footer), height, &view, true);
+            let inner = pane_block("Git Worktrees", view.git_focus).inner(panels.git.unwrap());
+            for y in 0..inner.height.min(original.area.height) {
+                for x in 0..inner.width.min(original.area.width) {
+                    // Preserve symbols and all styling, including colored graph
+                    // spans, backgrounds, and the previous selection highlight.
+                    assert_eq!(buffer[(inner.x + x, inner.y + y)], original[(x, y)]);
+                }
             }
             assert_eq!(*view.git_preview.borrow(), Some(original.clone()));
         }
@@ -5460,7 +5453,7 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn gray_preview_preserves_sessions_and_crops_wide_characters() {
+    async fn cached_preview_preserves_sessions_and_crops_wide_characters() {
         let (mut browser, history) = crate::git_sessions::tests::fixture().await;
         crate::git_sessions::tests::add_session(
             &mut browser,

@@ -81,7 +81,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         # New worktree is selected in Folders, and its HEAD is followed.
         t.resize(60, 100)
         t.expect('─ ◇ feature/from-folder')
-        # The old commit text remains visible in gray during navigation. Wait
+        # The old commit text remains visible during navigation. Wait
         # for the destination's HEAD label before interacting with its history.
         t.expect('[HEAD] [◇ feature/from-folder]')
         t.send(b'\x1b[Z\x1b[B')
