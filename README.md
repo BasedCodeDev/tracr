@@ -542,9 +542,11 @@ New terminals keep their own entries until closed; tracr does not infer their
 Codex session identity from timing or directory names.
 
 Each tracr instance owns its terminals. Quitting with open terminals asks before
-closing them, while another instance can continue monitoring. Resuming an identified
-session already owned by another tracr is blocked. Terminals do not persist after
-their owning tracr exits. Inside tmux with its default prefix, press Ctrl+B twice
+closing them. Multiple tracr instances can open the same Codex session, each with
+its own terminal UI and dimensions. Codex provides shared conversation behaviour
+through its built-in shared server; tracr does not synchronise terminal output.
+Local terminal UIs do not persist after their owning tracr exits. Inside tmux with
+its default prefix, press Ctrl+B twice
 to send the background shortcut through to tracr.
 
 Exiting Codex restores the session list and refreshes metadata.
@@ -560,6 +562,17 @@ python tests/fixtures/app-server/inline_check.py target/debug/tracr
 python tests/fixtures/app-server/drawer_check.py target/debug/tracr
 ```
 
+Native shared-session acceptance (disposable Codex home and local scripted model;
+no account credentials or external model inference):
+
+```sh
+python tests/fixtures/app-server/shared_check.py target/debug/tracr /absolute/path/to/codex
+```
+
+Verified with Codex 0.171.0: both UIs receive updates and accept input, use
+independent terminal sizes, and a newly attached UI can resolve an existing
+approval. Closing one Tracr leaves the other UI usable. The optional
+`./scripts/check.sh --codex /absolute/path/to/codex` run includes this check.
 
 ## Checks
 

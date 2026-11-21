@@ -79,6 +79,8 @@ if len(sys.argv) > 1 and sys.argv[1] in ('resume', '--cd'):
                 size = os.get_terminal_size(0)
                 record = home / f'terminal-size-{os.getpid()}.tmp'
                 record.write_text(json.dumps(dict(columns=size.columns, rows=size.lines, pid=os.getpid())))
+                record.replace(home / f'terminal-size-{os.getpid()}.json')
+                record.write_text((home / f'terminal-size-{os.getpid()}.json').read_text())
                 record.replace(home / 'terminal-size.json')
             finally:
                 signal.pthread_sigmask(signal.SIG_SETMASK, previous)
@@ -88,6 +90,8 @@ if len(sys.argv) > 1 and sys.argv[1] in ('resume', '--cd'):
     launch_record.write_text(json.dumps(dict(
         args=sys.argv[1:], cwd=os.getcwd(), home=os.environ['CODEX_HOME'],
         foreground=os.tcgetpgrp(0) == os.getpgrp(), pid=os.getpid())))
+    launch_record.replace(home / f'launch-{os.getpid()}.json')
+    launch_record.write_text((home / f'launch-{os.getpid()}.json').read_text())
     launch_record.replace(home / 'launch.json')
     os.write(1, b'FAKE CODING SESSION\r\n')
     if settings.get('scroll_fixture'):
