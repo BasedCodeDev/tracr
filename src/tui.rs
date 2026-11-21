@@ -2692,16 +2692,29 @@ fn sync_git_details(browser: &Browser, view: &mut View) {
     if let Some(info) = &view.git_details {
         view.git_details_tab = info.selected_tab();
     }
+    // Keep the matching details while the graph itself retains its old preview.
+    if view.git_zoomed && git_preview_pending(browser, view) {
+        return;
+    }
     let selected = view
         .git_zoomed
         .then(|| selected_commit(browser, view))
         .flatten();
     if selected != view.git_details_key {
-        view.git_details = selected.as_ref().map(|(repository, oid)| {
-            crate::commit_info::Dialog::new(repository.clone(), oid.clone())
-                .with_tab(view.git_details_tab)
-        });
+        match (selected.as_ref(), view.git_details.as_mut()) {
+            (Some((repository, oid)), Some(info)) => info.retarget(repository.clone(), oid.clone()),
+            (Some((repository, oid)), None) => {
+                view.git_details = Some(
+                    crate::commit_info::Dialog::new(repository.clone(), oid.clone())
+                        .with_tab(view.git_details_tab),
+                );
+            }
+            (None, _) => view.git_details = None,
+        }
         view.git_details_key = selected;
+    }
+    if view.git_details_key.is_none() {
+        view.git_details = None;
     }
 }
 
@@ -4874,7 +4887,6 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
                 view.git_details_tab = info.selected_tab();
             }
             view.git_details_key = None;
-            view.git_details = None;
             return Action::Refresh;
         }
         Command::Archives => browser.include_archived = !browser.include_archived,
