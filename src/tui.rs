@@ -2041,6 +2041,13 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
     }
     if !view.drawer_open && view.terminals.borrow().active.is_some() {
         entries.retain(|entry| !matches!(entry.0, CyclePane | CyclePaneBack));
+    } else if !view.drawer_open {
+        for entry in &mut entries {
+            if entry.0 == CyclePane {
+                entry.2 = "Tab / ←";
+                entry.3 = "Focus drawer";
+            }
+        }
     } else if view.drawer_open && view.history.present() {
         entries.push((PaneUp, "Navigation", "Alt+Up / Alt+Left", "Focus Folders"));
         entries.push((
@@ -3829,7 +3836,8 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         KeyCode::Char('a') => Command::Archives,
         KeyCode::Char('l') if view.focus == 0 => Command::FolderRight,
         KeyCode::Left | KeyCode::Char('h') if view.focus == 0 => Command::FolderLeft,
-        KeyCode::Left | KeyCode::Backspace if view.focus == 1 => Command::PreviousPane,
+        KeyCode::Left if view.focus == 1 => Command::CyclePane,
+        KeyCode::Backspace if view.focus == 1 => Command::PreviousPane,
         KeyCode::Esc => Command::PreviousPane,
         KeyCode::Up | KeyCode::Char('k') => Command::PreviousItem,
         KeyCode::Down | KeyCode::Char('j') => Command::NextItem,
@@ -6099,7 +6107,7 @@ mod cleanup_tests {
             );
             assert_eq!(view.focus, 1);
         }
-        for code in [KeyCode::Left, KeyCode::Esc, KeyCode::Backspace] {
+        for code in [KeyCode::Esc, KeyCode::Backspace] {
             view.focus = 1;
             handle_key(&mut browser, &mut view, key(code));
             assert_eq!(view.focus, 1);
@@ -6494,12 +6502,13 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
-    async fn tab_returns_inactive_sessions_to_drawer() {
+    async fn tab_and_left_return_inactive_sessions_to_drawer() {
         for count in [0, 2] {
             for (width, height) in [(160, 40), (80, 24)] {
                 for present in [false, true] {
                     for remembered_git in [false, true] {
                         for key in [
+                            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
                             KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
                             KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
                             KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT),
@@ -6516,18 +6525,23 @@ mod cleanup_tests {
                                 Terminal::new(ratatui::backend::TestBackend::new(width, height))
                                     .unwrap();
                             terminal.draw(|f| draw(f, &browser, &view)).unwrap();
-                            assert!(
-                                menu_entries(&browser, &view)
-                                    .iter()
-                                    .any(|entry| entry.command == Command::CyclePane)
-                            );
+                            assert!(menu_entries(&browser, &view).iter().any(
+                                |entry| entry.command == Command::CyclePane
+                                    && entry.shortcut == "Tab / ←"
+                                    && entry.label == "Focus drawer"
+                            ));
                             assert_eq!(handle_key(&mut browser, &mut view, key), Action::Continue);
                             let expected = if present && remembered_git { 2 } else { 0 };
                             assert_eq!(view.context(), expected);
                             assert!(view.drawer_open);
                             terminal.draw(|f| draw(f, &browser, &view)).unwrap();
                             for index in 0..4 {
-                                handle_key(&mut browser, &mut view, key);
+                                let cycle_key = if key.code == KeyCode::Left {
+                                    KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)
+                                } else {
+                                    key
+                                };
+                                handle_key(&mut browser, &mut view, cycle_key);
                                 assert_eq!(
                                     view.context(),
                                     if present && index % 2 == 0 {
@@ -6553,7 +6567,7 @@ mod cleanup_tests {
         let mut browser = Browser::new(vec![]);
         let mut view = View::default();
         view.terminals.borrow_mut().active = Some(1);
-        for code in [KeyCode::Tab, KeyCode::BackTab] {
+        for code in [KeyCode::Tab, KeyCode::BackTab, KeyCode::Left] {
             press(&mut browser, &mut view, code);
             assert!(!view.drawer_open);
             assert_eq!(view.context(), 1);
@@ -6565,6 +6579,9 @@ mod cleanup_tests {
         );
         view.terminals.borrow_mut().active = None;
         view.editing = true;
+        press(&mut browser, &mut view, KeyCode::Left);
+        assert!(!view.drawer_open);
+        assert!(view.editing);
         press(&mut browser, &mut view, KeyCode::Tab);
         assert!(!view.drawer_open);
         assert_ne!(view.search_control, 0);
