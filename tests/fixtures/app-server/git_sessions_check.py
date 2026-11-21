@@ -20,6 +20,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
     def git(*args):
         subprocess.run([real_git, '-C', str(project), *args], env=env, check=True, capture_output=True)
     git('init', '-q')
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'Earlier commit', '-m', 'Earlier details marker')
     git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'Session anchor')
     git('worktree', 'add', '-qb', 'feature', str(linked))
     fake = home / 'fake'
@@ -42,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.expect('Sessions')
         t.resize(40, 119)
         t.send(b'\x1b`')
-        t.expect('└─ Running Task first · codex')
+        t.expect('Running Task first · codex')
         t.send(b'\x1b[1;3C')  # Alt+Right focuses Git from Sessions.
         t.expect_action('Select worktree folder')
         # Zoom uses the same graph, dialogs, and navigation in both layouts.
@@ -50,10 +51,22 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.expect_action('Restore Git panel')
         assert t.line(0).startswith('┏Git Worktrees')
         assert '┏Folders' not in t.text() and '┌Folders' not in t.text()
+        t.expect('Commit information')
+        t.expect('Session anchor')
+        t.send(b'\x1b[F')
+        t.expect('Earlier details marker')
+        t.send(b'\x1b[H')
+        t.wait(lambda: 'Earlier details marker' not in t.text())
+        t.expect('No extended commit message.')
         t.send(b'i')
-        t.expect('Overview')
+        t.wait(lambda: '┏Commit information' in t.line(0))
+        t.send(b'2')
+        t.expect('No file changes in this commit.')
+        t.send(b'3')
+        t.expect('COMMITTER')
         t.send(b'\x1b')
-        t.wait(lambda: 'Commit information' not in t.text())
+        t.wait(lambda: t.line(0).startswith('┏Git Worktrees'))
+        assert 'Commit information' in t.text()
         t.expect_action('Restore Git panel')
         for rows, cols in [(50, 180), (30, 90), (40, 119)]:
             t.resize(rows, cols)
@@ -74,11 +87,12 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.expect_action('Restore Git panel')
         t.send(b'\x1b[B')  # First session beneath the commit.
         t.expect_action('Resume session')
+        t.expect('Select a commit to view details')
         settled = time.monotonic() + 1
         t.wait(lambda: time.monotonic() >= settled)
         count = (home/'git-reads').read_text()
         settings({'type': 'active', 'activeFlags': ['waitingOnUserInput']})
-        t.expect('└─ Input Task first · codex')
+        t.expect('Input Task first · codex')
         t.expect_action('Resume session')
         assert (home/'git-reads').read_text() == count, (count, (home/'git-reads').read_text())
         t.send(b'\r')
@@ -112,7 +126,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.send(b'\x1b[H')  # Select the commit after the live session disappears.
         t.expect_action('Select worktree folder')
         settings({'type': 'idle'})
-        t.expect('└─ Idle Task first · codex')
+        t.expect('Idle Task first · codex')
         t.finish()
         print('Git live sessions, direct resume, disappearance, and cached graph: passed')
     finally:

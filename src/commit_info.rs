@@ -6,7 +6,7 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
@@ -384,6 +384,22 @@ impl Dialog {
             return;
         }
         let inner = crate::modal::shell(frame, "Commit information", 96, 34);
+        self.draw_content(frame, inner, false);
+    }
+
+    pub fn draw_panel(&self, frame: &mut Frame<'_>, inner: Rect) {
+        if inner.width < 32 || inner.height < 14 {
+            frame.render_widget(
+                Paragraph::new("Enlarge terminal to view details.\nEsc history · y copy hash")
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
+                inner,
+            );
+            return;
+        }
+        self.draw_content(frame, inner, true);
+    }
+
+    fn draw_content(&self, frame: &mut Frame<'_>, inner: Rect, embedded: bool) {
         let width = usize::from(inner.width);
         let subject = self.details.as_ref().map_or(
             if self.error.is_some() {
@@ -498,7 +514,11 @@ impl Dialog {
                     lines.push(Line::default());
                     append(
                         &mut lines,
-                        "Close and press i to try again.",
+                        if embedded {
+                            "Press r to retry."
+                        } else {
+                            "Close and press i to try again."
+                        },
                         width,
                         Style::default(),
                     );
@@ -542,26 +562,30 @@ impl Dialog {
             Paragraph::new(status).style(Style::default().fg(Color::Cyan)),
             areas[4],
         );
-        crate::modal::buttons(
-            frame,
-            areas[5],
-            &[
-                crate::modal::Button {
-                    action: Event::Copy,
-                    label: "Copy details",
-                    enabled: self.details.is_some() && self.dialog.copy_task.is_none(),
-                    primary: false,
-                },
-                crate::modal::Button {
-                    action: Event::Close,
-                    label: "Close",
-                    enabled: true,
-                    primary: true,
-                },
-            ],
-            Some(self.dialog.button_focus),
-        );
-        let hints = if width < 45 {
+        if !embedded {
+            crate::modal::buttons(
+                frame,
+                areas[5],
+                &[
+                    crate::modal::Button {
+                        action: Event::Copy,
+                        label: "Copy details",
+                        enabled: self.details.is_some() && self.dialog.copy_task.is_none(),
+                        primary: false,
+                    },
+                    crate::modal::Button {
+                        action: Event::Close,
+                        label: "Close",
+                        enabled: true,
+                        primary: true,
+                    },
+                ],
+                Some(self.dialog.button_focus),
+            );
+        }
+        let hints = if embedded {
+            "1/2/3 tabs · c copy · y hash · Esc history"
+        } else if width < 45 {
             "1/2/3 tabs · c copy · y hash · Esc"
         } else if width >= 78 {
             "←/→ tabs · ↑/↓ scroll · Tab actions · Enter select · c copy · y hash · Esc close"
@@ -692,6 +716,32 @@ mod tests {
             tab: 0,
             scrolls: [0; 3],
             copied_hash: false,
+        }
+    }
+
+    #[test]
+    fn embedded_details_stay_inside_their_panel() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut info = example();
+        for (width, height) in [(160, 40), (100, 24), (70, 18), (20, 8), (2, 1)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let area = Rect::new(width / 2, 0, width - width / 2, height);
+            for tab in 0..3 {
+                info.tab = tab;
+                terminal.draw(|frame| info.draw_panel(frame, area)).unwrap();
+                let buffer = terminal.backend().buffer();
+                for y in 0..height {
+                    for x in 0..width / 2 {
+                        assert_eq!(buffer[(x, y)].symbol(), " ");
+                    }
+                }
+                let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+                assert!(!text.contains("Tab actions"));
+                if area.width >= 45 && area.height >= 14 {
+                    assert!(text.contains("Esc history"));
+                    assert!(text.contains("2 Files"));
+                }
+            }
         }
     }
 

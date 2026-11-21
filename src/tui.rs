@@ -401,6 +401,9 @@ pub struct View {
     pub git_navigation_error: bool,
     pub git_hidden: bool,
     pub git_zoomed: bool,
+    pub git_details: Option<crate::commit_info::Dialog>,
+    pub git_details_key: Option<(std::path::PathBuf, String)>,
+    pub git_details_focused: bool,
     pub folders_hidden: bool,
     pub git_size_limited: bool,
     pub git_watch_error: Option<String>,
@@ -464,6 +467,9 @@ impl Default for View {
             git_navigation_error: false,
             git_hidden: Default::default(),
             git_zoomed: false,
+            git_details: None,
+            git_details_key: None,
+            git_details_focused: false,
             folders_hidden: Default::default(),
             git_size_limited: Default::default(),
             git_watch_error: Default::default(),
@@ -612,6 +618,11 @@ impl View {
         if !self.git_focus {
             self.git_zoomed = false;
         }
+        if !self.git_zoomed {
+            self.git_details = None;
+            self.git_details_key = None;
+            self.git_details_focused = false;
+        }
         self.focus = if self.drawer_open { 0 } else { 1 };
         self.folders_hidden = false;
         self.git_hidden = false;
@@ -710,6 +721,7 @@ struct PanelLayout {
     folders: Option<Rect>,
     sessions: Option<Rect>,
     git: Option<Rect>,
+    details: Option<Rect>,
     graph_visible: bool,
 }
 
@@ -769,7 +781,7 @@ fn cache_git_preview(frame: &mut Frame<'_>, area: Rect, view: &View) {
 }
 
 fn draw_git_preview(frame: &mut Frame<'_>, area: Rect, view: &View) {
-    let block = pane_block("Git Worktrees", view.git_focus);
+    let block = pane_block("Git Worktrees", view.git_focus && !view.git_details_focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if let Some(snapshot) = view.git_preview.borrow().as_ref() {
@@ -818,11 +830,14 @@ fn panel_layout(area: Rect, terminal_height: u16, view: &View, present: bool) ->
         folders: None,
         sessions: None,
         git: None,
+        details: None,
         graph_visible: false,
     };
     if view.git_zoomed && view.drawer_open && view.drawer_git && present {
-        result.git = Some(area);
-        result.graph_visible = area.height >= 4 && area.width >= 12;
+        let halves = Layout::horizontal([Constraint::Ratio(1, 2); 2]).split(area);
+        result.git = Some(halves[0]);
+        result.details = Some(halves[1]);
+        result.graph_visible = halves[0].height >= 4 && halves[0].width >= 12;
         return result;
     }
     if !view.drawer_visible() {
@@ -1491,6 +1506,19 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
         view,
         selected_git_repository(browser).is_some(),
     );
+    if let Some(area) = panels.details {
+        let block = pane_block("Commit information", view.git_details_focused);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        if let Some(info) = &view.git_details {
+            info.draw_panel(frame, inner);
+        } else {
+            frame.render_widget(
+                Paragraph::new("Select a commit to view details").wrap(Wrap { trim: false }),
+                inner,
+            );
+        }
+    }
     let git_area = panels.git;
     let expanded = panels.graph_visible;
     if let Some(git_area) = git_area {
@@ -1503,12 +1531,16 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                         .notice()
                         .unwrap_or_else(|| "Loading Git history…".into()),
                 )
-                .block(pane_block("Git Worktrees", view.git_focus)),
+                .block(pane_block(
+                    "Git Worktrees",
+                    view.git_focus && !view.git_details_focused,
+                )),
                 git_area,
             );
         } else if expanded {
             use crate::git_sessions::Row;
-            let inner = pane_block("Git Worktrees", view.git_focus).inner(git_area);
+            let inner = pane_block("Git Worktrees", view.git_focus && !view.git_details_focused)
+                .inner(git_area);
             let height = usize::from(inner.height);
             view.history.page.set(height.max(1));
             let mut presentation = view.git_sessions.borrow_mut();
@@ -1612,16 +1644,23 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             frame.render_stateful_widget(
                 List::new(items)
                     .block(
-                        git_history_block(git_area, view.git_focus, commits_above, range.start > 0)
-                            .padding(ratatui::widgets::Padding::new(
-                                0,
-                                u16::from(scrolling),
-                                1,
-                                0,
-                            )),
+                        git_history_block(
+                            git_area,
+                            view.git_focus && !view.git_details_focused,
+                            commits_above,
+                            range.start > 0,
+                        )
+                        .padding(ratatui::widgets::Padding::new(
+                            0,
+                            u16::from(scrolling),
+                            1,
+                            0,
+                        )),
                     )
                     .highlight_symbol("> ")
-                    .highlight_style(selection_style(view.context() == 2)),
+                    .highlight_style(selection_style(
+                        view.context() == 2 && !view.git_details_focused,
+                    )),
                 git_area,
                 &mut ListState::default().with_selected(Some(selected)),
             );
@@ -1664,6 +1703,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     }
     let focused_area = match view.context() {
         0 => panels.folders,
+        2 if view.git_details_focused => panels.details,
         2 => panels.git,
         _ => panels.sessions,
     };
@@ -1674,6 +1714,17 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
             view.terminal_focused() && view.terminals.borrow().active.is_some(),
             view.context() == 2 && expanded,
         );
+    }
+    if view.git_zoomed && !view.git_details_focused {
+        if let Some(area) = panels
+            .git
+            .filter(|area| area.width >= 24 && area.height > 0)
+        {
+            frame.render_widget(
+                Paragraph::new(" i Details ").style(Style::default().fg(Color::Cyan)),
+                Rect::new(area.x + 1, area.bottom() - 1, 11, 1),
+            );
+        }
     }
     if footer_height > 0 {
         frame.render_widget(Paragraph::new(message), layout[1]);
@@ -2184,6 +2235,7 @@ enum Command {
     BackgroundTerminal,
     Info,
     CommitInfo,
+    CommitDetailsKey(KeyCode),
     Relink,
     MoveFolder,
     Recover,
@@ -2371,7 +2423,18 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             },
         ));
         if !view.git_hidden && !view.git_size_limited {
-            entries.push((CommitInfo, "Git", "i", "Commit information"));
+            entries.push((
+                CommitInfo,
+                "Git",
+                "i",
+                if view.git_details_focused {
+                    "Focus Git history"
+                } else if view.git_zoomed {
+                    "Focus commit details"
+                } else {
+                    "Commit information"
+                },
+            ));
             entries.push((
                 GitSelectWorktree,
                 "Git",
@@ -2424,12 +2487,36 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             } else {
                 "Esc"
             },
-            if view.git_zoomed {
+            if view.git_details_focused {
+                "Focus Git history"
+            } else if view.git_zoomed {
                 "Restore Git panel"
             } else {
                 "Close drawer"
             },
         ));
+    }
+    if view.git_details_focused {
+        entries.retain(|entry| {
+            !matches!(
+                entry.0,
+                GitUp | GitDown | GitLeft | GitRight | GitPageUp | GitPageDown | GitHome | GitEnd
+            )
+        });
+        for (code, shortcut, label) in [
+            (KeyCode::Left, "←", "Previous details tab"),
+            (KeyCode::Right, "→", "Next details tab"),
+            (KeyCode::Up, "↑ / k", "Scroll details up"),
+            (KeyCode::Down, "↓ / j", "Scroll details down"),
+            (KeyCode::PageUp, "PageUp", "Scroll details page up"),
+            (KeyCode::PageDown, "PageDown", "Scroll details page down"),
+            (KeyCode::Home, "Home", "Start of details"),
+            (KeyCode::End, "End", "End of details"),
+            (KeyCode::Char('c'), "c", "Copy commit details"),
+            (KeyCode::Char('y'), "y", "Copy commit hash"),
+        ] {
+            entries.push((CommitDetailsKey(code), "Commit details", shortcut, label));
+        }
     }
     entries.push((
         ToggleDrawer,
@@ -2564,6 +2651,22 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
         }
     });
     entries
+}
+
+fn sync_git_details(browser: &Browser, view: &mut View) {
+    let selected = view
+        .git_zoomed
+        .then(|| selected_commit(browser, view))
+        .flatten();
+    if selected != view.git_details_key {
+        view.git_details = selected.as_ref().map(|(repository, oid)| {
+            crate::commit_info::Dialog::new(repository.clone(), oid.clone())
+        });
+        view.git_details_key = selected;
+    }
+    if view.git_details.is_none() {
+        view.git_details_focused = false;
+    }
 }
 
 fn selected_commit(browser: &Browser, view: &View) -> Option<(std::path::PathBuf, String)> {
@@ -4331,6 +4434,36 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         }
         return Action::Continue;
     }
+    if view.git_zoomed && view.git_details_focused && key.modifiers == KeyModifiers::NONE {
+        if matches!(
+            key.code,
+            KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('i')
+        ) {
+            if key.kind == KeyEventKind::Press {
+                view.git_details_focused = false;
+            }
+            return Action::Continue;
+        }
+        if matches!(
+            key.code,
+            KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::PageUp
+                | KeyCode::PageDown
+                | KeyCode::Home
+                | KeyCode::End
+                | KeyCode::Char('1' | '2' | '3' | 'j' | 'k' | 'c' | 'y')
+        ) {
+            if let Some(info) = view.git_details.as_mut() {
+                if matches!(info.key(key), crate::error_dialog::Event::Copy) {
+                    info.copy_report();
+                }
+            }
+            return Action::Continue;
+        }
+    }
     if view.git_zoomed
         && key.modifiers == KeyModifiers::NONE
         && matches!(key.code, KeyCode::Esc | KeyCode::Backspace)
@@ -4591,7 +4724,9 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
         }
         Command::GitReturn => {
-            if view.git_zoomed {
+            if view.git_details_focused {
+                view.git_details_focused = false;
+            } else if view.git_zoomed {
                 view.git_zoomed = false;
             } else if view.drawer_open {
                 view.toggle_drawer();
@@ -4628,9 +4763,24 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
         Command::Help => {
             open_help(browser, view);
         }
+        Command::CommitDetailsKey(code) => {
+            if let Some(info) = view.git_details.as_mut() {
+                if matches!(
+                    info.key(KeyEvent::new(code, KeyModifiers::NONE)),
+                    crate::error_dialog::Event::Copy
+                ) {
+                    info.copy_report();
+                }
+            }
+        }
         Command::CommitInfo => {
             if let Some((repository, oid)) = selected_commit(browser, view) {
-                view.commit_info = Some(crate::commit_info::Dialog::new(repository, oid));
+                if view.git_zoomed {
+                    sync_git_details(browser, view);
+                    view.git_details_focused = !view.git_details_focused;
+                } else {
+                    view.commit_info = Some(crate::commit_info::Dialog::new(repository, oid));
+                }
             } else {
                 view.message = Some("Select a visible Git commit first.".into());
             }
@@ -4674,7 +4824,11 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             view.search_query.clear();
             view.search_selected = None;
         }
-        Command::Refresh => return Action::Refresh,
+        Command::Refresh => {
+            view.git_details_key = None;
+            view.git_details = None;
+            return Action::Refresh;
+        }
         Command::Archives => browser.include_archived = !browser.include_archived,
         Command::CyclePane | Command::CyclePaneBack => {
             if view.drawer_open {
@@ -5043,7 +5197,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                 || view.hidden_dialogs.info.as_ref().is_some_and(|i| i.dialog.copy_task.is_some());
             let hidden_tick = hidden_busy && now >= modal_deadline;
             if hidden_tick { modal_deadline = now + Duration::from_millis(100); }
-            let activity = view.discard.as_ref().is_some_and(|modal| modal.ready()) || view.folder_navigation.ready(now, input_waiting) || hidden_tick || view.commit_info.as_ref().is_some_and(|info| info.ready()) || reload_requested || view.worktree_create.as_ref().is_some_and(|modal| modal.ready()) || resized || (!defer_git && (candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll())) || copy_ready || picker_ready || modal_timer
+            let activity = view.discard.as_ref().is_some_and(|modal| modal.ready()) || view.folder_navigation.ready(now, input_waiting) || hidden_tick || view.commit_info.as_ref().is_some_and(|info| info.ready()) || view.git_details.as_ref().is_some_and(|info| info.ready()) || reload_requested || view.worktree_create.as_ref().is_some_and(|modal| modal.ready()) || resized || (!defer_git && (candidates_dirty || git_discovery.needs_poll() || view.history.needs_poll())) || copy_ready || picker_ready || modal_timer
                 || pending[usize::from(view.dialog_area)].as_ref().is_some_and(|p| p.task.is_finished())
                 || relink_task[usize::from(view.dialog_area)].as_ref().is_some_and(|task| task.is_finished()) || folder_task[usize::from(view.dialog_area)].as_ref().is_some_and(|task| task.is_finished())
                 || !relink_rx[usize::from(view.dialog_area)].is_empty() || !folder_rx[usize::from(view.dialog_area)].is_empty()
@@ -5322,6 +5476,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             view.select_dialog_area(visible_area);
             view.normalize_focus();
             sync_terminal_view(&browser, &view);
+            sync_git_details(&browser, &mut view);
+            if let Some(info) = view.git_details.as_mut() { info.tick().await; }
             let size = terminal.size()?;
             view.folder_rows_snapshot = Some(std::rc::Rc::new(browser.folder_rows()));
             terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame, &browser); })?;
@@ -6094,7 +6250,8 @@ mod cleanup_tests {
             assert!(!text.contains("Loading Git"));
             let (_, footer) = browser_footer(Rect::new(0, 0, width, height), &browser, &view);
             let panels = panel_layout(Rect::new(0, 0, width, height - footer), height, &view, true);
-            let inner = pane_block("Git Worktrees", view.git_focus).inner(panels.git.unwrap());
+            let inner = pane_block("Git Worktrees", view.git_focus && !view.git_details_focused)
+                .inner(panels.git.unwrap());
             for y in 0..inner.height.min(original.area.height) {
                 for x in 0..inner.width.min(original.area.width) {
                     // Preserve symbols and all styling, including colored graph
@@ -7132,6 +7289,62 @@ mod cleanup_tests {
     }
 
     #[tokio::test]
+    async fn zoom_details_follow_selection_and_keep_focus_local() {
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
+        view.git_zoomed = true;
+        sync_git_details(&browser, &mut view);
+        assert!(view.git_details.is_some());
+        assert!(!view.modal_open());
+        view.git_details.as_mut().unwrap().dialog.scroll = 5;
+        sync_git_details(&browser, &mut view);
+        assert_eq!(view.git_details.as_ref().unwrap().dialog.scroll, 5);
+        press(&mut browser, &mut view, KeyCode::Char('i'));
+        assert!(view.git_details_focused);
+        assert!(view.commit_info.is_none());
+        view.git_details
+            .as_mut()
+            .unwrap()
+            .dialog
+            .scroll_limit
+            .set(100);
+        press(&mut browser, &mut view, KeyCode::Down);
+        assert_eq!(view.git_details.as_ref().unwrap().dialog.scroll, 6);
+        assert_eq!(view.history.selected, 0);
+        press(&mut browser, &mut view, KeyCode::Char('?'));
+        assert!(view.help);
+        press(&mut browser, &mut view, KeyCode::Esc);
+        assert!(view.git_details_focused);
+        for code in [KeyCode::Esc, KeyCode::Backspace, KeyCode::Char('i')] {
+            press(&mut browser, &mut view, code);
+            assert!(!view.git_details_focused);
+            assert!(view.git_zoomed);
+            press(&mut browser, &mut view, KeyCode::Char('i'));
+        }
+        view.history.rows[0].oid = Some("new-oid".into());
+        sync_git_details(&browser, &mut view);
+        assert_eq!(view.git_details_key.as_ref().unwrap().1, "new-oid");
+        assert_eq!(view.git_details.as_ref().unwrap().dialog.scroll, 0);
+        // Old asynchronous completions cannot replace a new selection's dialog.
+        tokio::task::yield_now().await;
+        view.git_details.as_mut().unwrap().tick().await;
+        assert_eq!(view.git_details_key.as_ref().unwrap().1, "new-oid");
+        handle_key(
+            &mut browser,
+            &mut view,
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT),
+        );
+        assert!(!view.git_zoomed);
+        assert!(view.git_details.is_none());
+        assert!(!view.git_details_focused);
+        view.git_zoomed = true;
+        sync_git_details(&browser, &mut view);
+        view.history.rows.clear();
+        sync_git_details(&browser, &mut view);
+        assert!(view.git_details.is_none());
+        assert!(view.git_details_key.is_none());
+    }
+
+    #[tokio::test]
     async fn commit_info_shortcut_opens_modal_and_preserves_selection_on_close() {
         let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
         assert!(
@@ -8137,24 +8350,23 @@ mod cleanup_tests {
 
     #[tokio::test]
     async fn git_zoom_geometry_survives_resize_and_restores_panels() {
-        let browser = Browser::new(vec![]);
-        let mut view = View::default();
-        view.history
-            .tick(Some("/synthetic/repo".into()), 0, false, 1)
-            .await;
-        view.toggle_drawer();
-        view.drawer_git = true;
-        view.normalize_focus();
+        let (mut browser, mut view) = navigation_fixture(&["selected-oid"]).await;
+        select_git_fixture(&mut browser, "/project/.git");
         for (width, height) in [(240, 80), (119, 30), (40, 10), (12, 4), (8, 3)] {
             let area = Rect::new(0, 0, width, height - 2);
             view.git_zoomed = false;
             let normal = panel_layout(area, height, &view, true);
             view.git_zoomed = true;
             let zoomed = panel_layout(area, height, &view, true);
-            assert_eq!(zoomed.git, Some(area));
+            let left = zoomed.git.unwrap();
+            let right = zoomed.details.unwrap();
+            assert_eq!(left.x, area.x);
+            assert_eq!(left.right(), right.x);
+            assert_eq!(right.right(), area.right());
+            assert!(left.width.abs_diff(right.width) <= 1);
             assert!(zoomed.folders.is_none());
             assert!(zoomed.sessions.is_none());
-            assert_eq!(zoomed.graph_visible, width >= 12 && area.height >= 4);
+            assert_eq!(zoomed.graph_visible, left.width >= 12 && area.height >= 4);
             let mut terminal =
                 Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
