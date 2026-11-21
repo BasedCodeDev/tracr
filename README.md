@@ -811,7 +811,7 @@ worktrees are not converted or repaired by creating a new one.
 
 ## Discard a Git worktree and its conversations
 
-Select a linked feature worktree in **Folders** and press **d**, or choose
+Select a linked feature worktree in **Folders** and press **Delete**, or choose
 **Discard worktree…** from `?`. The warning dialog previews local changes,
 unmerged commits, and saved Codex conversations, including archived sessions
 and side chats. Scroll to review the list, use Tab to focus the confirmation

@@ -160,7 +160,7 @@ def check_fake(root, binary):
             else:
                 incident['chats'][side[0]].update(change)
             store.write_text(json.dumps(incident))
-            t.send(b'd')
+            t.send(b'\x1b[3~')
             t.expect(expected)
             t.send(b'\x1b')
             t.wait(lambda: expected not in t.text())
@@ -179,7 +179,7 @@ def check_fake(root, binary):
             'commit', '--allow-empty', '-qm', 'Nested history', cwd=nested)
 
         def expect_blocked(message):
-            t.send(b'd')
+            t.send(b'\x1b[3~')
             t.expect(message)
             t.send(b'\x1b')
             t.wait(lambda: message not in t.text())
@@ -219,7 +219,7 @@ def check_fake(root, binary):
         git('update-index', '--force-remove', 'submodule', cwd=nested)
 
         t.resize(40, 120)
-        t.send(b'd')
+        t.send(b'\x1b[3~')
         t.expect('Nested repositories and their Git history will be permanently deleted')
         t.expect('Bare repository .tmp/real3/paginated/codex/.tmp/git-fixture')
         t.expect('Repository nested')
@@ -242,7 +242,7 @@ def check_fake(root, binary):
         assert (bare / 'HEAD').is_file() and (nested / '.git').is_dir()
         t.resize(40, 120)
 
-        t.send(b'd')
+        t.send(b'\x1b[3~')
         t.expect('Type the branch name')
         t.send(b'\x1b[6~\x1b[6~')
         t.expect('3 Codex conversations remaining')
@@ -253,7 +253,7 @@ def check_fake(root, binary):
         t.send(b'\x1b')
         t.wait(lambda: 'Discard stopped' not in t.text())
 
-        t.send(b'd')
+        t.send(b'\x1b[3~')
         t.expect('Type the branch name')
         t.send(b'\x1b[6~\x1b[6~')
         t.expect('3 Codex conversations remaining')
@@ -353,7 +353,7 @@ def check_native(root, binary, codex):
     try:
         t.expect('[◇ feature *]')
         t.expect_action('Discard worktree')
-        t.send(b'd')
+        t.send(b'\x1b[3~')
         t.expect('3 Codex conversations remaining')
         confirm(t)
         t.expect('Worktree, local branch, and conversations discarded')

@@ -2340,7 +2340,7 @@ fn menu_entries(browser: &Browser, view: &View) -> Vec<MenuEntry> {
             && !view.discard_recovery_available
             && crate::worktree_discard_ui::unavailable(browser).is_none()
         {
-            entries.push((DiscardWorktree, "Folders", "d", "Discard worktree…"));
+            entries.push((DiscardWorktree, "Folders", "Delete", "Discard worktree…"));
         }
     }
     if view.discard_recovery_available && view.context() != 2 {
@@ -4366,7 +4366,11 @@ fn handle_area_key(browser: &mut Browser, view: &mut View, key: KeyEvent) -> Act
         KeyCode::Char('b') if view.focus == 0 => Command::FolderToggle,
         KeyCode::Char('m') if view.focus == 0 => Command::MoveFolder,
         KeyCode::Char('w') if view.focus == 0 => Command::CreateWorktree,
-        KeyCode::Char('d') if view.focus == 0 => Command::DiscardWorktree,
+        KeyCode::Delete
+            if view.focus == 0 && key.kind == KeyEventKind::Press && key.modifiers.is_empty() =>
+        {
+            Command::DiscardWorktree
+        }
         KeyCode::Char('D') if view.discard_recovery_available => Command::RecoverDiscard,
         KeyCode::Char('u') => Command::Recover,
         KeyCode::Char('a') => Command::Archives,
