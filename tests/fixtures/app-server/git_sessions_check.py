@@ -39,6 +39,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
     wrapper.chmod(0o755)
     env.update(PATH=str(wrapper_dir) + os.pathsep + env['PATH'], REAL_GIT=real_git, GIT_READ_LOG=str(home/'git-reads'))
     t = Terminal([binary, '--codex-home', tmp, '--codex-bin', str(fake), str(linked)], env)
+    def details_show_subject(subject):
+        cols = t.dimensions[1]
+        start = t.line(0, 0, cols).find('Commit information')
+        return start >= 0 and subject in t.line(2, start, cols)
+
     try:
         t.expect('Sessions')
         t.resize(40, 119)
@@ -63,12 +68,12 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.send(b'2')
         t.expect('No file changes in this commit.')
         t.send(b'\t\x1b[F')
-        t.wait(lambda: 'Earlier commit' in t.line(2, 60, 119))
+        t.wait(lambda: details_show_subject('Earlier commit'))
         t.expect('No file changes in this commit.')
         t.send(b'\t3')
         t.expect('COMMITTER')
         t.send(b'\t\x1b[H')
-        t.wait(lambda: 'Session anchor' in t.line(2, 60, 119))
+        t.wait(lambda: details_show_subject('Session anchor'))
         t.expect('COMMITTER')
         t.wait(lambda: t.line(0).startswith('┏Git Worktrees'))
         assert 'Commit information' in t.text()

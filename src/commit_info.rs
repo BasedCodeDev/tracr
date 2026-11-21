@@ -629,7 +629,11 @@ impl Dialog {
             );
         }
         let hints = if embedded {
-            "1/2/3 tabs · c copy · y hash · Esc history"
+            if width < 42 {
+                "1–3 tabs · c copy · y hash · Esc"
+            } else {
+                "1/2/3 tabs · c copy · y hash · Esc history"
+            }
         } else if width < 45 {
             "1/2/3 tabs · c copy · y hash · Esc"
         } else if width >= 78 {
