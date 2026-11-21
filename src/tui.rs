@@ -1260,7 +1260,13 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     view.layout_mode
         .set(LayoutMode::for_size(area.width, area.height));
     if !view.drawer_open && view.terminals.borrow().active.is_some() && !view.modal_open() {
-        view.terminals.borrow_mut().draw(frame, area, true, false);
+        let label =
+            view.terminals.borrow().active_folder().and_then(|folder| {
+                crate::inline_terminal::WorktreeLabel::for_folder(browser, &folder)
+            });
+        view.terminals
+            .borrow_mut()
+            .draw_with_worktree(frame, area, true, false, label.as_ref());
         let mut reminder = view.drawer_reminder.get();
         let visible = reminder.visible(
             std::time::Instant::now(),
@@ -2981,11 +2987,15 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
         }
         1 => {
             let drawer_visible = view.drawer_visible();
-            if view.terminals.borrow_mut().draw(
+            let label = view.terminals.borrow().active_folder().and_then(|folder| {
+                crate::inline_terminal::WorktreeLabel::for_folder(browser, &folder)
+            });
+            if view.terminals.borrow_mut().draw_with_worktree(
                 frame,
                 area,
                 view.terminal_focused(),
                 drawer_visible,
+                label.as_ref(),
             ) {
                 return;
             }
@@ -4407,6 +4417,8 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     let mut git_discovery = crate::git_discovery::Controller::default();
     let mut status_monitor = crate::worktree_status::Monitor::default();
     let mut git_watch = crate::git_watch::Monitor::default();
+    let mut terminal_git_watch = crate::git_watch::Monitor::default();
+    let mut terminal_folder = None;
     let mut history_folder = None;
     let mut candidates_dirty = true;
     let mut candidate_context = None;
@@ -4463,14 +4475,27 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             }
             if status_monitor.tick(&mut browser).await { idle.wake(); }
             let now = std::time::Instant::now();
-            if let Some(change) = git_watch.poll(now, git_discovery.pending() || view.history.loading()) {
-                git_watch.reconcile();
-                if let Some(id) = git_watch.repository() {
-                    git_discovery.refresh_repository(id, change == crate::git_watch::Change::Topology);
-                    let retry_paths = browser.invalidate_git_repository(id, change == crate::git_watch::Change::Topology);
-                    git_discovery.forget(&retry_paths);
-                    view.history.request_refresh();
-                    idle.wake();
+            let active_folder = view.terminals.borrow().active_folder();
+            if terminal_folder != active_folder {
+                terminal_folder = active_folder;
+                candidates_dirty = true;
+                idle.wake();
+            }
+            let terminal_repository = terminal_folder.as_ref().and_then(|folder| browser.ownership.get(folder)).and_then(|record| record.effective()).and_then(|outcome| match outcome {
+                crate::git_discovery::Outcome::Repository { repository, .. } => Some(repository.common_dir.clone()),
+                _ => None,
+            });
+            terminal_git_watch.context(terminal_repository.filter(|id| git_watch.repository() != Some(id)), browser.git_generation, terminal_folder.is_some());
+            for watcher in [&mut git_watch, &mut terminal_git_watch] {
+                if let Some(change) = watcher.poll(now, git_discovery.pending() || view.history.loading()) {
+                    watcher.reconcile();
+                    if let Some(id) = watcher.repository() {
+                        git_discovery.refresh_repository(id, change == crate::git_watch::Change::Topology);
+                        let retry_paths = browser.invalidate_git_repository(id, change == crate::git_watch::Change::Topology);
+                        git_discovery.forget(&retry_paths);
+                        view.history.request_refresh();
+                        idle.wake();
+                    }
                 }
             }
             if view.git_watch_error != git_watch.error { view.git_watch_error = git_watch.error.clone(); idle.wake(); }
@@ -4499,6 +4524,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             let context_changed = candidate_context.as_ref().is_none_or(|(generation, folder, expanded, archived)| *generation != browser.git_generation || folder != &browser.folder || expanded != &browser.expanded || *archived != browser.include_archived);
             if candidates_dirty || context_changed {
                 let mut candidates = Vec::new();
+                candidates.extend(terminal_folder.iter().cloned());
                 if let FolderFilter::Path(path) = &browser.folder { candidates.push(path.clone()); }
                 candidates.extend(browser.folder_rows().into_iter().filter_map(|r| match r.filter { FolderFilter::Path(p) => Some(p), _ => None }));
                 candidates.extend(browser.all().into_iter().filter_map(|s| s.cwd));
@@ -4750,7 +4776,9 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if let Some(deadline) = idle.deadline { wait = wait.min(deadline.saturating_duration_since(std::time::Instant::now())); }
             if let Some(deadline) = view.folder_navigation.deadline { wait = wait.min(deadline.saturating_duration_since(std::time::Instant::now())); }
             if !git_discovery.pending() && !view.history.loading() {
-                if let Some(deadline) = git_watch.deadline() { wait = wait.min(deadline.saturating_duration_since(std::time::Instant::now())); }
+                for watcher in [&git_watch, &terminal_git_watch] {
+                    if let Some(deadline) = watcher.deadline() { wait = wait.min(deadline.saturating_duration_since(std::time::Instant::now())); }
+                }
             }
             guard.enhanced(input_reader.enhanced())?;
             if let Err(error) = view.terminals.borrow_mut().sync_focus(outer_focused && view.terminal_focused()) { view.message = Some(error.to_string()); }
@@ -5053,6 +5081,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
     .await;
     view.terminals.get_mut().shutdown().await;
     git_watch.stop();
+    terminal_git_watch.stop();
     view.history.shutdown().await;
     status_monitor.shutdown().await;
     git_discovery.shutdown().await;
