@@ -492,9 +492,9 @@ when coding owns input. Tracr dialogs retain their own Tab navigation.
 In Folders, **Alt+Z** zooms into the selected folder as the tree root, hiding ancestors
 and unrelated branches. Its descendants and displayed worktrees remain navigable,
 including worktrees outside that directory. Search is restricted to this context;
-the search dialog and footer show the focused path. Press Alt+Z in Folders again
-to clear focus without changing the current selection. Navigation outside the
-context through another panel clears focus with a notice.
+the search dialog and Folders title show the focused path. Press Alt+Z in Folders
+again to clear focus without changing the current selection. Navigation outside
+the context through another panel clears focus with a notice.
 
 Focus is remembered separately for each launch folder (the explicit path, or the
 current directory for plain `tracr`). A new explicit launch path starts focused

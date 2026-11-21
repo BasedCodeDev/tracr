@@ -2101,8 +2101,11 @@ async fn focused_folder_ui_shows_scope_and_blocks_navigation_above_root() {
             .map(|c| c.symbol())
             .collect::<String>()
     };
-    assert!(text(&terminal).contains("Folders · Focused"));
-    assert!(text(&terminal).contains("Focused: /focused/project"));
+    assert!(text(&terminal).contains("Folders · /focused/project"));
+    assert!(!text(&terminal).contains("Alt+Z"));
+    let mut narrow = Terminal::new(TestBackend::new(20, 12)).unwrap();
+    narrow.draw(|frame| draw(frame, &browser, &view)).unwrap();
+    assert!(text(&narrow).contains("Folders · …project"));
     handle_key(
         &mut browser,
         &mut view,
@@ -2128,4 +2131,6 @@ async fn focused_folder_ui_shows_scope_and_blocks_navigation_above_root() {
         KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT),
     );
     assert!(browser.focus_root.is_none());
+    terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+    assert!(!text(&terminal).contains("Folders ·"));
 }
