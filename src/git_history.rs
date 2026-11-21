@@ -484,7 +484,7 @@ impl History {
         spans
     }
 
-    fn reference_label(
+    pub(crate) fn reference_label(
         &self,
         label: &crate::git::RefLabel,
         activity: Option<Color>,
@@ -533,34 +533,33 @@ impl History {
         Line::from(spans)
     }
 
-    pub(crate) fn reference_lines(
-        &self,
-        oid: &str,
-        width: usize,
-        activity_color: impl Fn(&str) -> Option<Color>,
-    ) -> Vec<Line<'static>> {
+    pub(crate) fn primary_branch_rank(label: &crate::git::RefLabel) -> Option<u8> {
         use crate::git::RefKind;
 
-        let Some(labels) = self.references.get(oid) else {
-            return Vec::new();
-        };
-        let mut labels: Vec<_> = labels.iter().collect();
-        labels.sort_by_key(|label| match (&label.kind, label.name.as_str()) {
-            (RefKind::Local, "main") => 0,
-            (RefKind::Local, "master") => 1,
-            _ => 2,
-        });
+        match (&label.kind, label.name.as_str()) {
+            (RefKind::Local, "main") => Some(0),
+            (RefKind::Local, "master") => Some(1),
+            _ => None,
+        }
+    }
 
+    pub(crate) fn reference_labels(&self, oid: &str) -> Vec<&crate::git::RefLabel> {
+        let mut labels: Vec<_> = self.references.get(oid).into_iter().flatten().collect();
+        labels.sort_by_key(|label| Self::primary_branch_rank(label).unwrap_or(2));
+        labels
+    }
+
+    pub(crate) fn wrap_reference_labels(
+        &self,
+        width: usize,
+        labels: impl IntoIterator<Item = Line<'static>>,
+    ) -> Vec<Line<'static>> {
         // Leave room to display wide graphemes when the graph itself needs horizontal scrolling.
         let capacity = width.saturating_sub(self.graph_width + 2).max(2);
         let mut lines = Vec::new();
         let mut line = Line::default();
         let mut used = 0;
         for label in labels {
-            let activity = (label.kind == RefKind::Local)
-                .then(|| activity_color(&label.name))
-                .flatten();
-            let label = self.reference_label(label, activity);
             let width = label.width();
             if used > 0 && used + 1 + width > capacity {
                 lines.push(std::mem::take(&mut line));
@@ -601,6 +600,16 @@ impl History {
             lines.push(line);
         }
         lines
+    }
+
+    #[cfg(test)]
+    fn reference_lines(&self, oid: &str, width: usize) -> Vec<Line<'static>> {
+        self.wrap_reference_labels(
+            width,
+            self.reference_labels(oid)
+                .into_iter()
+                .map(|label| self.reference_label(label, None)),
+        )
     }
 
     pub(crate) fn reference_line_width(&self, line: &Line<'_>) -> usize {
@@ -1401,7 +1410,7 @@ mod tests {
         h.linked_branches.insert("refs/heads/main".into());
         h.dirty_branches.insert("refs/heads/main".into());
         let spans = h
-            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200, |_| None)
+            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
             .remove(0)
             .spans;
         assert!(
@@ -2220,7 +2229,7 @@ mod tests {
             ],
         );
         let refs = |h: &History| {
-            h.reference_lines(h.rows[0].oid.as_deref().unwrap(), 200, |_| None)
+            h.reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
                 .remove(0)
         };
         let original_width = refs(&h).width();
@@ -2234,7 +2243,7 @@ mod tests {
             )
         );
         let spans = h
-            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200, |_| None)
+            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
             .remove(0)
             .spans;
         assert!(
@@ -2291,7 +2300,7 @@ mod tests {
             }],
         };
         let refs = |h: &History| {
-            h.reference_lines(h.rows[0].oid.as_deref().unwrap(), 200, |_| None)
+            h.reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
                 .remove(0)
         };
         let clean_width = refs(&h).width();
@@ -2304,7 +2313,7 @@ mod tests {
         )]);
         h.set_status(Some(&repository), &statuses);
         let spans = h
-            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200, |_| None)
+            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
             .remove(0)
             .spans;
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
@@ -2346,7 +2355,7 @@ mod tests {
             ),
         ]));
         let lines = |oid| {
-            h.reference_lines(oid, 17, |_| None)
+            h.reference_lines(oid, 17)
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
@@ -2369,7 +2378,7 @@ mod tests {
         use crate::git::{RefKind, RefLabel};
         let mut h = History::default();
         h.graph_width = 3;
-        assert!(h.reference_lines("commit", 20, |_| None).is_empty());
+        assert!(h.reference_lines("commit", 20).is_empty());
         let long_name = "long/界e\u{301}👩‍💻-branch";
         h.set_references(std::collections::BTreeMap::from([(
             "commit".into(),
@@ -2381,7 +2390,7 @@ mod tests {
                 })
                 .collect(),
         )]));
-        let lines = h.reference_lines("commit", 13, |_| None);
+        let lines = h.reference_lines("commit", 13);
         let contents: Vec<_> = lines.iter().map(ToString::to_string).collect();
         assert_eq!(contents.first().unwrap(), "[a] [b]");
         assert_eq!(contents[1..].concat(), format!("[{long_name}][c]"));
@@ -2424,7 +2433,7 @@ mod tests {
             .collect();
         assert!(text.contains("[HEAD] wide 界 text"));
         let spans = h
-            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200, |_| None)
+            .reference_lines(h.rows[0].oid.as_deref().unwrap(), 200)
             .remove(0)
             .spans;
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();

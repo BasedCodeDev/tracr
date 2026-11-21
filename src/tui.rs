@@ -1174,6 +1174,7 @@ fn git_session_spans(
     connector: Option<usize>,
     annotation: &crate::git_sessions::Annotation,
     last: bool,
+    grouped: bool,
     name_width: usize,
 ) -> Vec<Span<'static>> {
     let mut spans = view.history.session_spans(anchor, connector);
@@ -1181,6 +1182,11 @@ fn git_session_spans(
     // so names stay aligned as live statuses change.
     let status = git_session_status(annotation.status);
     let status_width: usize = 8;
+    let connector = if last { " └─ " } else { " ├─ " };
+    let connector_style = Style::default().fg(Color::White);
+    if grouped {
+        spans.push(Span::styled(connector.trim_start(), connector_style));
+    }
     spans.push(Span::raw(" ".repeat(
         status_width.saturating_sub(unicode_width::UnicodeWidthStr::width(status)),
     )));
@@ -1189,10 +1195,11 @@ fn git_session_spans(
         activity_color(annotation.status)
             .map_or(Style::default(), |color| Style::default().fg(color)),
     ));
-    spans.push(Span::styled(
-        if last { " └─ " } else { " ├─ " },
-        Style::default().fg(Color::White),
-    ));
+    if grouped {
+        spans.push(Span::raw(" "));
+    } else {
+        spans.push(Span::styled(connector, connector_style));
+    }
     let title = safe_text(&annotation.session.title);
     let padding = name_width.saturating_sub(unicode_width::UnicodeWidthStr::width(title.as_str()));
     spans.push(Span::styled(
@@ -1204,7 +1211,7 @@ fn git_session_spans(
         " · {}",
         safe_text(&annotation.session.key.provider.0)
     )));
-    if let Some(label) = &annotation.label {
+    if let Some(label) = annotation.label.as_ref().filter(|_| !grouped) {
         spans.push(Span::styled(
             format!(" · {}", safe_text(label)),
             Style::default().fg(Color::DarkGray),
@@ -1328,13 +1335,16 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                         anchor,
                         annotation,
                         connector,
+                        heading,
+                        last,
                     } => Some(
                         git_session_spans(
                             view,
                             *anchor,
                             *connector,
                             &presentation.annotations[*annotation],
-                            presentation.is_last_session(*annotation),
+                            *last,
+                            heading.is_some(),
                             name_width,
                         )
                         .iter()
@@ -1366,12 +1376,15 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
                             anchor,
                             annotation,
                             connector,
+                            heading,
+                            last,
                         } => git_session_spans(
                             view,
                             *anchor,
                             *connector,
                             &presentation.annotations[*annotation],
-                            presentation.is_last_session(*annotation),
+                            *last,
+                            heading.is_some(),
                             name_width,
                         ),
                     };
@@ -5955,7 +5968,7 @@ mod cleanup_tests {
             },
         ] {
             annotation.status = status;
-            let spans = git_session_spans(&view, 0, None, &annotation, true, 0);
+            let spans = git_session_spans(&view, 0, None, &annotation, true, false, 0);
             assert_eq!(
                 spans
                     .iter()
@@ -5980,10 +5993,11 @@ mod cleanup_tests {
                 _ => "Input",
             };
             assert!(line[..title_start].ends_with(&format!("{expected:>8} └─ ")));
-            let continuing: String = git_session_spans(&view, 0, None, &annotation, false, 0)
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect();
+            let continuing: String =
+                git_session_spans(&view, 0, None, &annotation, false, false, 0)
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect();
             assert_eq!(continuing, line.replace(" └─ ", " ├─ "));
             let prefix: String = view
                 .history
@@ -6038,6 +6052,7 @@ mod cleanup_tests {
 
     #[tokio::test]
     async fn git_session_enter_resumes_selected_session_in_one_step() {
+        use crate::git::{RefKind, RefLabel};
         use crate::git_sessions::tests::{add_session, fixture};
         let cwd = tempfile::tempdir().unwrap();
         for status in [
@@ -6048,7 +6063,14 @@ mod cleanup_tests {
                 input: true,
             },
         ] {
-            let (mut browser, history) = fixture().await;
+            let (mut browser, mut history) = fixture().await;
+            history.set_references(std::collections::BTreeMap::from([(
+                "head".into(),
+                vec![RefLabel {
+                    kind: RefKind::Local,
+                    name: "feature".into(),
+                }],
+            )]));
             let key = add_session(
                 &mut browser,
                 "Direct resume",
@@ -6078,6 +6100,101 @@ mod cleanup_tests {
             assert_eq!(view.context(), 1);
             assert!(!view.drawer_open);
         }
+    }
+
+    #[tokio::test]
+    async fn git_history_renders_sessions_under_their_own_branch() {
+        use crate::domain::RuntimeStatus;
+        use crate::git::{RefKind, RefLabel};
+        use crate::git_sessions::tests::{add_session, fixture};
+        let (mut browser, mut history) = fixture().await;
+        select_git_fixture(&mut browser, "/repo/.git");
+        let repo = browser
+            .repositories
+            .get_mut(std::path::Path::new("/repo/.git"))
+            .unwrap();
+        repo.worktrees.push(crate::git::Worktree {
+            path: "/detached".into(),
+            branch: None,
+            ..repo.worktrees[1].clone()
+        });
+        for (title, cwd, root, status) in [
+            ("Main session", "/repo", "/repo", RuntimeStatus::Running),
+            (
+                "Feature runner",
+                "/worktree",
+                "/worktree",
+                RuntimeStatus::Running,
+            ),
+            (
+                "Feature input",
+                "/worktree/src",
+                "/worktree",
+                RuntimeStatus::Waiting {
+                    approval: false,
+                    input: true,
+                },
+            ),
+            (
+                "Detached session",
+                "/detached",
+                "/detached",
+                RuntimeStatus::Idle,
+            ),
+        ] {
+            add_session(&mut browser, title, cwd, root, "/repo/.git", status, 1);
+        }
+        history.set_references(std::collections::BTreeMap::from([(
+            "head".into(),
+            [
+                (RefKind::Local, "feature"),
+                (RefKind::Local, "release"),
+                (RefKind::Local, "master"),
+                (RefKind::Local, "main"),
+                (RefKind::Tag, "v1"),
+            ]
+            .into_iter()
+            .map(|(kind, name)| RefLabel {
+                kind,
+                name: name.into(),
+            })
+            .collect(),
+        )]));
+        let view = View {
+            history,
+            git_focus: true,
+            drawer_git: true,
+            ..folder_view()
+        };
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(119, 40)).unwrap();
+        terminal.draw(|frame| draw(frame, &browser, &view)).unwrap();
+        let lines: Vec<String> = terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(119)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+            .collect();
+        let row = |needle: &str| {
+            assert_eq!(
+                lines.iter().filter(|line| line.contains(needle)).count(),
+                1,
+                "{needle}"
+            );
+            lines.iter().position(|line| line.contains(needle)).unwrap()
+        };
+        let main = row("[main]");
+        assert_eq!(row("Main session"), main + 1);
+        assert!(lines[main + 1].contains("└─"));
+        let compact = row("[master] [release] [tag: v1]");
+        assert_eq!(compact, main + 2);
+        let feature = row("[feature]");
+        assert_eq!(feature, compact + 1);
+        assert_eq!(row("Feature input"), feature + 1);
+        assert!(lines[feature + 1].contains("├─"));
+        assert_eq!(row("Feature runner"), feature + 2);
+        assert!(lines[feature + 2].contains("└─"));
+        assert_eq!(row("Detached session"), feature + 3);
     }
 
     #[tokio::test]
@@ -6122,6 +6239,8 @@ mod cleanup_tests {
                 anchor,
                 annotation,
                 connector,
+                heading,
+                last,
             } = row
             {
                 let spans = git_session_spans(
@@ -6129,7 +6248,8 @@ mod cleanup_tests {
                     *anchor,
                     *connector,
                     &presentation.annotations[*annotation],
-                    presentation.is_last_session(*annotation),
+                    *last,
+                    heading.is_some(),
                     width,
                 );
                 let text: String = spans.iter().map(|s| s.content.as_ref()).collect();

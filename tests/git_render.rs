@@ -217,7 +217,7 @@ fn reference_and_session_rows_preserve_topology_across_every_fixture_and_prefix(
     use tracr::{
         git::GraphRow,
         git_render::RenderedRow,
-        git_sessions::{Row, compose_rows},
+        git_sessions::{CommitSection, Row, compose_rows},
     };
     for (name, commits) in fixtures::fixtures() {
         for len in 1..=commits.len() {
@@ -249,10 +249,31 @@ fn reference_and_session_rows_preserve_topology_across_every_fixture_and_prefix(
                     .flat_map(|c| std::iter::repeat_n(c.oid.as_str(), count))
                     .collect();
                 let reference_count = usize::from(count > 0) * 2;
-                let presented = compose_rows(&rows, &tails, &session_oids, |_| {
-                    vec![ratatui::text::Line::from("[branch]"); reference_count]
+                let presented = compose_rows(&rows, &tails, &session_oids, |_, sessions| {
+                    let heading = || ratatui::text::Line::from("[branch]");
+                    match sessions {
+                        [] => vec![],
+                        [only] => vec![CommitSection::Branch {
+                            heading: vec![heading(), heading()],
+                            sessions: vec![*only],
+                        }],
+                        [first, rest @ ..] => vec![
+                            CommitSection::Branch {
+                                heading: vec![heading()],
+                                sessions: vec![*first],
+                            },
+                            CommitSection::Branch {
+                                heading: vec![heading()],
+                                sessions: rest.to_vec(),
+                            },
+                        ],
+                    }
                 });
-                let shared: usize = tails.values().map(|tail| count.min(tail.len())).sum();
+                let final_group_len = count - usize::from(count > 1);
+                let shared: usize = tails
+                    .values()
+                    .map(|tail| final_group_len.min(tail.len()))
+                    .sum();
                 assert_eq!(
                     presented.len(),
                     rows.len() + session_oids.len() + commits.len() * reference_count - shared
@@ -278,9 +299,15 @@ fn reference_and_session_rows_preserve_topology_across_every_fixture_and_prefix(
                             (row.graph_spans.clone(), row.oid.as_deref().map(Into::into))
                         }
                         Row::Session {
-                            anchor, connector, ..
+                            anchor,
+                            connector,
+                            annotation,
+                            ..
                         } => {
                             assert!(connector.is_none_or(|i| i < original.rows.len()));
+                            if count > 1 && annotation % count == 0 {
+                                assert!(connector.is_none());
+                            }
                             (
                                 connector
                                     .map(|i| rows[i].graph_spans.clone())
