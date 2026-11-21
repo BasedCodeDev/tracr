@@ -6,7 +6,7 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
@@ -282,6 +282,32 @@ impl Dialog {
             copied_hash: false,
         }
     }
+    pub fn retarget(&mut self, repository: PathBuf, oid: String) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+        let selected = oid.clone();
+        self.task = Some(tokio::spawn(async move {
+            details(&repository, &selected).await
+        }));
+        self.oid = oid;
+        self.error = None;
+        self.dialog.copy_status = None;
+        if self.details.is_none() {
+            self.dialog.scroll = 0;
+            self.scrolls = [0; 3];
+        }
+    }
+
+    pub fn selected_tab(&self) -> usize {
+        self.tab
+    }
+
+    pub fn with_tab(mut self, tab: usize) -> Self {
+        self.tab = tab.min(2);
+        self
+    }
+
     pub fn ready(&self) -> bool {
         self.task.as_ref().is_some_and(|task| task.is_finished())
             || self
@@ -292,6 +318,9 @@ impl Dialog {
     }
     pub async fn tick(&mut self) {
         if self.task.as_ref().is_some_and(|task| task.is_finished()) {
+            self.dialog.scroll = 0;
+            self.scrolls = [0; 3];
+            self.details = None;
             match self.task.take().expect("finished commit details").await {
                 Ok(Ok(details)) => {
                     self.dialog.set_body(details.report());
@@ -319,7 +348,7 @@ impl Dialog {
         }
     }
     pub fn copy_report(&mut self) {
-        if self.details.is_some() && self.dialog.copy_task.is_none() {
+        if self.details.is_some() && self.task.is_none() && self.dialog.copy_task.is_none() {
             self.copied_hash = false;
             self.dialog.start_copy();
             self.dialog.copy_status = Some("Copying commit details…".into());
@@ -327,6 +356,17 @@ impl Dialog {
     }
     pub fn key(&mut self, key: KeyEvent) -> Event {
         if key.kind == KeyEventKind::Release {
+            return Event::None;
+        }
+        // While showing the previous commit, do not copy the new target's hash
+        // or present its predecessor's report as the new selection's details.
+        if self.task.is_some()
+            && self.details.is_some()
+            && matches!(
+                key.code,
+                KeyCode::Char('c' | 'y') | KeyCode::Enter | KeyCode::Char(' ')
+            )
+        {
             return Event::None;
         }
         let tab = match key.code {
@@ -384,6 +424,22 @@ impl Dialog {
             return;
         }
         let inner = crate::modal::shell(frame, "Commit information", 96, 34);
+        self.draw_content(frame, inner, false);
+    }
+
+    pub fn draw_panel(&self, frame: &mut Frame<'_>, inner: Rect) {
+        if inner.width < 32 || inner.height < 14 {
+            draw_placeholder(
+                frame,
+                inner,
+                "Enlarge terminal to view details.\nEsc history · y copy hash",
+            );
+            return;
+        }
+        self.draw_content(frame, inner, true);
+    }
+
+    fn draw_content(&self, frame: &mut Frame<'_>, inner: Rect, embedded: bool) {
         let width = usize::from(inner.width);
         let subject = self.details.as_ref().map_or(
             if self.error.is_some() {
@@ -416,7 +472,12 @@ impl Dialog {
             areas[0],
         );
         let mut identity = vec![Span::styled(
-            self.oid.chars().take(12).collect::<String>(),
+            self.details
+                .as_ref()
+                .map_or(self.oid.as_str(), |details| details.oid.as_str())
+                .chars()
+                .take(12)
+                .collect::<String>(),
             Style::default().fg(Color::Cyan),
         )];
         if let Some(details) = &self.details {
@@ -498,7 +559,11 @@ impl Dialog {
                     lines.push(Line::default());
                     append(
                         &mut lines,
-                        "Close and press i to try again.",
+                        if embedded {
+                            "Press r to retry."
+                        } else {
+                            "Close and press i to try again."
+                        },
                         width,
                         Style::default(),
                     );
@@ -542,26 +607,30 @@ impl Dialog {
             Paragraph::new(status).style(Style::default().fg(Color::Cyan)),
             areas[4],
         );
-        crate::modal::buttons(
-            frame,
-            areas[5],
-            &[
-                crate::modal::Button {
-                    action: Event::Copy,
-                    label: "Copy details",
-                    enabled: self.details.is_some() && self.dialog.copy_task.is_none(),
-                    primary: false,
-                },
-                crate::modal::Button {
-                    action: Event::Close,
-                    label: "Close",
-                    enabled: true,
-                    primary: true,
-                },
-            ],
-            Some(self.dialog.button_focus),
-        );
-        let hints = if width < 45 {
+        if !embedded {
+            crate::modal::buttons(
+                frame,
+                areas[5],
+                &[
+                    crate::modal::Button {
+                        action: Event::Copy,
+                        label: "Copy details",
+                        enabled: self.details.is_some() && self.dialog.copy_task.is_none(),
+                        primary: false,
+                    },
+                    crate::modal::Button {
+                        action: Event::Close,
+                        label: "Close",
+                        enabled: true,
+                        primary: true,
+                    },
+                ],
+                Some(self.dialog.button_focus),
+            );
+        }
+        let hints = if embedded {
+            "1/2/3 tabs · c copy · y hash · Esc history"
+        } else if width < 45 {
             "1/2/3 tabs · c copy · y hash · Esc"
         } else if width >= 78 {
             "←/→ tabs · ↑/↓ scroll · Tab actions · Enter select · c copy · y hash · Esc close"
@@ -574,6 +643,22 @@ impl Dialog {
         );
     }
 }
+pub fn draw_placeholder(frame: &mut Frame<'_>, inner: Rect, text: &str) {
+    let message = Paragraph::new(text)
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .alignment(ratatui::layout::Alignment::Center);
+    let height = message
+        .line_count(inner.width.max(1))
+        .min(usize::from(inner.height)) as u16;
+    let area = Rect::new(
+        inner.x,
+        inner.y + (inner.height - height) / 2,
+        inner.width,
+        height,
+    );
+    frame.render_widget(message, area);
+}
+
 impl Drop for Dialog {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {
@@ -692,6 +777,109 @@ mod tests {
             tab: 0,
             scrolls: [0; 3],
             copied_hash: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_commit_keeps_complete_preview_until_latest_result_is_ready() {
+        use crossterm::event::KeyModifiers;
+        use ratatui::{Terminal, backend::TestBackend};
+        fn request(
+            info: &mut Dialog,
+            oid: &str,
+        ) -> tokio::sync::oneshot::Sender<Result<Details, String>> {
+            info.retarget("/unused".into(), oid.into());
+            info.task.take().unwrap().abort();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            info.task = Some(tokio::spawn(async move { rx.await.unwrap() }));
+            tx
+        }
+        fn render(info: &Dialog, width: u16) -> String {
+            let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+            terminal
+                .draw(|frame| info.draw_panel(frame, frame.area()))
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect()
+        }
+        let mut info = example();
+        info.tab = 1;
+        info.dialog.scroll = 2;
+        let original = render(&info, 80);
+        let first = request(&mut info, "1111111111111111111111111111111111111111");
+        assert_eq!(render(&info, 80), original);
+        assert!(!render(&info, 44).contains("Loading commit"));
+        info.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+        info.copy_report();
+        assert!(info.dialog.copy_task.is_none());
+        let mut superseded = example().details.take().unwrap();
+        superseded.message = "Superseded commit".into();
+        first
+            .send(Ok(superseded))
+            .unwrap_or_else(|_| panic!("first request closed"));
+        let latest = request(&mut info, "2222222222222222222222222222222222222222");
+        tokio::task::yield_now().await;
+        info.tick().await;
+        assert_eq!(render(&info, 80), original);
+        let mut details = example().details.take().unwrap();
+        details.oid = "2222222222222222222222222222222222222222".into();
+        details.message = "Newest commit".into();
+        latest
+            .send(Ok(details))
+            .unwrap_or_else(|_| panic!("latest request closed"));
+        while !info.ready() {
+            tokio::task::yield_now().await;
+        }
+        info.tick().await;
+        let screen = render(&info, 80);
+        assert!(screen.contains("Newest commit"));
+        assert!(screen.contains("222222222222"));
+        assert!(!screen.contains("Superseded commit"));
+        assert_eq!(info.selected_tab(), 1);
+        assert_eq!(info.dialog.scroll, 0);
+        let failure = request(&mut info, "3333333333333333333333333333333333333333");
+        assert!(render(&info, 80).contains("Newest commit"));
+        failure
+            .send(Err("Commit unavailable".into()))
+            .unwrap_or_else(|_| panic!("request closed"));
+        while !info.ready() {
+            tokio::task::yield_now().await;
+        }
+        info.tick().await;
+        let screen = render(&info, 80);
+        assert!(screen.contains("Unable to load commit"));
+        assert!(screen.contains("Commit unavailable"));
+        assert!(!screen.contains("Newest commit"));
+    }
+
+    #[test]
+    fn embedded_details_stay_inside_their_panel() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut info = example();
+        for (width, height) in [(160, 40), (100, 24), (70, 18), (20, 8), (2, 1)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let area = Rect::new(width / 2, 0, width - width / 2, height);
+            for tab in 0..3 {
+                info.tab = tab;
+                terminal.draw(|frame| info.draw_panel(frame, area)).unwrap();
+                let buffer = terminal.backend().buffer();
+                for y in 0..height {
+                    for x in 0..width / 2 {
+                        assert_eq!(buffer[(x, y)].symbol(), " ");
+                    }
+                }
+                let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+                assert!(!text.contains("Tab actions"));
+                if area.width >= 45 && area.height >= 14 {
+                    assert!(text.contains("Esc history"));
+                    assert!(text.contains("2 Files"));
+                }
+            }
         }
     }
 

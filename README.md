@@ -321,6 +321,18 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   restores the selected drawer panel.
   The top-right `↑` border marker indicates rows above the preview; the
   bottom-right `↓` indicates rows below it or more history available to load.
+- With Git focused, **Alt+Z** opens an equal split: Git history on the left and
+  commit information on the right. Details follow the selected commit automatically,
+  including the related commit for branch labels and session rows, and keeps your
+  chosen Overview, Files or Details tab as you browse. Each new commit
+  starts at the top of that tab. While a new commit loads, the previous details
+  remain visible until the replacement is ready.
+  Tab or Shift+Tab switches focus between history and details. Press `i` to focus
+  details and use its tabs, scrolling and copy shortcuts; Escape, Backspace or `i`
+  returns focus to history without leaving zoom. **Alt+Z** restores the normal
+  layout from either panel, as shown at the bottom-right of Commit Info.
+  Alt+arrows navigate within the split. Dialogs close before panel focus changes.
+  Outside zoom, `i` still opens the commit-information modal; folder zoom is unchanged.
 - In Git history (WorkTrees), `i` opens information for the highlighted commit:
   full hash, parents, refs, author and committer dates, full message, and file
   change statistics. Overview, Files, and Details tabs separate the message,
