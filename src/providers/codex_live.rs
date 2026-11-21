@@ -23,6 +23,7 @@ use tokio_tungstenite::{
 };
 
 type Socket = WebSocketStream<Join<ChildStdout, ChildStdin>>;
+
 #[derive(Clone, Debug)]
 pub struct LiveSession {
     pub title: String,

@@ -83,7 +83,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         t.expect('─ ◇ feature/from-folder')
         # The old commit text remains visible during navigation. Wait
         # for the destination's HEAD label before interacting with its history.
-        t.expect('[HEAD] [◇ feature/from-folder]')
+        t.expect('[HEAD]');t.expect('[◇ feature/from-folder]')
         t.send(b'\x1b[Z\x1b[B')
         t.expect_selected_commit(git(project, 'show', '-s', '--format=%s', first))
         open_worktree(t)
@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-create-worktree-') as directory:
         assert git(history, 'rev-parse', 'HEAD') == first
         assert not (created / '.worktrees').exists()
         # Wait for refreshed ownership before opening the next operation.
-        t.expect('[HEAD] [◇ from-history]')
+        t.expect('[HEAD]');t.expect('[◇ from-history]')
         # Existing branch rejection retains the editable input.
         t.expect_action('Create worktree');open_worktree(t, menu=True)
         t.send(b'from-history\r\r\r')

@@ -392,6 +392,7 @@ pub struct View {
     pub hidden_dialogs: AreaDialogs,
     pub layout_mode: std::cell::Cell<LayoutMode>,
     pub terminals: std::cell::RefCell<crate::inline_terminal::Manager>,
+    pub session_preview: std::cell::RefCell<crate::session_preview::Controller>,
     pub terminal_recovery: Option<crate::terminal_recovery::Dialog>,
     pub history: crate::git_history::History,
     pub git_sessions: std::cell::RefCell<crate::git_sessions::Presentation>,
@@ -449,6 +450,7 @@ impl Default for View {
             hidden_dialogs: Default::default(),
             layout_mode: Default::default(),
             terminals: Default::default(),
+            session_preview: Default::default(),
             terminal_recovery: Default::default(),
             history: Default::default(),
             git_sessions: Default::default(),
@@ -1275,6 +1277,33 @@ fn selected_git_session(browser: &Browser, view: &View) -> Option<crate::git_ses
     presentation.session().cloned()
 }
 
+fn preview_session(browser: &Browser, view: &View) -> Option<crate::domain::SessionSummary> {
+    (view.drawer_open && view.git_focus && !view.git_hidden && !view.git_size_limited)
+        .then(|| selected_git_session(browser, view))
+        .flatten()
+        .map(|a| a.session)
+}
+
+fn sync_terminal_view(browser: &Browser, view: &View) {
+    let preview = preview_session(browser, view);
+    let mut terminals = view.terminals.borrow_mut();
+    if let Some(session) = preview {
+        // A missing match must reveal the preview list/transcript, not an unrelated terminal.
+        terminals.sync_preview(None, Some(&session.key));
+    } else {
+        terminals.sync_folder(match &browser.folder {
+            FolderFilter::Path(path) => Some(path.as_path()),
+            _ => None,
+        });
+    }
+}
+
+fn tick_session_preview(browser: &Browser, view: &View) -> bool {
+    let target = preview_session(browser, view)
+        .and_then(|session| (!view.terminals.borrow().owns(&session.key)).then_some(session.key));
+    view.session_preview.borrow_mut().tick(target, browser)
+}
+
 fn git_session_status(status: crate::domain::RuntimeStatus) -> &'static str {
     use crate::domain::RuntimeStatus;
     match status {
@@ -1374,6 +1403,7 @@ pub fn draw(frame: &mut Frame<'_>, browser: &Browser, view: &View) {
     reminder.expire(std::time::Instant::now());
     view.drawer_reminder.set(reminder);
     view.terminals.borrow_mut().visible = false;
+    view.session_preview.borrow_mut().terminals.visible = false;
     if let Some(dialog) = &view.terminal_recovery {
         dialog.draw(frame);
         return;
@@ -3264,7 +3294,62 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
             ) {
                 return;
             }
-            let sessions = browser.visible();
+            let preview = preview_session(browser, view);
+            let mut preview_state = view.session_preview.borrow_mut();
+            if let Some(session) = &preview {
+                if preview_state.key.as_ref() == Some(&session.key) {
+                    let border = pane_block("Codex preview · Enter to interact", false);
+                    let inner = border.inner(area);
+                    preview_state.terminals.area = inner;
+                    if preview_state.terminals.draw(frame, inner, false, false) {
+                        frame.render_widget(border, area);
+                        return;
+                    }
+                }
+            }
+            let sessions = if let Some(session) = &preview {
+                let mut sessions: Vec<_> = browser
+                    .all()
+                    .into_iter()
+                    .filter(|s| {
+                        s.cwd == session.cwd
+                            && (!s.archived || browser.include_archived || s.key == session.key)
+                    })
+                    .collect();
+                if !sessions.iter().any(|s| s.key == session.key) {
+                    sessions.push(session.clone());
+                }
+                sessions
+            } else {
+                browser.visible()
+            };
+            let selected = preview
+                .as_ref()
+                .map(|s| &s.key)
+                .or(browser.selected.as_ref());
+            let preview_notice = safe_text(&preview_state.notice);
+            let scope = preview
+                .as_ref()
+                .map(|session| {
+                    format!(
+                        "Sessions · {} · {}",
+                        session
+                            .cwd
+                            .as_ref()
+                            .map(|p| safe_text(&p.display().to_string()))
+                            .unwrap_or_else(|| "Unknown folder".into()),
+                        if preview_state.key.as_ref() == Some(&session.key) {
+                            if preview_state.notice.is_empty() {
+                                "Loading preview…"
+                            } else {
+                                &preview_notice
+                            }
+                        } else {
+                            "Preview"
+                        }
+                    )
+                })
+                .unwrap_or_else(|| browser.scope_label());
             // Preserve eight columns for essential status labels in tiny panes.
             let right_padding = area.width.saturating_sub(12).min(2).max(u16::from(
                 sessions.len() * 3 > usize::from(pane_block("", false).inner(area).height),
@@ -3296,13 +3381,9 @@ fn draw_pane(frame: &mut Frame<'_>, area: Rect, pane: usize, browser: &Browser, 
                     ])
                 })
                 .collect();
-            let mut state = ListState::default().with_selected(
-                sessions
-                    .iter()
-                    .position(|s| Some(&s.key) == browser.selected.as_ref()),
-            );
-            let title = browser.scope_label();
-            let block = pane_block(&title, view.context() == 1)
+            let mut state = ListState::default()
+                .with_selected(sessions.iter().position(|s| Some(&s.key) == selected));
+            let block = pane_block(&scope, view.context() == 1)
                 .padding(ratatui::widgets::Padding::new(0, right_padding, 1, 0));
             view.session_page_size
                 .set(usize::from(block.inner(area).height) / 3);
@@ -4317,6 +4398,9 @@ fn execute_command(command: Command, browser: &mut Browser, view: &mut View) -> 
             }
             if let Some(annotation) = selected_git_session(browser, view) {
                 let session = annotation.session;
+                view.session_preview
+                    .borrow_mut()
+                    .promote(&mut view.terminals.borrow_mut(), &session.key);
                 if let Some(cwd) = session.cwd {
                     if let Some(main) = view
                         .history
@@ -4758,6 +4842,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             if terminal_copy.is_none() {
                 if let Some(text)=view.terminals.borrow_mut().copy_request.take() {terminal_copy=Some(tokio::spawn(crate::clipboard::copy(text)));}
             }
+            if tick_session_preview(&browser, &view) { idle.wake(); }
             let (terminal_changed, terminal_exits) = view.terminals.borrow_mut().poll();
             if terminal_changed { idle.wake(); }
             if let Some(error)=view.terminals.borrow_mut().input_error.take() {view.message=Some(error);}
@@ -5071,18 +5156,15 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
             }
             view.select_dialog_area(visible_area);
             view.normalize_focus();
-            view.terminals.borrow_mut().sync_folder(match &browser.folder {
-                FolderFilter::Path(path) => Some(path.as_path()),
-                _ => None,
-            });
+            sync_terminal_view(&browser, &view);
             let size = terminal.size()?;
             view.folder_rows_snapshot = Some(std::rc::Rc::new(browser.folder_rows()));
             terminal.draw(|frame| { draw(frame, &browser, &view); view.terminals.borrow().draw_overlay(frame, &browser); })?;
-            guard.mouse_capture(view.terminals.borrow().active.is_some())?;
+            guard.mouse_capture(view.terminals.borrow().active.is_some() || view.session_preview.borrow().terminals.visible)?;
             idle.deadline = next_age_update(&browser, &view, size.height)
                 .into_iter().chain(view.drawer_reminder.get().deadline).min();
             }
-            let busy = terminal_copy.is_some() || !view.terminals.borrow().is_empty() || browser.loading() || git_discovery.pending() || view.history.loading() || pending.iter().any(Option::is_some) || relink_task.iter().any(Option::is_some) || folder_task.iter().any(Option::is_some)
+            let busy = view.session_preview.borrow().active() || terminal_copy.is_some() || !view.terminals.borrow().is_empty() || browser.loading() || git_discovery.pending() || view.history.loading() || pending.iter().any(Option::is_some) || relink_task.iter().any(Option::is_some) || folder_task.iter().any(Option::is_some)
                 || view.relink.is_some() || view.folder_move.is_some() || view.worktree_create.is_some()
                 || view.error_dialog.as_ref().is_some_and(|dialog| dialog.copy_task.is_some())
                 || view.info.as_ref().is_some_and(|info| info.dialog.copy_task.is_some());
@@ -5123,9 +5205,16 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
                 if let Event::Mouse(mouse) = &incoming {
+                    let preview_clicked = matches!(mouse.kind,crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left))
+                        && !view.modal_open() && view.session_preview.borrow().terminals.visible
+                        && view.session_preview.borrow().terminals.area.contains((mouse.column,mouse.row).into());
+                    if preview_clicked {
+                        let _ = execute_command(Command::GitSelectWorktree, &mut browser, &mut view);
+                        continue;
+                    }
                     if view.drawer_open { continue; }
                     if !view.modal_open() {
-                        if matches!(mouse.kind,crossterm::event::MouseEventKind::Down(_)) && view.terminals.borrow().visible && view.terminals.borrow().area.contains((mouse.column,mouse.row).into()) {view.focus=1;view.git_focus=false;}
+                        if matches!(mouse.kind,crossterm::event::MouseEventKind::Down(_)) && view.terminals.borrow().visible && view.terminals.borrow().area.contains((mouse.column,mouse.row).into()) {view.focus=1;view.git_focus=false;sync_terminal_view(&browser, &view);}
                         if let Err(error) = view.terminals.borrow_mut().mouse(*mouse) {
                             view.message = Some(error.to_string());
                         }
@@ -5393,6 +5482,7 @@ pub async fn run(mut browser: Browser) -> Result<(), Box<dyn std::error::Error>>
         Ok(())
     }
     .await;
+    view.session_preview.get_mut().shutdown().await;
     view.terminals.get_mut().shutdown().await;
     git_watch.stop();
     terminal_git_watch.stop();
@@ -6267,6 +6357,157 @@ mod cleanup_tests {
                 assert!(!view.drawer_open);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn git_preview_renders_selected_folder_list_and_restores_original_scope() {
+        use crate::git_sessions::tests::{add_session, fixture};
+        let (mut browser, history) = fixture().await;
+        select_git_fixture(&mut browser, "/repo/.git");
+        let key = add_session(
+            &mut browser,
+            "REMOTE_PREVIEW_TARGET",
+            "/worktree/src",
+            "/worktree",
+            "/repo/.git",
+            crate::domain::RuntimeStatus::Running,
+            1,
+        );
+        browser.folder = FolderFilter::Path("/unrelated".into());
+        browser.query = "does not match".into();
+        browser.reconcile(0);
+        let original = (
+            browser.folder.clone(),
+            browser.query.clone(),
+            browser.selected.clone(),
+        );
+        let mut view = View {
+            history,
+            git_focus: true,
+            drawer_git: true,
+            ..folder_view()
+        };
+        press(&mut browser, &mut view, KeyCode::Down);
+        sync_terminal_view(&browser, &view);
+        assert_eq!(preview_session(&browser, &view).unwrap().key, key);
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(90, 20)).unwrap();
+        terminal
+            .draw(|frame| draw_pane(frame, frame.area(), 1, &browser, &view))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(text.contains("REMOTE_PREVIEW_TARGET"));
+        assert!(text.contains("/worktree/src"));
+        assert!(text.contains("> "));
+        assert_eq!(
+            (
+                browser.folder.clone(),
+                browser.query.clone(),
+                browser.selected.clone()
+            ),
+            original
+        );
+        press(&mut browser, &mut view, KeyCode::Up);
+        sync_terminal_view(&browser, &view);
+        terminal
+            .draw(|frame| draw_pane(frame, frame.area(), 1, &browser, &view))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(!text.contains("REMOTE_PREVIEW_TARGET"));
+        assert_eq!(
+            (
+                browser.folder.clone(),
+                browser.query.clone(),
+                browser.selected.clone()
+            ),
+            original
+        );
+    }
+
+    #[tokio::test]
+    async fn git_highlight_previews_and_restores_folder_terminal() {
+        use crate::git_sessions::tests::{add_session, fixture};
+        let (mut browser, history) = fixture().await;
+        let temp = tempfile::tempdir().unwrap();
+        let key = add_session(
+            &mut browser,
+            "Preview session",
+            "/worktree/src",
+            "/worktree",
+            "/repo/.git",
+            crate::domain::RuntimeStatus::Running,
+            1,
+        );
+        let mut view = View {
+            history,
+            git_focus: true,
+            drawer_git: true,
+            ..folder_view()
+        };
+        let command = crate::domain::LaunchCommand {
+            executable: "/usr/bin/python3".into(),
+            args: vec!["-c".into(), "import time; time.sleep(60)".into()],
+            cwd: temp.path().into(),
+            env: vec![("CODEX_HOME".into(), temp.path().as_os_str().to_owned())],
+        };
+        view.terminals
+            .borrow_mut()
+            .launch(&command, Some(key.clone()), "Preview".into())
+            .unwrap();
+        let preview = view.terminals.borrow().active;
+        view.terminals
+            .borrow_mut()
+            .launch(&command, None, "Original".into())
+            .unwrap();
+        let original = view.terminals.borrow().active;
+        browser.folder = FolderFilter::Path(temp.path().into());
+        browser.reconcile(0);
+        let folder = browser.folder.clone();
+        let selected = browser.selected.clone();
+        press(&mut browser, &mut view, KeyCode::Down);
+        assert_eq!(
+            selected_git_session(&browser, &view).unwrap().session.key,
+            key
+        );
+        sync_terminal_view(&browser, &view);
+        assert_eq!(view.terminals.borrow().active, preview);
+        assert!(!view.terminal_focused());
+        assert_eq!(browser.folder, folder);
+        assert_eq!(browser.selected, selected);
+        press(&mut browser, &mut view, KeyCode::Up);
+        sync_terminal_view(&browser, &view);
+        assert_eq!(view.terminals.borrow().active, original);
+        press(&mut browser, &mut view, KeyCode::Down);
+        sync_terminal_view(&browser, &view);
+        assert_eq!(view.terminals.borrow().active, preview);
+        press(&mut browser, &mut view, KeyCode::Esc);
+        sync_terminal_view(&browser, &view);
+        assert_eq!(view.terminals.borrow().active, original);
+        view.toggle_drawer();
+        sync_terminal_view(&browser, &view);
+        assert_eq!(view.terminals.borrow().active, preview);
+        view.drawer_git = false;
+        view.normalize_focus();
+        sync_terminal_view(&browser, &view);
+        assert_eq!(view.terminals.borrow().active, original);
+        view.drawer_git = true;
+        view.normalize_focus();
+        view.git_sessions.borrow_mut().follow();
+        view.history.follow();
+        sync_terminal_view(&browser, &view);
+        assert_eq!(view.terminals.borrow().active, original);
+        view.terminals.get_mut().shutdown().await;
     }
 
     #[tokio::test]

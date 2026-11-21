@@ -111,7 +111,14 @@ impl WorktreeLabel {
     }
 }
 
+#[derive(PartialEq)]
+enum Ownership {
+    Owned,
+    Preview,
+}
+
 struct Session {
+    ownership: Ownership,
     id: u64,
     key: Option<SessionKey>,
     title: String,
@@ -246,9 +253,64 @@ impl Manager {
     }
     /// Restore a folder's view without moving keyboard focus or restarting its PTY.
     pub fn sync_folder(&mut self, folder: Option<&std::path::Path>) {
-        let next = folder.and_then(|path| self.folder_views.get(path)).copied();
-        self.active = next;
+        self.sync_preview(folder, None);
     }
+    /// Temporarily display an owned session without changing any folder's saved view.
+    pub fn sync_preview(&mut self, folder: Option<&std::path::Path>, key: Option<&SessionKey>) {
+        self.active = key
+            .and_then(|key| self.sessions.iter().find(|s| s.key.as_ref() == Some(key)))
+            .map(|session| session.id)
+            .or_else(|| folder.and_then(|path| self.folder_views.get(path)).copied());
+    }
+    /// Hide and stop disposable clients without touching a daemon or another manager.
+    pub(crate) fn stop_preview(&mut self) {
+        self.active = None;
+        self.visible = false;
+        self.folder_views.clear();
+        for session in &mut self.sessions {
+            if session.ownership == Ownership::Preview {
+                session.stop();
+            }
+        }
+    }
+
+    pub(crate) fn launch_preview(
+        &mut self,
+        command: &LaunchCommand,
+        key: SessionKey,
+        title: String,
+    ) -> Result<()> {
+        self.launch(command, Some(key), title)?;
+        self.sessions
+            .last_mut()
+            .expect("launched preview")
+            .ownership = Ownership::Preview;
+        self.folder_views.clear();
+        Ok(())
+    }
+
+    /// Transfer the same PTY into normal ownership; no resume or restart occurs.
+    pub(crate) fn promote_into(&mut self, owned: &mut Self, key: &SessionKey) -> bool {
+        let Some(index) = self.sessions.iter().position(|s| {
+            s.ownership == Ownership::Preview && s.key.as_ref() == Some(key) && s.stopping.is_none()
+        }) else {
+            return false;
+        };
+        let mut session = self.sessions.remove(index);
+        session.ownership = Ownership::Owned;
+        owned.next_id += 1;
+        session.id = owned.next_id;
+        owned
+            .folder_views
+            .insert(session.folder.clone(), session.id);
+        owned.active = Some(session.id);
+        owned.sessions.push(session);
+        self.active = None;
+        self.visible = false;
+        self.folder_views.clear();
+        true
+    }
+
     pub fn active_folder(&self) -> Option<std::path::PathBuf> {
         self.sessions
             .iter()
@@ -383,6 +445,7 @@ impl Manager {
         self.active = Some(self.next_id);
         self.folder_views.insert(command.cwd.clone(), self.next_id);
         self.sessions.push(Session {
+            ownership: Ownership::Owned,
             id: self.next_id,
             key,
             title,
@@ -1472,6 +1535,89 @@ mod tests {
     fn key(code: KeyCode, modifiers: KeyModifiers) -> Event {
         Event::Key(KeyEvent::new(code, modifiers))
     }
+    #[tokio::test]
+    async fn temporary_preview_promotes_same_pty_and_restores_owned_folder() {
+        use crate::domain::{ProviderId, SourceId};
+        let key = SessionKey {
+            provider: ProviderId("codex".into()),
+            source_id: SourceId("test".into()),
+            native_id: "external".into(),
+        };
+        let mut owned = Manager::default();
+        owned
+            .launch(
+                &command("import time; time.sleep(30)"),
+                None,
+                "original".into(),
+            )
+            .unwrap();
+        let original = owned.active;
+        let original_views = owned.folder_views.clone();
+        let mut preview = Manager {
+            area: Rect::new(0, 0, 80, 24),
+            ..Manager::default()
+        };
+        preview
+            .launch_preview(
+                &command("import time; print('NATIVE_PREVIEW',flush=True); time.sleep(30)"),
+                key.clone(),
+                "preview".into(),
+            )
+            .unwrap();
+        wait(&mut preview, |m| {
+            m.sessions[0]
+                .parser
+                .screen()
+                .contents()
+                .contains("NATIVE_PREVIEW")
+        });
+        assert!(preview.folder_views.is_empty());
+        assert_eq!(owned.active, original);
+        assert_eq!(owned.folder_views, original_views);
+        let pid = preview.sessions[0].pid;
+        assert!(preview.promote_into(&mut owned, &key));
+        preview.stop_preview();
+        assert!(preview.is_empty());
+        assert_eq!(owned.sessions.last().unwrap().pid, pid);
+        assert!(owned.owns(&key));
+        assert_ne!(owned.sessions[0].id, owned.sessions[1].id);
+        owned.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn temporary_preview_closes_and_reaps_without_touching_owned_client() {
+        use crate::domain::{ProviderId, SourceId};
+        let key = SessionKey {
+            provider: ProviderId("codex".into()),
+            source_id: SourceId("test".into()),
+            native_id: "external".into(),
+        };
+        let mut owned = Manager::default();
+        owned
+            .launch(
+                &command("import time; time.sleep(30)"),
+                None,
+                "original".into(),
+            )
+            .unwrap();
+        let mut preview = Manager {
+            area: Rect::new(0, 0, 80, 24),
+            ..Manager::default()
+        };
+        preview
+            .launch_preview(
+                &command("import time; time.sleep(30)"),
+                key,
+                "preview".into(),
+            )
+            .unwrap();
+        preview.stop_preview();
+        assert!(preview.active.is_none());
+        wait(&mut preview, Manager::is_empty);
+        assert!(owned.sessions[0].child.try_wait().unwrap().is_none());
+        owned.shutdown().await;
+    }
+
     fn command(script: &str) -> LaunchCommand {
         LaunchCommand {
             executable: "/usr/bin/python3".into(),
@@ -1496,6 +1642,65 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+    #[test]
+    fn session_previews_preserve_folder_choices_and_processes() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut manager = Manager::default();
+        let mut launch = command("import time; time.sleep(60)");
+        launch.cwd = temp.path().into();
+        let key = |name: &str| SessionKey {
+            provider: crate::domain::ProviderId("preview-test".into()),
+            source_id: crate::domain::SourceId("local".into()),
+            native_id: name.into(),
+        };
+        // Assign keys after launch so this test needs no external ownership locks.
+        for name in ["first", "second", "third"] {
+            manager.launch(&launch, None, name.into()).unwrap();
+            manager.sessions.last_mut().unwrap().key = Some(key(name));
+        }
+        let original = manager.active;
+        let pids: Vec<_> = manager.sessions.iter().map(|s| s.pid).collect();
+        for name in ["first", "second", "first"] {
+            manager.sync_preview(Some(temp.path()), Some(&key(name)));
+            let expected = manager
+                .sessions
+                .iter()
+                .find(|s| s.key == Some(key(name)))
+                .unwrap()
+                .id;
+            assert_eq!(manager.active, Some(expected));
+            manager.sync_preview(Some(temp.path()), Some(&key(name)));
+            assert_eq!(manager.active, Some(expected));
+            assert_eq!(
+                manager.sessions.iter().map(|s| s.pid).collect::<Vec<_>>(),
+                pids
+            );
+        }
+        manager.sync_preview(Some(temp.path()), Some(&key("external")));
+        assert_eq!(manager.active, original);
+        manager.sync_folder(Some(temp.path()));
+        assert_eq!(manager.active, original);
+        manager.background();
+        manager.sync_preview(Some(temp.path()), Some(&key("first")));
+        assert!(manager.active.is_some());
+        manager.sync_folder(Some(temp.path()));
+        assert_eq!(manager.active, None);
+        manager.sync_preview(None, Some(&key("second")));
+        assert!(manager.active.is_some());
+        manager.sync_folder(None);
+        assert_eq!(manager.active, None);
+        assert!(manager.attach(&key("third")));
+        manager.sync_preview(Some(temp.path()), Some(&key("first")));
+        manager.sessions[0].stop();
+        wait(&mut manager, |m| m.sessions.len() == 2);
+        manager.sync_preview(Some(temp.path()), Some(&key("first")));
+        assert_eq!(manager.active, original);
+        assert!(manager.attach(&key("second")));
+        let selected = manager.active;
+        manager.sync_folder(Some(temp.path()));
+        assert_eq!(manager.active, selected);
+    }
+
     #[test]
     fn real_readline_and_neovim_accept_nested_editing() {
         let temp = tempfile::tempdir().unwrap();

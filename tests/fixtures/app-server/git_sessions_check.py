@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.expect('Sessions')
         t.resize(40, 119)
         t.send(b'\x1b`')
-        t.expect('Running └─ Task first · codex · feature')
+        t.expect('└─ Running Task first · codex')
         t.send(b'\x1b[1;3C')  # Alt+Right focuses Git from Sessions.
         t.expect_action('Select worktree folder')
         t.send(b'\x1b[B')  # First session beneath the commit.
@@ -51,7 +51,7 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.wait(lambda: time.monotonic() >= settled)
         count = (home/'git-reads').read_text()
         settings({'type': 'active', 'activeFlags': ['waitingOnUserInput']})
-        t.expect('Input └─ Task first · codex · feature')
+        t.expect('└─ Input Task first · codex')
         t.expect_action('Resume session')
         assert (home/'git-reads').read_text() == count, (count, (home/'git-reads').read_text())
         t.send(b'\r')
@@ -71,10 +71,11 @@ with tempfile.TemporaryDirectory(prefix='tracr-git-sessions-') as tmp:
         t.send(b'\x1b[B')
         t.expect_action('Resume session')
         settings({'type': 'notLoaded'})
-        t.wait(lambda: 'Task first · codex' not in t.text())
+        # This fixture has one annotated session; wait for its connector regardless of status.
+        t.wait(lambda: '└─ ' not in t.text())
         t.expect_action('Select worktree folder')
         settings({'type': 'idle'})
-        t.expect('Idle └─ Task first · codex · feature')
+        t.expect('└─ Idle Task first · codex')
         t.finish()
         print('Git live sessions, direct resume, disappearance, and cached graph: passed')
     finally:

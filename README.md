@@ -333,6 +333,16 @@ With fewer than 12 content rows, only the focused drawer panel is shown.
   Waiting sessions appear first, followed by errors, running, and idle sessions;
   newer sessions come first within each status. Unloaded and unknown sessions are
   omitted. Updates use the same live-status feed as Sessions, without reloading Git.
+- Highlighting a Git session previews the full Codex UI in the Sessions panel.
+  Tracr reuses an existing local terminal when identified, or opens a temporary
+  Codex client attached to the running session. Input stays in Git while browsing;
+  Enter or clicking the preview makes that same terminal interactive.
+  Leaving the row immediately closes temporary clients without stopping the
+  original session. Existing local terminals remain running, as in folder browsing.
+  Returning to an external session reopens its UI after a short selection delay.
+  If a preview is unavailable, the session stays highlighted in its folder's list.
+  Moving to a commit or leaving Git restores the original folder, search, and
+  session selection.
 - Enter on a Git session row selects its folder and resumes the session,
   or offers relinking if its folder is missing. Enter on a commit selects its worktree folder,
   offering a chooser when multiple worktrees match, then applies the same
